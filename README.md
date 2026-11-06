@@ -41,6 +41,8 @@ Git 不会自动安装 hooks：每人在自己的 clone 确认角色后运行 `p
 
 只建环境不启动服务：`python scripts/A/bootstrap.py`；复用客户已有 MySQL/Milvus：`python scripts/A/bootstrap.py --no-docker`。
 
+若本机 3306 / 19530 已被别的项目占用（或要同时跑多套环境），在根 `.env` 指定 `MYSQL_PORT`、`MILVUS_PORT`、`MILVUS_METRICS_PORT`、`COMPOSE_PROJECT_NAME`，并配独立的 `MYSQL_DB`、`MILVUS_COLLECTION`、`APP_PORT`、`FRONTEND_PORT`，脚本会自动起一套端口、容器名、卷、库和向量集合都隔离的环境，不会连进别人的实例。模板 `.env.example` 末尾有可直接取消注释的示例。
+
 脚本自动完成，**幂等**（重跑不会覆盖客户已填的配置或已有数据）：
 
 1. 生成 `backend/.env`（随机 `JWT_SECRET`、MySQL 密码、真实供应商默认地址）与 `frontend/.env.local`（API 基址）

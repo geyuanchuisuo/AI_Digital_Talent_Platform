@@ -1,6 +1,6 @@
 # 开发计划 · Todolist · 板块 A
 
-> 版本：v0.1.5　|　日期：2026-11-06 22:45　|　身份：A　|　分支：`feature/A/continuation`　|　基线：`60f7967`（22:28 二次同步，A 的 3 个提交已 rebase）
+> 版本：v0.1.6　|　日期：2026-11-06 23:35　|　身份：A　|　分支：`feature/A/continuation`　|　基线：`60f7967`（22:28 二次同步，A 的 3 个提交已 rebase）
 > 上游：`docs/需求文档.md` **V2.2**、`docs/源码接入与需求决策.md`、`docs/四人分工与试行方案.md` §2、`docs/技术框架.md`、`tasks/A.md`、`docs/modules/A/设计方案.md` v0.1.1、`.collaboration/ownership.json`。
 > 用法：**按 M1 → M6 顺序**；每项满足「验收点」才勾选，勾选必须写实际命令/结果/证据落点；编号 `T-Axx` 供沟通引用。进度同步 `docs/modules/A/开发日志.md` Layer 3/4 与 `docs/updates/A/` 交接记录。
 > ⚠️ 本表是台账，**不是完成声明**；`[x]` 只表示「有实证且已登记」。3–4 天是首轮检查窗口，M1 实跑后按证据重排。
@@ -32,8 +32,9 @@
 
 ## M7 · 交付环境封装（用户 22:27 独立任务，不进入 M1–M6 主链）
 
-- [x] **T-A70 一键自动创建运行环境** ✅ 2026-11-06 22:45 实现（`scripts/A/bootstrap.py` + `.cmd`/`.sh`、根 `.env.example`、`backend/.env.example` 真实默认值、`deploy/milvus/docker-compose.yml` +mysql、README 一键章节、[设计说明](交付环境封装.md)）。验证：`py_compile` / `--help`、临时目录配置生成 **11/11**、`docker compose config --quiet`（4 服务 + mysql 卷）、`check_scope --staged`。**未验证**：客户机端到端一键流程（本机 3306/19530 被旧 main 占用，实跑 `init_db.py` 会碰同名库），须在隔离机器演练并补证据。详见 [开发日志](开发日志.md) Layer 3 §A-03、[交接记录](../../updates/A/20261106-224500-交付环境封装.md)。
-- [ ] **T-A71 隔离环境端到端演练** — 在干净机器或独立端口跑一次 `bootstrap.cmd`/`bootstrap.sh`，记录容器启动、venv/npm、建库 seed、`check_env`、前后端 health 与浏览器登录的**真实输出**；未跑不写通过。
+- [x] **T-A70 一键自动创建运行环境** ✅ 2026-11-06 22:45 实现（`scripts/A/bootstrap.py` + `.cmd`/`.sh`、根 `.env.example`、`backend/.env.example` 真实默认值、`deploy/milvus/docker-compose.yml` +mysql、README 一键章节、[设计说明](交付环境封装.md)）。验证：`py_compile` / `--help`、临时目录配置生成 **11/11**、`docker compose config --quiet`（4 服务 + mysql 卷）、`check_scope --staged`。**端到端证据已由 T-A71 补齐**（见下条）；演练在隔离副本/独立端口完成，未触碰现有 3306/ai_talent。详见 [开发日志](开发日志.md) Layer 3 §A-03 / §A-04、[交接记录](../../updates/A/20261106-224500-交付环境封装.md)。
+- [x] **T-A71 隔离环境端到端演练** ✅ 2026-11-06 23:35 完成并通过：干净 clone 副本 `D:/HHHYYY/_aitalent_e2e_20261106` + 独立 MySQL 3307/`ai_talent_e2e`、Milvus 19531/`talent_vectors_e2e`、容器前缀 `aitalent_e2e`、后端 8100/前端 3100。真实跑通配置生成→4 容器→venv(Python 3.13.14)→`npm ci`(327 包)→13 表 + seed→`check_env` 全绿→`--start` 前后端就绪；`/api/health` 200(db/milvus/worker 全 true)、`/login`/`/screen`/`/talents` 200 无 `__next_error__`、登录 200 返回 JWT、4 个受保护接口 200、CORS 200；模拟 Ctrl+C 后 8100/3100 均释放；演练后 `3306/ai_talent` 13 表/users=1/job_profiles=1 **与演练前一致**。过程中发现并修复 2 个真缺陷（`npm exec -p` 被吞、Windows 孤儿进程）。**未验证**：`.cmd`/`.sh` 包装入口单独实跑、业务 pytest/vitest/浏览器点击流/真实模型调用。证据：[2335 交接记录](../../updates/A/20261106-2335-T-A71端到端演练通过.md)、[开发日志](开发日志.md) Layer 3 §A-04、[交付环境封装](交付环境封装.md) §4。
+- [ ] **T-A72 按授权发布** — 用户 22:52 授权「测试完没问题推上去合并到 master」；测试已通过，执行 push `feature/A/continuation` → 快进合入 `master` → push master，并复核远端。
 ## M1 · 第 1 天环境与能力探针（未开始 → **接力 Agent 从这里开工**）
 
 - [ ] **T-A01 依赖、建库与启动探针** — 建 venv、`pip install -r backend/requirements.txt`、`init_db.py`、`check_env.py --skip-llm`、`uvicorn app.main:app --workers 1`、`curl /api/health`。验收点：7 项自检无 FAIL、`status=ok`、worker alive。`--workers 1` 是硬约束。证据：新增 `docs/updates/A/<时间戳>-M1首轮探针.md`
@@ -109,3 +110,4 @@
 - v0.1.3（2026-11-06 21:35）：补记状态订正提交 `c139566`；实时 HEAD 以 `git log -1` 为准。M1 仍是唯一下一步。
 - v0.1.4（2026-11-06 22:28）：二次同步远端 master `60f7967` + rebase，M0 任务数 5→6、补 T-A00f、登记 D→A 新契约请求；**下一步改为用户要求的「交付环境封装」，随后才是 M1 探针**。
 - v0.1.5（2026-11-06 22:45）：新增独立批次 **M7**（T-A70 已实现、T-A71 隔离环境端到端演练待做）；交付封装未端到端验证，接力 Agent 第一优先级是 T-A71 补证据，其次才是 M1。
+- v0.1.6（2026-11-06 23:35）：**T-A71 已通过**（隔离副本真实实跑，含 2 个缺陷修复）；新增 T-A72 按授权发布。此后第一优先级是 T-A72，其次才是 M1 探针。
