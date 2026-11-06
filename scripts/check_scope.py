@@ -43,7 +43,7 @@ def owner_of(path, policy):
     if any(p in policy['blocked_segments'] for p in parts):
         return None
     name = parts[-1]
-    if name == '.env' or (name.startswith('.env.') and name != '.env.example'):
+    if name == '.env' or (name.startswith('.env.') and name not in ('.env.example', '.env.local.example')):
         return None
     if name.endswith(('.pem', '.key', '.p12')):
         return None

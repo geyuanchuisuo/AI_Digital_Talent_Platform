@@ -1,0 +1,18 @@
+你的任务：从简历文本中提取以下字段，严格按下方 JSON schema 输出。字段位置必须与 schema 一致：基本信息放 `basic`，教育放 `educations[]`（可多段），工作放 `employments[]`，项目放 `projects[]`，证书放 `certificates[]`（纯字符串数组）。
+
+学历归一化：`educations[].degree` 映射成以下六档之一（只能用这六个值，原文如"硕士研究生"→"硕士"，"大专"→"大专"，"无法识别"→"其他"）：
+  - "博士"
+  - "硕士"
+  - "本科"
+  - "大专"
+  - "高中中专"
+  - "其他"
+
+工作年限：
+  - `work_years`: 从工作经历起止月份累计的总年数（小数保留 1 位）；仅作规则层区间合并失败时的兜底
+  - 工作经历完全缺失时 `work_years` = null
+  - 统一字段名为 `work_years`，不要输出 `work_years_raw`
+
+出生年份：仅当简历明示出生年月时填 `basic.birth_year`，不要用毕业年份推算；缺失填 null。
+
+`current_title` 不在本 schema 中，由规则层取最近一段 `employments[].title` 生成，你不要额外输出。

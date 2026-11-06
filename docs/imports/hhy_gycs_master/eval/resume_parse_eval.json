@@ -1,0 +1,349 @@
+[
+  {
+    "filename": "eval-01-张伟-backend-pass.docx",
+    "name": "张伟",
+    "phone": "13801010101",
+    "degree": "本科",
+    "major": "计算机科学与技术",
+    "school": "北京工业大学",
+    "work_years": 6.0,
+    "skills": [
+      "docker",
+      "fastapi",
+      "mysql",
+      "python",
+      "redis"
+    ],
+    "layout": "flow"
+  },
+  {
+    "filename": "eval-02-李娜-backend-pass.docx",
+    "name": "李娜",
+    "phone": "13902020202",
+    "degree": "硕士",
+    "major": "软件工程",
+    "school": "复旦大学",
+    "work_years": 4.5,
+    "skills": [
+      "fastapi",
+      "golang",
+      "mysql",
+      "python 3.11"
+    ],
+    "layout": "table"
+  },
+  {
+    "filename": "eval-03-王强-backend-pass.docx",
+    "name": "王强",
+    "phone": "13603030303",
+    "degree": "本科",
+    "major": "信息管理",
+    "school": "华南理工大学",
+    "work_years": 3.2,
+    "skills": [
+      "flask",
+      "mysql",
+      "python",
+      "redis"
+    ],
+    "layout": "flow"
+  },
+  {
+    "filename": "eval-04-赵敏-backend-pass.docx",
+    "name": "赵敏",
+    "phone": "13504040404",
+    "degree": "博士",
+    "major": "计算机应用",
+    "school": "浙江大学",
+    "work_years": 3.5,
+    "skills": [
+      "fastapi",
+      "kubernetes",
+      "milvus",
+      "mysql",
+      "python"
+    ],
+    "layout": "two_col"
+  },
+  {
+    "filename": "eval-05-陈晨-backend-edge-3y.docx",
+    "name": "陈晨",
+    "phone": "13705050505",
+    "degree": "本科",
+    "major": "软件工程",
+    "school": "电子科技大学",
+    "work_years": 3.0,
+    "skills": [
+      "django",
+      "mysql",
+      "python"
+    ],
+    "layout": "flow"
+  },
+  {
+    "filename": "eval-06-周洁-backend-pass.docx",
+    "name": "周洁",
+    "phone": "18806060606",
+    "degree": "硕士",
+    "major": "计算机技术",
+    "school": "东南大学",
+    "work_years": 5.0,
+    "skills": [
+      "fastapi",
+      "mongodb",
+      "mysql",
+      "python"
+    ],
+    "layout": "table"
+  },
+  {
+    "filename": "eval-07-吴磊-backend-pass.docx",
+    "name": "吴磊",
+    "phone": "13907070707",
+    "degree": "本科",
+    "major": "网络工程",
+    "school": "武汉大学",
+    "work_years": 7.5,
+    "skills": [
+      "golang",
+      "kafka",
+      "mysql",
+      "python",
+      "redis"
+    ],
+    "layout": "flow"
+  },
+  {
+    "filename": "eval-08-郑爽-backend-pass.docx",
+    "name": "郑爽",
+    "phone": "18608080808",
+    "degree": "本科",
+    "major": "计算机科学",
+    "school": "西安交通大学",
+    "work_years": 4.0,
+    "skills": [
+      "fastapi",
+      "mysql",
+      "python"
+    ],
+    "layout": "two_col"
+  },
+  {
+    "filename": "eval-09-孙悦-backend-no-degree.docx",
+    "name": "孙悦",
+    "phone": "15009090909",
+    "degree": "大专",
+    "major": "软件技术",
+    "school": "北京信息职业技术学院",
+    "work_years": 6.0,
+    "skills": [
+      "fastapi",
+      "mysql",
+      "python"
+    ],
+    "layout": "flow"
+  },
+  {
+    "filename": "eval-10-马涛-backend-edge-2y9m.docx",
+    "name": "马涛",
+    "phone": "15201010102",
+    "degree": "本科",
+    "major": "计算机科学",
+    "school": "中山大学",
+    "work_years": 2.9,
+    "skills": [
+      "mysql",
+      "python"
+    ],
+    "layout": "flow"
+  },
+  {
+    "filename": "eval-11-林芳-backend-no-mysql.docx",
+    "name": "林芳",
+    "phone": "15302020203",
+    "degree": "本科",
+    "major": "计算机科学",
+    "school": "厦门大学",
+    "work_years": 4.0,
+    "skills": [
+      "flask",
+      "python",
+      "redis",
+      "sqlite"
+    ],
+    "layout": "flow"
+  },
+  {
+    "filename": "eval-12-何军-backend-fresh.docx",
+    "name": "何军",
+    "phone": "15603030304",
+    "degree": "本科",
+    "major": "软件工程",
+    "school": "湖南大学",
+    "work_years": 1.0,
+    "skills": [
+      "mysql",
+      "python"
+    ],
+    "layout": "flow"
+  },
+  {
+    "filename": "eval-13-冯旭-trap-javascript.docx",
+    "name": "冯旭",
+    "phone": "15804040405",
+    "degree": "本科",
+    "major": "软件工程",
+    "school": "深圳大学",
+    "work_years": 5.0,
+    "skills": [
+      "javascript",
+      "typescript",
+      "vue",
+      "webpack"
+    ],
+    "layout": "flow"
+  },
+  {
+    "filename": "eval-14-苏晴-trap-go-google.docx",
+    "name": "苏晴",
+    "phone": "15905050506",
+    "degree": "本科",
+    "major": "电子商务",
+    "school": "上海大学",
+    "work_years": 3.0,
+    "skills": [
+      "google analytics",
+      "mysql",
+      "python",
+      "sql"
+    ],
+    "layout": "flow"
+  },
+  {
+    "filename": "eval-15-杜鹏-trap-cpp.docx",
+    "name": "杜鹏",
+    "phone": "16006060607",
+    "degree": "本科",
+    "major": "通信工程",
+    "school": "杭州电子科技大学",
+    "work_years": 6.0,
+    "skills": [
+      "c",
+      "c++",
+      "linux",
+      "tcp/ip"
+    ],
+    "layout": "table"
+  },
+  {
+    "filename": "eval-16-姜蕾-trap-nosql.docx",
+    "name": "姜蕾",
+    "phone": "16107070708",
+    "degree": "本科",
+    "major": "信息工程",
+    "school": "苏州大学",
+    "work_years": 4.0,
+    "skills": [
+      "mongodb",
+      "nosql",
+      "python"
+    ],
+    "layout": "flow"
+  },
+  {
+    "filename": "eval-17-许飞-trap-react-native.docx",
+    "name": "许飞",
+    "phone": "16208080809",
+    "degree": "本科",
+    "major": "软件工程",
+    "school": "华南师范大学",
+    "work_years": 3.5,
+    "skills": [
+      "android",
+      "ios",
+      "react",
+      "react native",
+      "typescript"
+    ],
+    "layout": "flow"
+  },
+  {
+    "filename": "eval-18-韩雪-frontend-pass.docx",
+    "name": "韩雪",
+    "phone": "16309090910",
+    "degree": "本科",
+    "major": "数字媒体",
+    "school": "中国传媒大学",
+    "work_years": 3.0,
+    "skills": [
+      "javascript",
+      "react",
+      "typescript",
+      "vite"
+    ],
+    "layout": "flow"
+  },
+  {
+    "filename": "eval-19-曹阳-frontend-pass.docx",
+    "name": "曹阳",
+    "phone": "16400000011",
+    "degree": "大专",
+    "major": "计算机应用",
+    "school": "北京联合大学",
+    "work_years": 2.0,
+    "skills": [
+      "javascript",
+      "react",
+      "redux"
+    ],
+    "layout": "two_col"
+  },
+  {
+    "filename": "eval-20-潘玉-frontend-junior.docx",
+    "name": "潘玉",
+    "phone": "16501111112",
+    "degree": "本科",
+    "major": "计算机科学",
+    "school": "北京化工大学",
+    "work_years": 0.8,
+    "skills": [
+      "javascript",
+      "react"
+    ],
+    "layout": "flow"
+  },
+  {
+    "filename": "eval-21-沈从-java-pass.docx",
+    "name": "沈从",
+    "phone": "16602222213",
+    "degree": "本科",
+    "major": "计算机科学",
+    "school": "同济大学",
+    "work_years": 5.0,
+    "skills": [
+      "java",
+      "kafka",
+      "mysql",
+      "spring boot"
+    ],
+    "layout": "table"
+  },
+  {
+    "filename": "eval-22-薛冰-backend-senior.docx",
+    "name": "薛冰",
+    "phone": "16703333314",
+    "degree": "硕士",
+    "major": "计算机科学",
+    "school": "四川大学",
+    "work_years": 8.0,
+    "skills": [
+      "docker",
+      "fastapi",
+      "kubernetes",
+      "milvus",
+      "mysql",
+      "python"
+    ],
+    "layout": "flow"
+  }
+]

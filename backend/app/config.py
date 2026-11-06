@@ -1,0 +1,135 @@
+"""全局配置（T-01）。
+
+实现口径唯一依据：`docs/运行配置.md` v1.3、`docs/架构设计.md` v1.4 §5.6。
+键名、默认值、并发语义一律照抄公共文档，代码里不另起一套。
+
+必填且无默认值（.env 或环境变量提供）：
+    LLM_BASE_URL / LLM_API_KEY / MYSQL_PASSWORD / JWT_SECRET
+"""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from urllib.parse import quote_plus
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# BASE_DIR 相对定位（架构 §5.6）：不写死绝对路径，任意 cwd 启动都能读到 backend/.env
+BASE_DIR = Path(__file__).resolve().parents[1]
+ENV_FILE = BASE_DIR / ".env"
+
+logger = logging.getLogger(__name__)
+
+
+class Settings(BaseSettings):
+    # ---- LLM / Embedding ----
+    llm_base_url: str
+    llm_api_key: str
+    llm_model: str = "deepseek-chat"
+    llm_timeout: float = 120.0
+    llm_concurrency: int = 2
+    embedding_base_url: str | None = None
+    embedding_api_key: str | None = None
+    embedding_model: str = "text-embedding-v3"
+    embedding_query_cache_ttl: int = 300
+    embedding_timeout: float = 10.0
+    vector_sync_timeout: float = 5.0  # H-14（运行配置 v1.4）：原 1.5s，冷连接 embedding 实测 ~1.7s 会误判超时
+    prompt_version: str = "v1.0"
+    embedding_dim: int = 1024
+
+    # ---- MySQL ----
+    mysql_host: str = "localhost"
+    mysql_port: int = 3306
+    mysql_user: str = "root"
+    mysql_password: str
+    mysql_db: str = "ai_talent"
+    mysql_pool_size: int = 10
+    mysql_max_overflow: int = 20
+    mysql_echo: bool = False
+
+    # ---- Milvus ----
+    milvus_uri: str = "http://localhost:19530"
+    milvus_collection: str = "talent_vectors"
+
+    # ---- JWT ----
+    jwt_secret: str
+    jwt_expire_hours: int = 24
+
+    # ---- 文件上传 ----
+    upload_dir: str = "./data/uploads"
+    upload_max_mb: int = 20
+    upload_allowed_ext: str = "pdf,docx"
+
+    # ---- TaskRunner ----
+    task_concurrency: int = 2
+    runner_scan_interval: float = 2.0
+    task_heartbeat_timeout: int = 600
+    task_shutdown_timeout: int = 30
+
+    # ---- 应用与网络 ----
+    cors_origins: str = "*"
+    app_env: str = "development"
+    app_host: str = "0.0.0.0"
+    app_port: int = 8000
+    log_level: str = "INFO"
+
+    model_config = SettingsConfigDict(
+        env_file=str(ENV_FILE),
+        env_file_encoding="utf-8",
+        extra="ignore",  # 允许 .env 存在前端键/临时键，避免启动失败
+        case_sensitive=False,
+    )
+
+    # ---- 派生属性（不新增配置项，只做组合/回退） ----
+    @property
+    def database_url(self) -> str:
+        """SQLAlchemy 同步连接串；用户名/密码做 URL 编码。"""
+        user = quote_plus(self.mysql_user)
+        password = quote_plus(self.mysql_password)
+        return (
+            f"mysql+pymysql://{user}:{password}"
+            f"@{self.mysql_host}:{self.mysql_port}/{self.mysql_db}?charset=utf8mb4"
+        )
+
+    @property
+    def effective_embedding_base_url(self) -> str:
+        """运行配置 v1.3：EMBEDDING_BASE_URL 为空时回退到 LLM_BASE_URL。"""
+        return self.embedding_base_url or self.llm_base_url
+
+    @property
+    def effective_embedding_api_key(self) -> str:
+        return self.embedding_api_key or self.llm_api_key
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [item.strip() for item in self.cors_origins.split(",") if item.strip()]
+
+    @property
+    def upload_allowed_ext_list(self) -> list[str]:
+        return [item.strip().lower().lstrip(".") for item in self.upload_allowed_ext.split(",") if item.strip()]
+
+    @property
+    def upload_dir_path(self) -> Path:
+        path = Path(self.upload_dir)
+        return path if path.is_absolute() else (BASE_DIR / path).resolve()
+
+    def load_runtime_overrides(self) -> None:
+        """唯一从 DB 覆盖的配置项：task_concurrency（运行配置 v1.3「读取优先级」）。
+
+        T-03 建 sys_settings 表之前 dao.sys_settings 尚不存在，此时保留 .env 兜底值；
+        表就绪后自动以页面设置为准（无需重启即生效，重启后保持）。
+        """
+        try:
+            from app.dao.sys_settings import get_value  # type: ignore[import-not-found]
+
+            value = get_value("task_concurrency")
+            if value is not None:
+                self.task_concurrency = int(value)
+        except ImportError:
+            logger.debug("sys_settings 尚未实现（T-03），task_concurrency 用 .env 兜底值 %s", self.task_concurrency)
+        except Exception:  # noqa: BLE001 - 读表失败不能阻塞启动
+            logger.warning("读取 sys_settings.task_concurrency 失败，保留兜底值", exc_info=True)
+
+
+settings = Settings()

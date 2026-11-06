@@ -1,0 +1,22 @@
+/* antd 的 reset 在 layout.tsx 里以 `import 'antd/dist/reset.css'` 引入，
+   CSS 里不用 @import（node_modules 裸路径在 @import 下解析不稳定）。 */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+}
+
+body {
+  background: #f5f7fa;
+  color: rgba(0, 0, 0, 0.88);
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}

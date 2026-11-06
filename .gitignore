@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!.env.local.example
 *.pem
 *.key
 *.p12
@@ -18,3 +19,12 @@ dist/
 build/
 /data/
 *.log
+
+# Imported Next.js source: generated output and private runtime data
+.next/
+.vite-tmp/
+*.tsbuildinfo
+/backend/data/
+/backend/backups/
+/backend/.pytest_tmp*/
+/.pytest_tmp*/

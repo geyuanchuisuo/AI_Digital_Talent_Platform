@@ -1,0 +1,625 @@
+{
+  "model": "spark-x2.6",
+  "prompt_version": "v1.0",
+  "temperature": 0,
+  "samples": 22,
+  "duration_sec": 1081.8,
+  "overall_weighted_score": 0.9749,
+  "pass_line": 0.95,
+  "passed": true,
+  "field_scores": {
+    "name": 1.0,
+    "phone": 0.9545,
+    "degree": 1.0,
+    "work_years": 1.0,
+    "skills": 0.939
+  },
+  "weights": {
+    "name": 0.15,
+    "phone": 0.15,
+    "degree": 0.2,
+    "work_years": 0.2,
+    "skills": 0.3
+  },
+  "notes": "work_years 容差 ±1.0；skills 集合 F1≥0.8 记满分（低于 0.8 按既有口径记 0）；work_years 按生产口径 calc_work_years(employments) 计算（LLM 原始值仅兜底，见 work_years_llm_raw）；数据集「至今」已固定为可算出标注年限的截止日（原件备份在 resumes_original_20261106/）；Prompt A 注入解析基准日期；work_years/phone 为 None 时重试一次（quality_retried 字段）。本次明细 parsed 未展示 phone（评分已按 basic.phone 正确取值，脚本已修，下次重跑可见）",
+  "known_dataset_issues": [
+    "eval-16 正文缺失电话号码（生成时漏写，_verify 未拦住），标注却有 16107070708，phone 重试一次后仍为 None —— 该样本 phone 不可达，失分来自数据集而非解析链路",
+    "eval-20 为模板直写退化样本（正文含 JSON 字符串），多抽「前端工程化/组件化」使 skills F1=0.667，低于 0.8 阈值按既有口径记 0",
+    "eval-09 正文「内容管理相关后端系统」被 LLM 当作技能多抽，skills F1=0.857"
+  ],
+  "details": [
+    {
+      "filename": "eval-01-张伟-backend-pass.docx",
+      "layout": "flow",
+      "quality_retried": [],
+      "status": "ok",
+      "scores": {
+        "name": 1.0,
+        "phone": 1.0,
+        "degree": 1.0,
+        "work_years": 1.0,
+        "skills": 1.0
+      },
+      "overall": 1.0,
+      "attempts": 1,
+      "parsed": {
+        "name": "张伟",
+        "degree": "本科",
+        "work_years": 6.1,
+        "work_years_llm_raw": 6.0,
+        "skills": [
+          "Python",
+          "FastAPI",
+          "MySQL",
+          "Redis",
+          "Docker"
+        ]
+      }
+    },
+    {
+      "filename": "eval-02-李娜-backend-pass.docx",
+      "layout": "table",
+      "quality_retried": [],
+      "status": "ok",
+      "scores": {
+        "name": 1.0,
+        "phone": 1.0,
+        "degree": 1.0,
+        "work_years": 1.0,
+        "skills": 1.0
+      },
+      "overall": 1.0,
+      "attempts": 1,
+      "parsed": {
+        "name": "李娜",
+        "degree": "硕士",
+        "work_years": 4.6,
+        "work_years_llm_raw": 4.4,
+        "skills": [
+          "Python 3.11",
+          "MySQL",
+          "FastAPI",
+          "golang"
+        ]
+      }
+    },
+    {
+      "filename": "eval-03-王强-backend-pass.docx",
+      "layout": "flow",
+      "quality_retried": [],
+      "status": "ok",
+      "scores": {
+        "name": 1.0,
+        "phone": 1.0,
+        "degree": 1.0,
+        "work_years": 1.0,
+        "skills": 1.0
+      },
+      "overall": 1.0,
+      "attempts": 1,
+      "parsed": {
+        "name": "王强",
+        "degree": "本科",
+        "work_years": 3.3,
+        "work_years_llm_raw": 3.2,
+        "skills": [
+          "python",
+          "MySQL",
+          "Redis",
+          "Flask"
+        ]
+      }
+    },
+    {
+      "filename": "eval-04-赵敏-backend-pass.docx",
+      "layout": "two_col",
+      "quality_retried": [],
+      "status": "ok",
+      "scores": {
+        "name": 1.0,
+        "phone": 1.0,
+        "degree": 1.0,
+        "work_years": 1.0,
+        "skills": 1.0
+      },
+      "overall": 1.0,
+      "attempts": 1,
+      "parsed": {
+        "name": "赵敏",
+        "degree": "博士",
+        "work_years": 3.6,
+        "work_years_llm_raw": 3.5,
+        "skills": [
+          "Python",
+          "MySQL",
+          "FastAPI",
+          "Milvus",
+          "Kubernetes"
+        ]
+      }
+    },
+    {
+      "filename": "eval-05-陈晨-backend-edge-3y.docx",
+      "layout": "flow",
+      "quality_retried": [],
+      "status": "ok",
+      "scores": {
+        "name": 1.0,
+        "phone": 1.0,
+        "degree": 1.0,
+        "work_years": 1.0,
+        "skills": 1.0
+      },
+      "overall": 1.0,
+      "attempts": 1,
+      "parsed": {
+        "name": "陈晨",
+        "degree": "本科",
+        "work_years": 3.1,
+        "work_years_llm_raw": 3.0,
+        "skills": [
+          "Python",
+          "MySQL",
+          "Django"
+        ]
+      }
+    },
+    {
+      "filename": "eval-06-周洁-backend-pass.docx",
+      "layout": "table",
+      "quality_retried": [],
+      "status": "ok",
+      "scores": {
+        "name": 1.0,
+        "phone": 1.0,
+        "degree": 1.0,
+        "work_years": 1.0,
+        "skills": 1.0
+      },
+      "overall": 1.0,
+      "attempts": 1,
+      "parsed": {
+        "name": "周洁",
+        "degree": "硕士",
+        "work_years": 5.1,
+        "work_years_llm_raw": 4.9,
+        "skills": [
+          "Python",
+          "MySQL",
+          "FastAPI",
+          "MongoDB"
+        ]
+      }
+    },
+    {
+      "filename": "eval-07-吴磊-backend-pass.docx",
+      "layout": "flow",
+      "quality_retried": [],
+      "status": "ok",
+      "scores": {
+        "name": 1.0,
+        "phone": 1.0,
+        "degree": 1.0,
+        "work_years": 1.0,
+        "skills": 1.0
+      },
+      "overall": 1.0,
+      "attempts": 1,
+      "parsed": {
+        "name": "吴磊",
+        "degree": "本科",
+        "work_years": 7.6,
+        "work_years_llm_raw": 7.5,
+        "skills": [
+          "Python",
+          "MySQL",
+          "Redis",
+          "Kafka",
+          "golang"
+        ]
+      }
+    },
+    {
+      "filename": "eval-08-郑爽-backend-pass.docx",
+      "layout": "two_col",
+      "quality_retried": [],
+      "status": "ok",
+      "scores": {
+        "name": 1.0,
+        "phone": 1.0,
+        "degree": 1.0,
+        "work_years": 1.0,
+        "skills": 1.0
+      },
+      "overall": 1.0,
+      "attempts": 1,
+      "parsed": {
+        "name": "郑爽",
+        "degree": "本科",
+        "work_years": 4.1,
+        "work_years_llm_raw": 4.0,
+        "skills": [
+          "Python",
+          "MySQL",
+          "FastAPI"
+        ]
+      }
+    },
+    {
+      "filename": "eval-09-孙悦-backend-no-degree.docx",
+      "layout": "flow",
+      "quality_retried": [],
+      "status": "ok",
+      "scores": {
+        "name": 1.0,
+        "phone": 1.0,
+        "degree": 1.0,
+        "work_years": 1.0,
+        "skills": 0.857
+      },
+      "overall": 0.9571,
+      "attempts": 1,
+      "parsed": {
+        "name": "孙悦",
+        "degree": "大专",
+        "work_years": 6.1,
+        "work_years_llm_raw": 6.0,
+        "skills": [
+          "Python",
+          "FastAPI",
+          "MySQL",
+          "内容管理"
+        ]
+      }
+    },
+    {
+      "filename": "eval-10-马涛-backend-edge-2y9m.docx",
+      "layout": "flow",
+      "quality_retried": [],
+      "status": "ok",
+      "scores": {
+        "name": 1.0,
+        "phone": 1.0,
+        "degree": 1.0,
+        "work_years": 1.0,
+        "skills": 1.0
+      },
+      "overall": 1.0,
+      "attempts": 1,
+      "parsed": {
+        "name": "马涛",
+        "degree": "本科",
+        "work_years": 3.0,
+        "work_years_llm_raw": 2.9,
+        "skills": [
+          "Python",
+          "MySQL"
+        ]
+      }
+    },
+    {
+      "filename": "eval-11-林芳-backend-no-mysql.docx",
+      "layout": "flow",
+      "quality_retried": [],
+      "status": "ok",
+      "scores": {
+        "name": 1.0,
+        "phone": 1.0,
+        "degree": 1.0,
+        "work_years": 1.0,
+        "skills": 1.0
+      },
+      "overall": 1.0,
+      "attempts": 1,
+      "parsed": {
+        "name": "林芳",
+        "degree": "本科",
+        "work_years": 4.1,
+        "work_years_llm_raw": 4.0,
+        "skills": [
+          "Python",
+          "Flask",
+          "SQLite",
+          "Redis"
+        ]
+      }
+    },
+    {
+      "filename": "eval-12-何军-backend-fresh.docx",
+      "layout": "flow",
+      "quality_retried": [],
+      "status": "ok",
+      "scores": {
+        "name": 1.0,
+        "phone": 1.0,
+        "degree": 1.0,
+        "work_years": 1.0,
+        "skills": 1.0
+      },
+      "overall": 1.0,
+      "attempts": 1,
+      "parsed": {
+        "name": "何军",
+        "degree": "本科",
+        "work_years": 1.1,
+        "work_years_llm_raw": 1.0,
+        "skills": [
+          "Python",
+          "MySQL"
+        ]
+      }
+    },
+    {
+      "filename": "eval-13-冯旭-trap-javascript.docx",
+      "layout": "flow",
+      "quality_retried": [],
+      "status": "ok",
+      "scores": {
+        "name": 1.0,
+        "phone": 1.0,
+        "degree": 1.0,
+        "work_years": 1.0,
+        "skills": 1.0
+      },
+      "overall": 1.0,
+      "attempts": 1,
+      "parsed": {
+        "name": "冯旭",
+        "degree": "本科",
+        "work_years": 5.1,
+        "work_years_llm_raw": 5.0,
+        "skills": [
+          "JavaScript",
+          "TypeScript",
+          "Vue",
+          "Webpack"
+        ]
+      }
+    },
+    {
+      "filename": "eval-14-苏晴-trap-go-google.docx",
+      "layout": "flow",
+      "quality_retried": [],
+      "status": "ok",
+      "scores": {
+        "name": 1.0,
+        "phone": 1.0,
+        "degree": 1.0,
+        "work_years": 1.0,
+        "skills": 1.0
+      },
+      "overall": 1.0,
+      "attempts": 1,
+      "parsed": {
+        "name": "苏晴",
+        "degree": "本科",
+        "work_years": 3.1,
+        "work_years_llm_raw": 3.0,
+        "skills": [
+          "Python",
+          "SQL",
+          "MySQL",
+          "Google Analytics"
+        ]
+      }
+    },
+    {
+      "filename": "eval-15-杜鹏-trap-cpp.docx",
+      "layout": "table",
+      "quality_retried": [],
+      "status": "ok",
+      "scores": {
+        "name": 1.0,
+        "phone": 1.0,
+        "degree": 1.0,
+        "work_years": 1.0,
+        "skills": 1.0
+      },
+      "overall": 1.0,
+      "attempts": 1,
+      "parsed": {
+        "name": "杜鹏",
+        "degree": "本科",
+        "work_years": 6.1,
+        "work_years_llm_raw": 6.0,
+        "skills": [
+          "C",
+          "C++",
+          "Linux",
+          "TCP/IP"
+        ]
+      }
+    },
+    {
+      "filename": "eval-16-姜蕾-trap-nosql.docx",
+      "layout": "flow",
+      "quality_retried": [
+        "phone"
+      ],
+      "status": "ok",
+      "scores": {
+        "name": 1.0,
+        "phone": 0.0,
+        "degree": 1.0,
+        "work_years": 1.0,
+        "skills": 0.8
+      },
+      "overall": 0.79,
+      "attempts": 1,
+      "parsed": {
+        "name": "姜蕾",
+        "degree": "本科",
+        "work_years": 4.1,
+        "work_years_llm_raw": 4.0,
+        "skills": [
+          "NoSQL",
+          "MongoDB"
+        ]
+      }
+    },
+    {
+      "filename": "eval-17-许飞-trap-react-native.docx",
+      "layout": "flow",
+      "quality_retried": [],
+      "status": "ok",
+      "scores": {
+        "name": 1.0,
+        "phone": 1.0,
+        "degree": 1.0,
+        "work_years": 1.0,
+        "skills": 1.0
+      },
+      "overall": 1.0,
+      "attempts": 1,
+      "parsed": {
+        "name": "许飞",
+        "degree": "本科",
+        "work_years": 3.6,
+        "work_years_llm_raw": 3.5,
+        "skills": [
+          "React Native",
+          "TypeScript",
+          "React",
+          "iOS",
+          "Android"
+        ]
+      }
+    },
+    {
+      "filename": "eval-18-韩雪-frontend-pass.docx",
+      "layout": "flow",
+      "quality_retried": [],
+      "status": "ok",
+      "scores": {
+        "name": 1.0,
+        "phone": 1.0,
+        "degree": 1.0,
+        "work_years": 1.0,
+        "skills": 1.0
+      },
+      "overall": 1.0,
+      "attempts": 1,
+      "parsed": {
+        "name": "韩雪",
+        "degree": "本科",
+        "work_years": 3.1,
+        "work_years_llm_raw": 3.0,
+        "skills": [
+          "JavaScript",
+          "TypeScript",
+          "React",
+          "Vite"
+        ]
+      }
+    },
+    {
+      "filename": "eval-19-曹阳-frontend-pass.docx",
+      "layout": "two_col",
+      "quality_retried": [],
+      "status": "ok",
+      "scores": {
+        "name": 1.0,
+        "phone": 1.0,
+        "degree": 1.0,
+        "work_years": 1.0,
+        "skills": 1.0
+      },
+      "overall": 1.0,
+      "attempts": 1,
+      "parsed": {
+        "name": "曹阳",
+        "degree": "大专",
+        "work_years": 2.1,
+        "work_years_llm_raw": 2.0,
+        "skills": [
+          "JavaScript",
+          "React",
+          "Redux"
+        ]
+      }
+    },
+    {
+      "filename": "eval-20-潘玉-frontend-junior.docx",
+      "layout": "flow",
+      "quality_retried": [],
+      "status": "ok",
+      "scores": {
+        "name": 1.0,
+        "phone": 1.0,
+        "degree": 1.0,
+        "work_years": 1.0,
+        "skills": 0.0
+      },
+      "overall": 0.7,
+      "attempts": 1,
+      "parsed": {
+        "name": "潘玉",
+        "degree": "本科",
+        "work_years": 0.9,
+        "work_years_llm_raw": null,
+        "skills": [
+          "JavaScript",
+          "React",
+          "前端工程化",
+          "组件化"
+        ]
+      }
+    },
+    {
+      "filename": "eval-21-沈从-java-pass.docx",
+      "layout": "table",
+      "quality_retried": [],
+      "status": "ok",
+      "scores": {
+        "name": 1.0,
+        "phone": 1.0,
+        "degree": 1.0,
+        "work_years": 1.0,
+        "skills": 1.0
+      },
+      "overall": 1.0,
+      "attempts": 1,
+      "parsed": {
+        "name": "沈从",
+        "degree": "本科",
+        "work_years": 5.1,
+        "work_years_llm_raw": 5.0,
+        "skills": [
+          "Java",
+          "Spring Boot",
+          "MySQL",
+          "Kafka"
+        ]
+      }
+    },
+    {
+      "filename": "eval-22-薛冰-backend-senior.docx",
+      "layout": "flow",
+      "quality_retried": [],
+      "status": "ok",
+      "scores": {
+        "name": 1.0,
+        "phone": 1.0,
+        "degree": 1.0,
+        "work_years": 1.0,
+        "skills": 1.0
+      },
+      "overall": 1.0,
+      "attempts": 1,
+      "parsed": {
+        "name": "薛冰",
+        "degree": "硕士",
+        "work_years": 8.1,
+        "work_years_llm_raw": 8.0,
+        "skills": [
+          "Python",
+          "MySQL",
+          "FastAPI",
+          "Milvus",
+          "Kubernetes",
+          "Docker"
+        ]
+      }
+    }
+  ]
+}

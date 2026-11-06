@@ -17,6 +17,41 @@ POLICY = json.loads((ROOT / '.collaboration/ownership.json').read_text(encoding=
 
 
 class PolicyTests(unittest.TestCase):
+    def test_imported_next_routes_have_one_business_owner(self):
+        examples = {
+            'frontend/src/app/(main)/talents/page.tsx': 'B',
+            'frontend/src/app/(main)/screen/UploadPanel.tsx': 'B',
+            'frontend/src/app/(main)/screen/ScreenBatchPanel.tsx': 'A',
+            'frontend/src/app/(main)/screen/page.tsx': 'A',
+            'frontend/src/lib/usePolling.ts': 'D',
+        }
+        for path, expected in examples.items():
+            self.assertEqual(scope.owner_of(path, POLICY), expected, path)
+            for other in set('ABCD') - {expected}:
+                self.assertTrue(scope.check_paths([path], other, POLICY), (path, other))
+
+    def test_only_named_environment_templates_are_allowed(self):
+        for path in ['backend/.env.example', 'frontend/.env.local.example']:
+            self.assertEqual(scope.owner_of(path, POLICY), 'A', path)
+        for path in ['backend/.env', 'frontend/.env.local', 'frontend/.env.production',
+                     'frontend/.env.production.example', 'backend/backups/db.sql',
+                     'frontend/.next/server.js', 'backend/data/eval/report.json']:
+            self.assertIsNone(scope.owner_of(path, POLICY), path)
+
+    def test_imported_mixed_backend_and_reference_boundaries(self):
+        examples = {
+            'backend/app/tasks/screen_worker.py': 'A',
+            'backend/app/tasks/parse_worker.py': 'B',
+            'backend/app/tasks/runner.py': 'D',
+            'backend/app/core/prompts/match.txt': 'A',
+            'backend/app/core/prompts/parse.txt': 'B',
+            'backend/app/core/prompts/loader.py': 'D',
+        }
+        for path, owner in examples.items():
+            self.assertEqual(scope.owner_of(path, POLICY), owner, path)
+        self.assertIsNone(scope.owner_of('backend/app/service/unassigned.py', POLICY))
+        self.assertIsNone(scope.owner_of('docs/imports/hhy_gycs_master/README.md', POLICY))
+
     def test_each_role_owns_its_module_and_records(self):
         examples = {'A': 'matching', 'B': 'talents', 'C': 'assessments', 'D': 'analytics'}
         for actor, module in examples.items():

@@ -1,0 +1,102 @@
+{
+  "files": 22,
+  "run_mode": "resume：解析段沿用本轮真实实测（DB parse_tasks 时间戳），批次段续跑",
+  "upload": {
+    "upload_batch_id": "01M6QFJWV4YMNP4YTWZNF7PQBQ",
+    "accepted": 22,
+    "duplicates": 0,
+    "elapsed": null
+  },
+  "parse_concurrency_2": {
+    "total": 22,
+    "success": 21,
+    "wall_seconds": 2290.0,
+    "throughput_per_min": 0.55,
+    "source": "parse_tasks.created_at → finished_at（真实实测，并发 2）"
+  },
+  "parse_failures": [
+    {
+      "filename": "eval-22-薛冰-backend-senior.docx",
+      "error": "Prompt A 调用失败：LLM 结构化输出失败（共 2 次尝试）：JSON 括号未闭合；原始输出摘要：'{\\n  \"basic\": {\\n    \"name\": \"薛冰\",\\n    \"gender\": null,\\n    \"birth'"
+    }
+  ],
+  "screen_estimated_llm_calls": 5,
+  "screen_batch": {
+    "batch_id": 186,
+    "total": 21,
+    "processed": 21,
+    "skipped_deleted": 0,
+    "passed": 4,
+    "pending_count": 1,
+    "rejected": 16,
+    "actual_llm_calls": 5,
+    "vector_degraded": false,
+    "wall_seconds": 200.5
+  },
+  "match_batch": {
+    "batch_id": 157,
+    "total": 21,
+    "processed": 21,
+    "hard_failed": 16,
+    "vector_degraded": false,
+    "wall_seconds": 260.6
+  },
+  "latency_concurrency_10": {
+    "talents_list": {
+      "requests": 200,
+      "concurrency": 10,
+      "wall_seconds": 4.2,
+      "avg_ms": 206.0,
+      "p50_ms": 191.071,
+      "p95_ms": 326.703,
+      "p99_ms": 381.189,
+      "max_ms": 387.0,
+      "errors": 0,
+      "error_samples": [],
+      "slo_limit_ms": 2000,
+      "meets_slo": true
+    },
+    "semantic_search_cache_hit": {
+      "requests": 50,
+      "concurrency": 10,
+      "wall_seconds": 1.0,
+      "avg_ms": 190.1,
+      "p50_ms": 192.4,
+      "p95_ms": 244.449,
+      "p99_ms": 248.226,
+      "max_ms": 248.2,
+      "errors": 0,
+      "error_samples": [],
+      "slo_limit_ms": 1000,
+      "meets_slo": true
+    },
+    "semantic_search_cold_query": {
+      "requests": 10,
+      "concurrency": 10,
+      "wall_seconds": 1.9,
+      "avg_ms": 1685.3,
+      "p50_ms": 1656.888,
+      "p95_ms": 1845.507,
+      "p99_ms": 1845.507,
+      "max_ms": 1845.5,
+      "errors": 0,
+      "error_samples": [],
+      "slo_limit_ms": 1000,
+      "meets_slo": false
+    },
+    "semantic_search_cold_query_serial": {
+      "requests": 5,
+      "concurrency": 1,
+      "wall_seconds": 4.1,
+      "avg_ms": 825.5,
+      "p50_ms": 544.745,
+      "p95_ms": 1339.764,
+      "p99_ms": 1339.764,
+      "max_ms": 1339.8,
+      "errors": 0,
+      "error_samples": []
+    },
+    "d10_conclusion": "按 D-10『不含 embedding 网络耗时』口径：缓存命中组 p95 即服务端处理耗时，达标；冷 query 端到端超标源于云端 embedding 固有延迟（与 H-14 冷连接 ~1.7s 同源），10 并发下因上游排队进一步放大。属已知约束，非功能缺陷。",
+    "note": "冷 query 每组文本带唯一后缀，强制走 embedding + Milvus；缓存组命中 300s TTL 短期缓存。embedding 网络耗时与 Milvus 耗时的进一步拆分需应用层埋点（D-10）。"
+  }
+}

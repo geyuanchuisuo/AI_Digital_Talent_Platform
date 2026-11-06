@@ -1,0 +1,1985 @@
+{
+  "version": 1,
+  "import_date": "2026-11-06",
+  "branch": "master_YB",
+  "archive_filename": "AI_Digital_Talent_Platform-hhy_gycs_master.zip",
+  "archive_sha256": "a666307ae92c84eb76079bd575096f392a61bb01c534cdb004cfdebd81727df8",
+  "source_url": "http://47.106.207.27:3000/longtrying/AI_Digital_Talent_Platform/src/branch/hhy_gycs_master",
+  "git_history_included": false,
+  "business_code_modified": false,
+  "requirement_source": {
+    "filename": "AI数字化人才平台-项目需求细化v1(1).md",
+    "destination": "docs/requirements/sources/S08-项目需求细化v1-20261106.md",
+    "sha256": "93533754e4764dc431bee40a006fd02ccb3e6c4eedba8a554b28f0a4c914607c"
+  },
+  "entries": [
+    {
+      "archive_path": ".gitignore",
+      "destination": "docs/imports/hhy_gycs_master/original/ROOT_GITIGNORE.txt",
+      "kind": "historical_document",
+      "owner": null,
+      "bytes": 831,
+      "sha256": "455cecd5d7aadbe090c0ab2e9f588e18483ee7b56e8a724f61f9762a7ae70739"
+    },
+    {
+      "archive_path": "DELIVERY.md",
+      "destination": "docs/imports/hhy_gycs_master/original/DELIVERY.md",
+      "kind": "historical_document",
+      "owner": null,
+      "bytes": 4568,
+      "sha256": "14cd38b5f297f154da110e553301280af88684d890784db177e05dae2d8c3ad6"
+    },
+    {
+      "archive_path": "README.md",
+      "destination": "docs/imports/hhy_gycs_master/original/README.md",
+      "kind": "historical_document",
+      "owner": null,
+      "bytes": 6237,
+      "sha256": "a6af96470dc15051479a1f0cae5ff46ab00bacc6e92b3a6b5833cb90659e965e"
+    },
+    {
+      "archive_path": "backend/.env.example",
+      "destination": "backend/.env.example",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 1570,
+      "sha256": "991bebd296eb750bea316bcecfe04700de3229c9b8e520aa82e8e2461e286dea"
+    },
+    {
+      "archive_path": "backend/app/__init__.py",
+      "destination": "backend/app/__init__.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 76,
+      "sha256": "a0256acd0163dc420edeea5b8b9c759008c2422f2034e943e033c39c746ddcb9"
+    },
+    {
+      "archive_path": "backend/app/api/__init__.py",
+      "destination": "backend/app/api/__init__.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 152,
+      "sha256": "09e47935333a55bfbce04ef9af299713e77d503a83b5790853e7a4c97cb0e7db"
+    },
+    {
+      "archive_path": "backend/app/api/auth.py",
+      "destination": "backend/app/api/auth.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 1756,
+      "sha256": "2835310e3fad600d942137fcfd129439f172383a2380eae3514db403188cfafe"
+    },
+    {
+      "archive_path": "backend/app/api/deps.py",
+      "destination": "backend/app/api/deps.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 2544,
+      "sha256": "eddbb505e9bcfd1e4a8d738a1d19f3c012cfb8cf95f6a6008c82661d368324d5"
+    },
+    {
+      "archive_path": "backend/app/api/health.py",
+      "destination": "backend/app/api/health.py",
+      "kind": "active_source",
+      "owner": "D",
+      "bytes": 6670,
+      "sha256": "4fb6849dda55531f6602595e1d9501e437bda5d4a8a8be296de468a4a2a37d2d"
+    },
+    {
+      "archive_path": "backend/app/api/job_profiles.py",
+      "destination": "backend/app/api/job_profiles.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 4458,
+      "sha256": "2c0f343879add7478149de94ae116b531057f436adfb74fc18efebfeebbfeb0e"
+    },
+    {
+      "archive_path": "backend/app/api/match.py",
+      "destination": "backend/app/api/match.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 4089,
+      "sha256": "4da0696520c847525a81c1110232404a216db69f45ec9f78d1a63a38309fbb38"
+    },
+    {
+      "archive_path": "backend/app/api/resumes.py",
+      "destination": "backend/app/api/resumes.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 5143,
+      "sha256": "7f4a94be7e729b50e7e1a6ab850d0e403d229e8a30adf211070f3354fee85052"
+    },
+    {
+      "archive_path": "backend/app/api/screen.py",
+      "destination": "backend/app/api/screen.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 4488,
+      "sha256": "f0e4582cd01df6c23498cd906f531c65df4662913014a959fd484647cac5ac71"
+    },
+    {
+      "archive_path": "backend/app/api/talents.py",
+      "destination": "backend/app/api/talents.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 11760,
+      "sha256": "d5be83fcb8d0a5309b5d01ecb9547d980ea36c631fc14121233fa229d80a09cb"
+    },
+    {
+      "archive_path": "backend/app/config.py",
+      "destination": "backend/app/config.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 4761,
+      "sha256": "3d7ae53284d418840402d4425dbac81756080840f94922b3517d83ee60448b1e"
+    },
+    {
+      "archive_path": "backend/app/core/__init__.py",
+      "destination": "backend/app/core/__init__.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 297,
+      "sha256": "d0af613164b8f0a6f07f7abb3de0620aecbf4af407565affa3414d66d5950bab"
+    },
+    {
+      "archive_path": "backend/app/core/embedding_client.py",
+      "destination": "backend/app/core/embedding_client.py",
+      "kind": "active_source",
+      "owner": "D",
+      "bytes": 9432,
+      "sha256": "92a0825b6c4a2feb6714090e131d886194417326782be4304d8c903520fdf329"
+    },
+    {
+      "archive_path": "backend/app/core/errors.py",
+      "destination": "backend/app/core/errors.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 5932,
+      "sha256": "18e5f70cb34dc353285a5610273479f5916aa59dfb630adfc43bf2f8e1ddc298"
+    },
+    {
+      "archive_path": "backend/app/core/llm_client.py",
+      "destination": "backend/app/core/llm_client.py",
+      "kind": "active_source",
+      "owner": "D",
+      "bytes": 11172,
+      "sha256": "8cf1aea97b9b76a76df21710958d3628dfbc6a10c349a5279b627ce9f0266f31"
+    },
+    {
+      "archive_path": "backend/app/core/milvus_store.py",
+      "destination": "backend/app/core/milvus_store.py",
+      "kind": "active_source",
+      "owner": "D",
+      "bytes": 20971,
+      "sha256": "2d8cce3d3ec436747f2d6b9c20b75e008b36584bbeef86ac64b067d6ce6811d5"
+    },
+    {
+      "archive_path": "backend/app/core/normalize.py",
+      "destination": "backend/app/core/normalize.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 21471,
+      "sha256": "c100b997d8681de7cb6185df36e3f2b73c32c07843cc48b1d9474f173c911c44"
+    },
+    {
+      "archive_path": "backend/app/core/profile_text.py",
+      "destination": "backend/app/core/profile_text.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 6953,
+      "sha256": "b9d096bdc12f8b0ab70faa64c2a5c7f31c404aebc820e83d488aade3a92b4890"
+    },
+    {
+      "archive_path": "backend/app/core/prompts/__init__.py",
+      "destination": "backend/app/core/prompts/__init__.py",
+      "kind": "active_source",
+      "owner": "D",
+      "bytes": 1104,
+      "sha256": "e0baaf535bd2baf3a3adc558215d3de6d3b0dd2c9fbcbf56185e5eaca8c836d4"
+    },
+    {
+      "archive_path": "backend/app/core/prompts/loader.py",
+      "destination": "backend/app/core/prompts/loader.py",
+      "kind": "active_source",
+      "owner": "D",
+      "bytes": 5640,
+      "sha256": "2aa56034af751fbf4dedbe388288b9ec839150d925f90ec3c2c5b9d23eeb0ac2"
+    },
+    {
+      "archive_path": "backend/app/core/prompts/match.txt",
+      "destination": "backend/app/core/prompts/match.txt",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 1228,
+      "sha256": "cf28023e63ab7c555a2e32ac0ef4fc515b3e6a9b710a83ffe9b3cbc3cce11437"
+    },
+    {
+      "archive_path": "backend/app/core/prompts/parse.txt",
+      "destination": "backend/app/core/prompts/parse.txt",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 1096,
+      "sha256": "1158e6fb0c79edf2a70a0131fe1c19fbcdd94c384214d3be6e629e6d68150f0d"
+    },
+    {
+      "archive_path": "backend/app/core/prompts/profile.txt",
+      "destination": "backend/app/core/prompts/profile.txt",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 1994,
+      "sha256": "ebf926a4f208b2dbf2e20a261bc5af4cfa65732b0f2ada2267dac2307b45e953"
+    },
+    {
+      "archive_path": "backend/app/core/prompts/schemas.py",
+      "destination": "backend/app/core/prompts/schemas.py",
+      "kind": "active_source",
+      "owner": "D",
+      "bytes": 6751,
+      "sha256": "13cc247e19bc3cc7425a53e972478b226b368c3edaa8a4116898ed221dd75086"
+    },
+    {
+      "archive_path": "backend/app/core/response.py",
+      "destination": "backend/app/core/response.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 1796,
+      "sha256": "2c175fd22c30b49496d3b70a9eb92ac3b5dfc995bd9273f9a657f0187f729066"
+    },
+    {
+      "archive_path": "backend/app/core/worker_state.py",
+      "destination": "backend/app/core/worker_state.py",
+      "kind": "active_source",
+      "owner": "D",
+      "bytes": 2016,
+      "sha256": "68b8722cba5362590be0a841e62598a8ae7dd99bbf2238e7b0a37f46b97117f0"
+    },
+    {
+      "archive_path": "backend/app/dao/__init__.py",
+      "destination": "backend/app/dao/__init__.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 125,
+      "sha256": "2700b7d8345866c85f83338d2a233e9574216433c53c92f6583901f127a195f3"
+    },
+    {
+      "archive_path": "backend/app/dao/job_profiles.py",
+      "destination": "backend/app/dao/job_profiles.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 2375,
+      "sha256": "b13fcf7d25b36bba7e15908c62f7390fa23f027d3a81a67bd30c25d7cac9de2d"
+    },
+    {
+      "archive_path": "backend/app/dao/match.py",
+      "destination": "backend/app/dao/match.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 4605,
+      "sha256": "912c538426a33a311942db67dd9e9127fb6d3ab795dd8357ef2a23c764bfa394"
+    },
+    {
+      "archive_path": "backend/app/dao/parse_tasks.py",
+      "destination": "backend/app/dao/parse_tasks.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 5824,
+      "sha256": "7a0230982c4c80f22a05cf12f19ca2753f0c5773b204ee61fedf7d313f9cdfab"
+    },
+    {
+      "archive_path": "backend/app/dao/parsed_resumes.py",
+      "destination": "backend/app/dao/parsed_resumes.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 1929,
+      "sha256": "b501883b962f03b1b2d086aad8b885713355a91c72eb789aecf6a146d2203f9b"
+    },
+    {
+      "archive_path": "backend/app/dao/resume_files.py",
+      "destination": "backend/app/dao/resume_files.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 5609,
+      "sha256": "bc26015c24ed17d24c80e24240d45fa61097cb330b994350b858aefcf980b6bf"
+    },
+    {
+      "archive_path": "backend/app/dao/screen.py",
+      "destination": "backend/app/dao/screen.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 5135,
+      "sha256": "b96f7ef232b7bffdb047ffe1921c286c5b29b9f9448c134ae76af220988771f6"
+    },
+    {
+      "archive_path": "backend/app/dao/sys_settings.py",
+      "destination": "backend/app/dao/sys_settings.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 3222,
+      "sha256": "cf4deb1f17ed0449e180803cef14bedd8b79a668c65f0d5ffa76ae337a8f1af7"
+    },
+    {
+      "archive_path": "backend/app/dao/talent_duplicates.py",
+      "destination": "backend/app/dao/talent_duplicates.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 3959,
+      "sha256": "a9de67e604f6483c0199c1fe9745f1107d70e7287b2c367df9fb9ac0b4867b10"
+    },
+    {
+      "archive_path": "backend/app/dao/talent_profiles.py",
+      "destination": "backend/app/dao/talent_profiles.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 7902,
+      "sha256": "f3146e89f766d820f9a26f048fb9276f99d335df8c820ccd826887255b934cef"
+    },
+    {
+      "archive_path": "backend/app/dao/users.py",
+      "destination": "backend/app/dao/users.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 1295,
+      "sha256": "1b0e4870df46735d5e2efb4464f4a1a2d757c6f1ab72a3ab8c2d1be5e8e2c1df"
+    },
+    {
+      "archive_path": "backend/app/database.py",
+      "destination": "backend/app/database.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 1242,
+      "sha256": "d52e6dd6612b6425a2746847b6217a4e13c7f90f8b0e7c58829a1cfc817e543a"
+    },
+    {
+      "archive_path": "backend/app/main.py",
+      "destination": "backend/app/main.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 5644,
+      "sha256": "0c4565ca90e21ee5631208c146d1435d867e921a4891594f6512ff7f82f525ec"
+    },
+    {
+      "archive_path": "backend/app/models/__init__.py",
+      "destination": "backend/app/models/__init__.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 2286,
+      "sha256": "9c589d780f6ae4b6aed3e0490273b8dadcdaf45cf1b38f6c8f0a6c4f4dca0cec"
+    },
+    {
+      "archive_path": "backend/app/models/base.py",
+      "destination": "backend/app/models/base.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 2687,
+      "sha256": "e1aa38146c923ae7baf8557f4696381dd8df8909ca3b576450c6127c792f05b6"
+    },
+    {
+      "archive_path": "backend/app/models/enums.py",
+      "destination": "backend/app/models/enums.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 2330,
+      "sha256": "69c86cd7a37ecb6a81ec7ad5e463115afc44ff03514a23ff5eed544d834c72d2"
+    },
+    {
+      "archive_path": "backend/app/models/job.py",
+      "destination": "backend/app/models/job.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 9177,
+      "sha256": "6847b0c82b39e05c5f4c1c3b1d3c435e59fe81abdcd78cb7d33b1fed8464f98e"
+    },
+    {
+      "archive_path": "backend/app/models/resume.py",
+      "destination": "backend/app/models/resume.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 4117,
+      "sha256": "1e645cf25dd627fcd4b9e3e1a318853fbb3e59d0ba184e546b5feedefacf84ef"
+    },
+    {
+      "archive_path": "backend/app/models/talent.py",
+      "destination": "backend/app/models/talent.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 5263,
+      "sha256": "395dbf82c38e155b19fedd9df7c7c47e5706877a1170d3e313db39e8172beecb"
+    },
+    {
+      "archive_path": "backend/app/models/user.py",
+      "destination": "backend/app/models/user.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 2195,
+      "sha256": "67e9ed3c0a3fe268e2c4cbf716d1cfdbd15b5be2a4cdd029a5ff506cc7b88c37"
+    },
+    {
+      "archive_path": "backend/app/schemas/__init__.py",
+      "destination": "backend/app/schemas/__init__.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 71,
+      "sha256": "1d8f485ddbaa5d184b6a1eea966d48707d2b04918901bc3756097500ed76bb9d"
+    },
+    {
+      "archive_path": "backend/app/schemas/auth.py",
+      "destination": "backend/app/schemas/auth.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 969,
+      "sha256": "52b3f5a9b97f910f354945f15526f918ef1571db6c80f4b5b15dcde20a79c4c2"
+    },
+    {
+      "archive_path": "backend/app/schemas/job_profile.py",
+      "destination": "backend/app/schemas/job_profile.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 3729,
+      "sha256": "704384bd96f99ce409c45607be169c56fcc439dad3b113cbdf6d3069a2714b5f"
+    },
+    {
+      "archive_path": "backend/app/schemas/match.py",
+      "destination": "backend/app/schemas/match.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 4356,
+      "sha256": "b4431dc2d29cfdaa084278d67c65b8963066a85f71c73f9493ceb1d97c001885"
+    },
+    {
+      "archive_path": "backend/app/schemas/parse.py",
+      "destination": "backend/app/schemas/parse.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 5483,
+      "sha256": "05a6127cd32e7e1a87c5420c31a62408a70098d5dd2083a8fc8202b2c9d9e69a"
+    },
+    {
+      "archive_path": "backend/app/schemas/profile.py",
+      "destination": "backend/app/schemas/profile.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 1967,
+      "sha256": "dd1c0438c214976094b76da014e3d66050b6ea3cb0a88830d4cc815170abd440"
+    },
+    {
+      "archive_path": "backend/app/schemas/resume.py",
+      "destination": "backend/app/schemas/resume.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 4361,
+      "sha256": "db5cf916badb41b172b2f5e18757c4508cf9fe120012bc5084ec4850d6948293"
+    },
+    {
+      "archive_path": "backend/app/schemas/screen.py",
+      "destination": "backend/app/schemas/screen.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 3292,
+      "sha256": "d4a5ba308a32013f8da83a3796e3cd2ce64e04622cfd839838d5c43e1e84abec"
+    },
+    {
+      "archive_path": "backend/app/schemas/talent.py",
+      "destination": "backend/app/schemas/talent.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 10316,
+      "sha256": "d265665cadb2cf911d3ec67a4dd55c1d8f510b00e80b12f71af0da56069877ce"
+    },
+    {
+      "archive_path": "backend/app/service/__init__.py",
+      "destination": "backend/app/service/__init__.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 88,
+      "sha256": "fa3e5f53f0b193348c2d7a6e64907aa3e7766a58ef6ef68476456aff5eeb3ff1"
+    },
+    {
+      "archive_path": "backend/app/service/auth_service.py",
+      "destination": "backend/app/service/auth_service.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 5162,
+      "sha256": "d0d760219f421c5d26f7f056ae0d97ebbaf38069ca9aa9fc9ebe77116ba48a5b"
+    },
+    {
+      "archive_path": "backend/app/service/dedup_service.py",
+      "destination": "backend/app/service/dedup_service.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 20672,
+      "sha256": "ca0afbc5bc05f310da8757b79cecf9e3bfd2759b822b32bed85536c97eb91e98"
+    },
+    {
+      "archive_path": "backend/app/service/extract_service.py",
+      "destination": "backend/app/service/extract_service.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 9741,
+      "sha256": "56b600e1476604fbb275f7a6c20f95042dfb248726dd19b533a3fe11bb59296b"
+    },
+    {
+      "archive_path": "backend/app/service/job_profile_service.py",
+      "destination": "backend/app/service/job_profile_service.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 5174,
+      "sha256": "ec67b48d580927f054689bcd8c8d38d2af0c3a17eb0ece68eabe4491c0d78b17"
+    },
+    {
+      "archive_path": "backend/app/service/match_engine.py",
+      "destination": "backend/app/service/match_engine.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 16122,
+      "sha256": "ac356cb8626cda30a6ae4ad0e9a664ae8efa0f92c5c808944f2bc4d7e5c2a4b8"
+    },
+    {
+      "archive_path": "backend/app/service/match_service.py",
+      "destination": "backend/app/service/match_service.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 11125,
+      "sha256": "239a15727b3e8b2cd34ef83287b6d6a805318ae3192f05e7cecccffc600d378b"
+    },
+    {
+      "archive_path": "backend/app/service/parse_service.py",
+      "destination": "backend/app/service/parse_service.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 5096,
+      "sha256": "0a0eb2266515d70cce0361a40d73e87891273859c5b036f64dae608fee545c0a"
+    },
+    {
+      "archive_path": "backend/app/service/profile_service.py",
+      "destination": "backend/app/service/profile_service.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 19478,
+      "sha256": "2b438332743ddb7e61ef1f0a545c3f421d75ba2f4d2c73e7d511b9d6fde989f3"
+    },
+    {
+      "archive_path": "backend/app/service/queue_service.py",
+      "destination": "backend/app/service/queue_service.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 8203,
+      "sha256": "7286c8770226932cd1c42050214dbb021c79a231778cd382e370d0ad030b7dcb"
+    },
+    {
+      "archive_path": "backend/app/service/screen_service.py",
+      "destination": "backend/app/service/screen_service.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 13746,
+      "sha256": "fe20619310d88b383280444f2742bbb1db04dc61042a9f36bd6f1f776e98df7a"
+    },
+    {
+      "archive_path": "backend/app/service/talent_service.py",
+      "destination": "backend/app/service/talent_service.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 27151,
+      "sha256": "6ab6990beaf4d34303341e88c4b18c4cf99ec1e5f85e71de47ec6a9e5e3ff512"
+    },
+    {
+      "archive_path": "backend/app/service/upload_service.py",
+      "destination": "backend/app/service/upload_service.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 8658,
+      "sha256": "752171afe68dc99b1b18d31e44ac7c07117922dcbfd5799e263c9ab7908bc3d8"
+    },
+    {
+      "archive_path": "backend/app/tasks/__init__.py",
+      "destination": "backend/app/tasks/__init__.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 103,
+      "sha256": "0469ac5d143f6230d58f72cd4febfd25e4f359801090796c4d49e9637dd3610b"
+    },
+    {
+      "archive_path": "backend/app/tasks/match_worker.py",
+      "destination": "backend/app/tasks/match_worker.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 5339,
+      "sha256": "f6282efd41a2f0990f87e944f4a0ae21fd8360d83dab67c89e5824e6c4f67296"
+    },
+    {
+      "archive_path": "backend/app/tasks/parse_worker.py",
+      "destination": "backend/app/tasks/parse_worker.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 12988,
+      "sha256": "2859f418b42c76dfcee146b92c156a9ccb019673869080b4dcf48d21de1cc097"
+    },
+    {
+      "archive_path": "backend/app/tasks/runner.py",
+      "destination": "backend/app/tasks/runner.py",
+      "kind": "active_source",
+      "owner": "D",
+      "bytes": 17402,
+      "sha256": "43ee02fcc09b9f74e50e2c9d2e78849f4df75b2480e0ac85f139ca6b2e9d42be"
+    },
+    {
+      "archive_path": "backend/app/tasks/screen_worker.py",
+      "destination": "backend/app/tasks/screen_worker.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 5784,
+      "sha256": "2e82ec8301115d8ecab8607e39aa32c285f37df155700a8098f814a58f4712f0"
+    },
+    {
+      "archive_path": "backend/app/utils/__init__.py",
+      "destination": "backend/app/utils/__init__.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 95,
+      "sha256": "984c3cf954a053cec38627303591217b50b4bf9a1ec71c848d6b0757c51dd9f8"
+    },
+    {
+      "archive_path": "backend/app/utils/files.py",
+      "destination": "backend/app/utils/files.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 5177,
+      "sha256": "b528d6689bf1fff098b3b3953fc6c26037893be1daea8ac75a49d60bbb9f51c7"
+    },
+    {
+      "archive_path": "backend/app/utils/ids.py",
+      "destination": "backend/app/utils/ids.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 459,
+      "sha256": "e1c5bfa1c24bb7524da2c97566c98121b7e69df2d38d2850ffeb3f65a87d1a23"
+    },
+    {
+      "archive_path": "backend/app/utils/mask.py",
+      "destination": "backend/app/utils/mask.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 1125,
+      "sha256": "b1931c03fc4f9e3bce0ff663de4299a5975a3c8149770511d8d59806ca8dbe81"
+    },
+    {
+      "archive_path": "backend/data/eval/eval_match_report.json",
+      "destination": "docs/imports/hhy_gycs_master/eval/eval_match_report.json",
+      "kind": "historical_eval",
+      "owner": null,
+      "bytes": 55233,
+      "sha256": "5d686a39605a37d5266524f9efa42a1b8318d555e7e8b581dd3377cfa9a81235"
+    },
+    {
+      "archive_path": "backend/data/eval/eval_parse_report.json",
+      "destination": "docs/imports/hhy_gycs_master/eval/eval_parse_report.json",
+      "kind": "historical_eval",
+      "owner": null,
+      "bytes": 14314,
+      "sha256": "51afcb52f0dea02c37d33f98771ce7985097b74fbc0a60fade49b473a1b43b31"
+    },
+    {
+      "archive_path": "backend/data/eval/match_eval.json",
+      "destination": "docs/imports/hhy_gycs_master/eval/match_eval.json",
+      "kind": "historical_eval",
+      "owner": null,
+      "bytes": 14718,
+      "sha256": "4b7529198dd339dea350778a3f9f1b3db78e9af746291f3c07aad771f84883fa"
+    },
+    {
+      "archive_path": "backend/data/eval/perf_t31_report.json",
+      "destination": "docs/imports/hhy_gycs_master/eval/perf_t31_report.json",
+      "kind": "historical_eval",
+      "owner": null,
+      "bytes": 3090,
+      "sha256": "17336a21bd3dd7c7d11014cb7d90e30e11229aa459506c8a4f269a6ec60f4d91"
+    },
+    {
+      "archive_path": "backend/data/eval/resume_parse_eval.json",
+      "destination": "docs/imports/hhy_gycs_master/eval/resume_parse_eval.json",
+      "kind": "historical_eval",
+      "owner": null,
+      "bytes": 7229,
+      "sha256": "3fc6e2de55e6c39e7acc532c6b0a5b2b83ceeb2eb26711f62faab81534fd3c33"
+    },
+    {
+      "archive_path": "backend/data/eval/resumes/eval-01-张伟-backend-pass.docx",
+      "destination": "docs/imports/hhy_gycs_master/eval/resumes/eval-01-张伟-backend-pass.docx",
+      "kind": "historical_eval",
+      "owner": null,
+      "bytes": 37350,
+      "sha256": "abfffefcc10a2894bfb1bf58cb801abc075615003ce1ed0c1efa26a80f58c958"
+    },
+    {
+      "archive_path": "backend/data/eval/resumes/eval-02-李娜-backend-pass.docx",
+      "destination": "docs/imports/hhy_gycs_master/eval/resumes/eval-02-李娜-backend-pass.docx",
+      "kind": "historical_eval",
+      "owner": null,
+      "bytes": 37186,
+      "sha256": "1ab303614428b9953e8db3cb5a4601f4c0351c5c3e551c4ab13c4145911f0e7a"
+    },
+    {
+      "archive_path": "backend/data/eval/resumes/eval-03-王强-backend-pass.docx",
+      "destination": "docs/imports/hhy_gycs_master/eval/resumes/eval-03-王强-backend-pass.docx",
+      "kind": "historical_eval",
+      "owner": null,
+      "bytes": 37056,
+      "sha256": "f1c7b46ae040f7bf236c29f05551062a9b0fec167eb1eca0ebb6742802529f3d"
+    },
+    {
+      "archive_path": "backend/data/eval/resumes/eval-04-赵敏-backend-pass.docx",
+      "destination": "docs/imports/hhy_gycs_master/eval/resumes/eval-04-赵敏-backend-pass.docx",
+      "kind": "historical_eval",
+      "owner": null,
+      "bytes": 37480,
+      "sha256": "d11a5c99406ebfad5b4dddb40ac750b82072353df1ecee973aa20c82a57f6a9c"
+    },
+    {
+      "archive_path": "backend/data/eval/resumes/eval-05-陈晨-backend-edge-3y.docx",
+      "destination": "docs/imports/hhy_gycs_master/eval/resumes/eval-05-陈晨-backend-edge-3y.docx",
+      "kind": "historical_eval",
+      "owner": null,
+      "bytes": 37153,
+      "sha256": "c18eb8457fc145041a0dd72060c104c5435e47584918e7044170e700c87ff16c"
+    },
+    {
+      "archive_path": "backend/data/eval/resumes/eval-06-周洁-backend-pass.docx",
+      "destination": "docs/imports/hhy_gycs_master/eval/resumes/eval-06-周洁-backend-pass.docx",
+      "kind": "historical_eval",
+      "owner": null,
+      "bytes": 37211,
+      "sha256": "0da36656ef45afa48dfcd179b793ab306a52dad945df8ab9228fcb7cbc058780"
+    },
+    {
+      "archive_path": "backend/data/eval/resumes/eval-07-吴磊-backend-pass.docx",
+      "destination": "docs/imports/hhy_gycs_master/eval/resumes/eval-07-吴磊-backend-pass.docx",
+      "kind": "historical_eval",
+      "owner": null,
+      "bytes": 37122,
+      "sha256": "6f045d15be90a215d7ae5c7336ce2e2fdc35b4f0022cebfd1f12c186041070e0"
+    },
+    {
+      "archive_path": "backend/data/eval/resumes/eval-08-郑爽-backend-pass.docx",
+      "destination": "docs/imports/hhy_gycs_master/eval/resumes/eval-08-郑爽-backend-pass.docx",
+      "kind": "historical_eval",
+      "owner": null,
+      "bytes": 37047,
+      "sha256": "8b300342ba15d9f95e1f9342566194e1e1e54a918bde919b8f4205e4d29a299a"
+    },
+    {
+      "archive_path": "backend/data/eval/resumes/eval-09-孙悦-backend-no-degree.docx",
+      "destination": "docs/imports/hhy_gycs_master/eval/resumes/eval-09-孙悦-backend-no-degree.docx",
+      "kind": "historical_eval",
+      "owner": null,
+      "bytes": 37224,
+      "sha256": "9152afec654486b85d4c4bfa2eb6cf2c6eba33634357f92d6bf83e5dcb8058f5"
+    },
+    {
+      "archive_path": "backend/data/eval/resumes/eval-10-马涛-backend-edge-2y9m.docx",
+      "destination": "docs/imports/hhy_gycs_master/eval/resumes/eval-10-马涛-backend-edge-2y9m.docx",
+      "kind": "historical_eval",
+      "owner": null,
+      "bytes": 37297,
+      "sha256": "0a85f54817c6d2afb4c9ed3d77e6ac6a8a945f9c494026ed0b26af820b74c8e7"
+    },
+    {
+      "archive_path": "backend/data/eval/resumes/eval-11-林芳-backend-no-mysql.docx",
+      "destination": "docs/imports/hhy_gycs_master/eval/resumes/eval-11-林芳-backend-no-mysql.docx",
+      "kind": "historical_eval",
+      "owner": null,
+      "bytes": 36907,
+      "sha256": "ef58db12e61bc161e9f3a8e1dba173132eb29afa7b276168b86320722e2d3539"
+    },
+    {
+      "archive_path": "backend/data/eval/resumes/eval-12-何军-backend-fresh.docx",
+      "destination": "docs/imports/hhy_gycs_master/eval/resumes/eval-12-何军-backend-fresh.docx",
+      "kind": "historical_eval",
+      "owner": null,
+      "bytes": 37144,
+      "sha256": "0e7ce5c3b9e133cdf938f19afcb7007faa9c87089839faed66a7a1c36f21eb65"
+    },
+    {
+      "archive_path": "backend/data/eval/resumes/eval-13-冯旭-trap-javascript.docx",
+      "destination": "docs/imports/hhy_gycs_master/eval/resumes/eval-13-冯旭-trap-javascript.docx",
+      "kind": "historical_eval",
+      "owner": null,
+      "bytes": 37055,
+      "sha256": "39cce42768de3ae8ce158e113f6f3588e31f33ab1159c962992b5ba308c62265"
+    },
+    {
+      "archive_path": "backend/data/eval/resumes/eval-14-苏晴-trap-go-google.docx",
+      "destination": "docs/imports/hhy_gycs_master/eval/resumes/eval-14-苏晴-trap-go-google.docx",
+      "kind": "historical_eval",
+      "owner": null,
+      "bytes": 37217,
+      "sha256": "d9036881bb81856952e014206a7bc8178b083327f405d6bafc4d015918e60b65"
+    },
+    {
+      "archive_path": "backend/data/eval/resumes/eval-15-杜鹏-trap-cpp.docx",
+      "destination": "docs/imports/hhy_gycs_master/eval/resumes/eval-15-杜鹏-trap-cpp.docx",
+      "kind": "historical_eval",
+      "owner": null,
+      "bytes": 37555,
+      "sha256": "21a1dd916731766d4af83cd56cc1a2d68b248575fcca7396cb1ab4ef4abc6b1c"
+    },
+    {
+      "archive_path": "backend/data/eval/resumes/eval-16-姜蕾-trap-nosql.docx",
+      "destination": "docs/imports/hhy_gycs_master/eval/resumes/eval-16-姜蕾-trap-nosql.docx",
+      "kind": "historical_eval",
+      "owner": null,
+      "bytes": 37222,
+      "sha256": "a4db5516abfabf515212bee22325dc8eb5f2b6bbb1251b027f213f882ee4c4c8"
+    },
+    {
+      "archive_path": "backend/data/eval/resumes/eval-17-许飞-trap-react-native.docx",
+      "destination": "docs/imports/hhy_gycs_master/eval/resumes/eval-17-许飞-trap-react-native.docx",
+      "kind": "historical_eval",
+      "owner": null,
+      "bytes": 37146,
+      "sha256": "d04115fd8cf7c284138929280c9f3812f64a4ae38082530c5f2a80efb6f05cd5"
+    },
+    {
+      "archive_path": "backend/data/eval/resumes/eval-18-韩雪-frontend-pass.docx",
+      "destination": "docs/imports/hhy_gycs_master/eval/resumes/eval-18-韩雪-frontend-pass.docx",
+      "kind": "historical_eval",
+      "owner": null,
+      "bytes": 37165,
+      "sha256": "02d43de68badcb09761013ee7dc51e33c5fabcc0efa3ef498d973818e328ae43"
+    },
+    {
+      "archive_path": "backend/data/eval/resumes/eval-19-曹阳-frontend-pass.docx",
+      "destination": "docs/imports/hhy_gycs_master/eval/resumes/eval-19-曹阳-frontend-pass.docx",
+      "kind": "historical_eval",
+      "owner": null,
+      "bytes": 37273,
+      "sha256": "02dc16691e4f4172d7516022f3b6f5754a184e871923e843ba401f07a0b9f28d"
+    },
+    {
+      "archive_path": "backend/data/eval/resumes/eval-20-潘玉-frontend-junior.docx",
+      "destination": "docs/imports/hhy_gycs_master/eval/resumes/eval-20-潘玉-frontend-junior.docx",
+      "kind": "historical_eval",
+      "owner": null,
+      "bytes": 37400,
+      "sha256": "7e92b1d1aa445961fba25cbb72af428f997a7f1aabd855b6664b7ff719c52955"
+    },
+    {
+      "archive_path": "backend/data/eval/resumes/eval-21-沈从-java-pass.docx",
+      "destination": "docs/imports/hhy_gycs_master/eval/resumes/eval-21-沈从-java-pass.docx",
+      "kind": "historical_eval",
+      "owner": null,
+      "bytes": 37279,
+      "sha256": "6fdd6e83ccbf67be86de985a53631179e981bcec2d6e10f01ac72f9b563f7f47"
+    },
+    {
+      "archive_path": "backend/data/eval/resumes/eval-22-薛冰-backend-senior.docx",
+      "destination": "docs/imports/hhy_gycs_master/eval/resumes/eval-22-薛冰-backend-senior.docx",
+      "kind": "historical_eval",
+      "owner": null,
+      "bytes": 36984,
+      "sha256": "e44e3610b9ca246c4e8c80cb535de2e59c8cc50eec5a057ebb3fdb57473826fe"
+    },
+    {
+      "archive_path": "backend/pytest.ini",
+      "destination": "backend/pytest.ini",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 507,
+      "sha256": "101a8684f256f3df375a881926efb556874c95ab6aab3b7ebfdfb6693120fd65"
+    },
+    {
+      "archive_path": "backend/requirements.txt",
+      "destination": "backend/requirements.txt",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 782,
+      "sha256": "27055eb0dede8c5e8677634a2c97fc998cd512a23a8d44cf8d8de8d12e9bc33c"
+    },
+    {
+      "archive_path": "backend/scripts/backup_db.py",
+      "destination": "backend/scripts/backup_db.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 8026,
+      "sha256": "318b1237acf74d2ae54d431c24f9284c57b975d91fcd5a767b50d456f47491d0"
+    },
+    {
+      "archive_path": "backend/scripts/build_eval_dataset.py",
+      "destination": "backend/scripts/build_eval_dataset.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 28174,
+      "sha256": "55ba47536ff36412215907117dddfe4d1be6f6ab6bf5a06b907def4cb49f16ad"
+    },
+    {
+      "archive_path": "backend/scripts/check_env.py",
+      "destination": "backend/scripts/check_env.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 9504,
+      "sha256": "b5e9d87b1d5cacafdbcd2f07093882cbe7402602aabd9f79501b75723593bf36"
+    },
+    {
+      "archive_path": "backend/scripts/fix_eval_dataset_dates.py",
+      "destination": "backend/scripts/fix_eval_dataset_dates.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 4274,
+      "sha256": "2c5e4e373e405cf708e49567af06acee5082084d8bd48cf5a2f032c73c998ca4"
+    },
+    {
+      "archive_path": "backend/scripts/init_db.py",
+      "destination": "backend/scripts/init_db.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 5895,
+      "sha256": "8291e51ab637e9e241f40b4aefcc396acfb6d560d29aca4c218278ee46476237"
+    },
+    {
+      "archive_path": "backend/scripts/perf_t31.py",
+      "destination": "backend/scripts/perf_t31.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 13551,
+      "sha256": "2320a62a804f4557d1646aa8791d71be783ceac69a1c91bc2ac3cdac4b624ed0"
+    },
+    {
+      "archive_path": "backend/scripts/perf_t31_latency.py",
+      "destination": "backend/scripts/perf_t31_latency.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 7691,
+      "sha256": "08143ca7466beba84277ffd86379f2cda107999ae00e63534fbf3b866e21d862"
+    },
+    {
+      "archive_path": "backend/scripts/perf_t31_resume.py",
+      "destination": "backend/scripts/perf_t31_resume.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 7115,
+      "sha256": "4edd5aabbaf76fa7481dda320f921720104a9e9db05efe6ab8d3b2c8d5819912"
+    },
+    {
+      "archive_path": "backend/scripts/rebuild_vectors.py",
+      "destination": "backend/scripts/rebuild_vectors.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 11490,
+      "sha256": "6bfec691afdd2f44a7a8434858294e7bd8ebce7b3b699c612a058214f91052a1"
+    },
+    {
+      "archive_path": "backend/scripts/smoke_llm.py",
+      "destination": "backend/scripts/smoke_llm.py",
+      "kind": "active_source",
+      "owner": "D",
+      "bytes": 1949,
+      "sha256": "3847d4b1928ed70ba7dda1f0e2cf500b207ef2af444d55f99a319f180491d28e"
+    },
+    {
+      "archive_path": "backend/tests/__init__.py",
+      "destination": "backend/tests/__init__.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 81,
+      "sha256": "68496495af570bb9e2b830f493ac7c7e18f3c71531ae9c4da282f37475009552"
+    },
+    {
+      "archive_path": "backend/tests/conftest.py",
+      "destination": "backend/tests/conftest.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 1984,
+      "sha256": "2f7690d84f7fee848b8047004c7db1fd4e518f9d25b63fab6d558b52e214afba"
+    },
+    {
+      "archive_path": "backend/tests/eval_match.py",
+      "destination": "backend/tests/eval_match.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 12091,
+      "sha256": "e2bc098d43595b2e3b91170864d57ce44288dee895eded3e736a93f3eb5815d9"
+    },
+    {
+      "archive_path": "backend/tests/eval_parse.py",
+      "destination": "backend/tests/eval_parse.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 9445,
+      "sha256": "ba7a394bc9b4d5df3aefdc4d17951c484b52765a8428d3471c7adf662f093928"
+    },
+    {
+      "archive_path": "backend/tests/test_app_integration_t02.py",
+      "destination": "backend/tests/test_app_integration_t02.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 1839,
+      "sha256": "e15782c5d32c49da7250e63b8f71a832fc8dd59eaaf4529fe4a8918613235891"
+    },
+    {
+      "archive_path": "backend/tests/test_auth_integration_t07.py",
+      "destination": "backend/tests/test_auth_integration_t07.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 6845,
+      "sha256": "10f981803744d805aa20e8a967b248c8f0d72edd34988113e6553ab47ef41dc3"
+    },
+    {
+      "archive_path": "backend/tests/test_auth_unit.py",
+      "destination": "backend/tests/test_auth_unit.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 6952,
+      "sha256": "3f5563708e3081a411cb3ed4fddd276fa3229c1efc83370b1df19af1682bfc27"
+    },
+    {
+      "archive_path": "backend/tests/test_backup_initdb_unit.py",
+      "destination": "backend/tests/test_backup_initdb_unit.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 5016,
+      "sha256": "4ea4cc7e8fd06b5a9607053cee7e245f18b7d15cd45d2846fe8829ea39e53501"
+    },
+    {
+      "archive_path": "backend/tests/test_config.py",
+      "destination": "backend/tests/test_config.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 3319,
+      "sha256": "4609ef6704f30bf5714b3fc68ffa1bc059c2f57610f6c2b34af69895faf04015"
+    },
+    {
+      "archive_path": "backend/tests/test_db_integration_t03.py",
+      "destination": "backend/tests/test_db_integration_t03.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 8482,
+      "sha256": "246b6b6eae4fcc343222e4254260c14476388b30a2f7347aa45dc7922ef3f229"
+    },
+    {
+      "archive_path": "backend/tests/test_dedup_integration_t17.py",
+      "destination": "backend/tests/test_dedup_integration_t17.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 26660,
+      "sha256": "1ba6097ed88b1cab99422625646953be654f34f7d39e0ba490f9a4ebf4f66311"
+    },
+    {
+      "archive_path": "backend/tests/test_dedup_unit.py",
+      "destination": "backend/tests/test_dedup_unit.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 3284,
+      "sha256": "58acf157449c64ae00b6e076b20b938ec37b3b46990869d8e270cd10ca7942e8"
+    },
+    {
+      "archive_path": "backend/tests/test_embedding_client.py",
+      "destination": "backend/tests/test_embedding_client.py",
+      "kind": "active_source",
+      "owner": "D",
+      "bytes": 5233,
+      "sha256": "3d536e7c700685b38e6e2346bac93616573be07bccb78ef141eb87f2b822f4ec"
+    },
+    {
+      "archive_path": "backend/tests/test_extract_integration_t11.py",
+      "destination": "backend/tests/test_extract_integration_t11.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 3462,
+      "sha256": "29239828d1b3c513ba0315e5f87f7199c480b4ed1dcac83e34d1c510a6c3822e"
+    },
+    {
+      "archive_path": "backend/tests/test_extract_unit.py",
+      "destination": "backend/tests/test_extract_unit.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 10961,
+      "sha256": "7562491cadb2cddcf68ce54f95a1fafe278622103654c6f7ec2939c6cf092df8"
+    },
+    {
+      "archive_path": "backend/tests/test_health_integration.py",
+      "destination": "backend/tests/test_health_integration.py",
+      "kind": "active_source",
+      "owner": "D",
+      "bytes": 1858,
+      "sha256": "cecbbf27f40e6526b3f4626d354055f266e26cc9c415766b307b1c74855014c1"
+    },
+    {
+      "archive_path": "backend/tests/test_health_unit.py",
+      "destination": "backend/tests/test_health_unit.py",
+      "kind": "active_source",
+      "owner": "D",
+      "bytes": 4778,
+      "sha256": "269276400e60200e72be11674cd646a6fbe7179363a5aaab0bce115e2bc32708"
+    },
+    {
+      "archive_path": "backend/tests/test_job_profile_t22.py",
+      "destination": "backend/tests/test_job_profile_t22.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 12143,
+      "sha256": "d5bc8908078306a63d78e4049c0e2506dd10b4184eed6d9d6d5b8dc1a4944382"
+    },
+    {
+      "archive_path": "backend/tests/test_llm_client_fake_server.py",
+      "destination": "backend/tests/test_llm_client_fake_server.py",
+      "kind": "active_source",
+      "owner": "D",
+      "bytes": 5762,
+      "sha256": "0d13d68993c6b40e24fa616c8fa473b6201491c95e629060394f7ab8eec3a9a9"
+    },
+    {
+      "archive_path": "backend/tests/test_llm_client_unit.py",
+      "destination": "backend/tests/test_llm_client_unit.py",
+      "kind": "active_source",
+      "owner": "D",
+      "bytes": 10316,
+      "sha256": "091f870c393b9f1de718f92a51e6fb4bdf48e74cb9127e85a3c0b10496600efe"
+    },
+    {
+      "archive_path": "backend/tests/test_mask.py",
+      "destination": "backend/tests/test_mask.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 1090,
+      "sha256": "9573242b10a2460f2537c2f40c5d0f76974c1415d48e5fee1e15e3f93379f84f"
+    },
+    {
+      "archive_path": "backend/tests/test_match_batch_t25.py",
+      "destination": "backend/tests/test_match_batch_t25.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 15905,
+      "sha256": "e828768edd3ca4df5380c6680e0f49978fc02dd11425b8dce061e5a31badf4eb"
+    },
+    {
+      "archive_path": "backend/tests/test_match_engine_t23.py",
+      "destination": "backend/tests/test_match_engine_t23.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 12873,
+      "sha256": "7c64b1b798aed91ef3196e34fa54f461f4adecdc082ec91bb28d393778c6e6e6"
+    },
+    {
+      "archive_path": "backend/tests/test_milvus_store_unit.py",
+      "destination": "backend/tests/test_milvus_store_unit.py",
+      "kind": "active_source",
+      "owner": "D",
+      "bytes": 11811,
+      "sha256": "34f356c1e9dc4a4dab0bd6b34a5ea152d0ba3d2c4979de39dd7a9631ee957e31"
+    },
+    {
+      "archive_path": "backend/tests/test_models_structure.py",
+      "destination": "backend/tests/test_models_structure.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 13457,
+      "sha256": "c125b5d4dd93d32a603c8286157464ef3bf455ffad7d8913ceef068788407c63"
+    },
+    {
+      "archive_path": "backend/tests/test_normalize_unit.py",
+      "destination": "backend/tests/test_normalize_unit.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 9309,
+      "sha256": "02099007e72219f62b1b5db94db8998060fa63ade96556068981d28ebba74208"
+    },
+    {
+      "archive_path": "backend/tests/test_parse_integration_t13.py",
+      "destination": "backend/tests/test_parse_integration_t13.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 24306,
+      "sha256": "32f68e14c9cc5b4be76f5a3ce957bae2233241cfe48046bb09a4922bbac00897"
+    },
+    {
+      "archive_path": "backend/tests/test_parse_unit.py",
+      "destination": "backend/tests/test_parse_unit.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 8311,
+      "sha256": "ae67e84e4668982de534c2655645f43df9f521d1e3aa8754dad3885b6ef7a0f8"
+    },
+    {
+      "archive_path": "backend/tests/test_profile_integration_t16.py",
+      "destination": "backend/tests/test_profile_integration_t16.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 16726,
+      "sha256": "5279a3b8f633a5a44224c2a662b96f6058039ec6730fda5078b16c471eb07b9e"
+    },
+    {
+      "archive_path": "backend/tests/test_profile_text.py",
+      "destination": "backend/tests/test_profile_text.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 5130,
+      "sha256": "27056d4f9e62bf7623f2251804259b0b306c2883c679c4206edb396aea82153c"
+    },
+    {
+      "archive_path": "backend/tests/test_profile_unit.py",
+      "destination": "backend/tests/test_profile_unit.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 10146,
+      "sha256": "c1d73e69ca267b6b46e18d11261c589905c8400ab628d75bc3f043447db295ea"
+    },
+    {
+      "archive_path": "backend/tests/test_prompts.py",
+      "destination": "backend/tests/test_prompts.py",
+      "kind": "active_source",
+      "owner": "D",
+      "bytes": 5186,
+      "sha256": "c87cf258876e858570084b9c33c1e637495a494b63a2ad245e781d8cc0ef3398"
+    },
+    {
+      "archive_path": "backend/tests/test_queue_integration_t14.py",
+      "destination": "backend/tests/test_queue_integration_t14.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 11817,
+      "sha256": "0cf087e42493256e305141a26050679f3031f6dfbccd198bc3c6647169cc76ad"
+    },
+    {
+      "archive_path": "backend/tests/test_queue_unit_t14.py",
+      "destination": "backend/tests/test_queue_unit_t14.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 3483,
+      "sha256": "13da382b538dcb647e71fbe96acd31871caeee44e709496a0cf8974c0649c436"
+    },
+    {
+      "archive_path": "backend/tests/test_response_errors.py",
+      "destination": "backend/tests/test_response_errors.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 6916,
+      "sha256": "beb0f9cc9abb02cefbaf3828184cf869c5e302a6949165339bd57d0da3a6b4e4"
+    },
+    {
+      "archive_path": "backend/tests/test_runner_integration_t12.py",
+      "destination": "backend/tests/test_runner_integration_t12.py",
+      "kind": "active_source",
+      "owner": "D",
+      "bytes": 14521,
+      "sha256": "ff1093b691e473e56bffe005e4095707c853239315251206127d0df4cbbd599c"
+    },
+    {
+      "archive_path": "backend/tests/test_runner_unit.py",
+      "destination": "backend/tests/test_runner_unit.py",
+      "kind": "active_source",
+      "owner": "D",
+      "bytes": 2081,
+      "sha256": "ca247b7aa594e4f4945c8739c53c53a66018b94488fe9b65cb78e37fc4c0e037"
+    },
+    {
+      "archive_path": "backend/tests/test_screen_t24.py",
+      "destination": "backend/tests/test_screen_t24.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 20211,
+      "sha256": "2de959102666d9ec2f0ee73de831e65ce9d69c677d0692f74f9a70855f28bf37"
+    },
+    {
+      "archive_path": "backend/tests/test_search_integration_t19.py",
+      "destination": "backend/tests/test_search_integration_t19.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 6985,
+      "sha256": "30342498d5a6a77e3d7f311c9e821a39dd2c370ee779865b38b2abe6d51893c8"
+    },
+    {
+      "archive_path": "backend/tests/test_talent_integration_t18.py",
+      "destination": "backend/tests/test_talent_integration_t18.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 33775,
+      "sha256": "3c0666e914dbfb379a2752261f3b04ed1a0a2e136556854d13e88408be240435"
+    },
+    {
+      "archive_path": "backend/tests/test_talent_unit_t18.py",
+      "destination": "backend/tests/test_talent_unit_t18.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 11456,
+      "sha256": "93c48388fa45b37f3b8b1d56fe995113170f87ece0b34ab5eea59aed1143338d"
+    },
+    {
+      "archive_path": "backend/tests/test_upload_integration_t10.py",
+      "destination": "backend/tests/test_upload_integration_t10.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 10563,
+      "sha256": "13889270361a7ebb68bfc8344dba6abfd35dce7b07f2f119fff2366705688346"
+    },
+    {
+      "archive_path": "backend/tests/test_upload_unit.py",
+      "destination": "backend/tests/test_upload_unit.py",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 4835,
+      "sha256": "8108564f8f71bd43693f148c6f634ea6971b1e88b330a39acfe0060c8946abd2"
+    },
+    {
+      "archive_path": "backend/tests/test_vectors_integration_t05.py",
+      "destination": "backend/tests/test_vectors_integration_t05.py",
+      "kind": "active_source",
+      "owner": "D",
+      "bytes": 8284,
+      "sha256": "80ad380aa82880d49cee7a5e53d784aedd14296b433240b59192bd9d76710bec"
+    },
+    {
+      "archive_path": "deploy/milvus/docker-compose.yml",
+      "destination": "deploy/milvus/docker-compose.yml",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 1786,
+      "sha256": "6c3a40ab00e615c57b40acf002bfedfa8a9efc1b4f698ecc234cf0850a1e5c4e"
+    },
+    {
+      "archive_path": "deploy/milvus/verify_milvus.py",
+      "destination": "deploy/milvus/verify_milvus.py",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 1618,
+      "sha256": "97b28e498f2b72a5be156f642521fa86573a9fff2e3bbcd39313e2b03a17e7d4"
+    },
+    {
+      "archive_path": "docs/LLM提示词设计.md",
+      "destination": "docs/imports/hhy_gycs_master/original/docs/LLM提示词设计.md",
+      "kind": "historical_document",
+      "owner": null,
+      "bytes": 18078,
+      "sha256": "6f818fd7ee9567f31b022eed25a43778b5a5127e350ceee3a00f854f3e2500a0"
+    },
+    {
+      "archive_path": "docs/安全走查记录.md",
+      "destination": "docs/imports/hhy_gycs_master/original/docs/安全走查记录.md",
+      "kind": "historical_document",
+      "owner": null,
+      "bytes": 4288,
+      "sha256": "e52efc354646e8e3949a4ad86f8836cd26ed584da20874fb8af50df1123c303f"
+    },
+    {
+      "archive_path": "docs/审核-修改建议报告.md",
+      "destination": "docs/imports/hhy_gycs_master/original/docs/审核-修改建议报告.md",
+      "kind": "historical_document",
+      "owner": null,
+      "bytes": 28485,
+      "sha256": "c159556af3f9155593b9c620609fcdb9889225ba4726d26cd160e575ab172d79"
+    },
+    {
+      "archive_path": "docs/开发计划-todolist.md",
+      "destination": "docs/imports/hhy_gycs_master/original/docs/开发计划-todolist.md",
+      "kind": "historical_document",
+      "owner": null,
+      "bytes": 61068,
+      "sha256": "069d93f73ee7e413315889e2f15f1179da3e81da20bc4eaff5b5f854380a86df"
+    },
+    {
+      "archive_path": "docs/接口设计.md",
+      "destination": "docs/imports/hhy_gycs_master/original/docs/接口设计.md",
+      "kind": "historical_document",
+      "owner": null,
+      "bytes": 34591,
+      "sha256": "9ef3ca8096821029d40497c2b97b1901796fe01d1150e09178e94b983ac70404"
+    },
+    {
+      "archive_path": "docs/数据库设计.md",
+      "destination": "docs/imports/hhy_gycs_master/original/docs/数据库设计.md",
+      "kind": "historical_document",
+      "owner": null,
+      "bytes": 39329,
+      "sha256": "c95dd6ea8a4b1ab2412aa0b37976fb7025ae47ce7e6186f66a1ee6afc67b9ca0"
+    },
+    {
+      "archive_path": "docs/架构设计.md",
+      "destination": "docs/imports/hhy_gycs_master/original/docs/架构设计.md",
+      "kind": "historical_document",
+      "owner": null,
+      "bytes": 47266,
+      "sha256": "7d9998ebc455ff0c123b974585fdd1e665993f9563e7b87e727c0bbba950769c"
+    },
+    {
+      "archive_path": "docs/架构评审与修改建议.md",
+      "destination": "docs/imports/hhy_gycs_master/original/docs/架构评审与修改建议.md",
+      "kind": "historical_document",
+      "owner": null,
+      "bytes": 50105,
+      "sha256": "9e134b3c2bb98bac860dda373a7f979ccccaab14c12a8a516082efe4c947d351"
+    },
+    {
+      "archive_path": "docs/测试报告.md",
+      "destination": "docs/imports/hhy_gycs_master/original/docs/测试报告.md",
+      "kind": "historical_document",
+      "owner": null,
+      "bytes": 23062,
+      "sha256": "5fabed3df7be2206d1aaef455f3a39e76713a9b7b4bbebf207ae67f1a52d0cb8"
+    },
+    {
+      "archive_path": "docs/算法与判定规则.md",
+      "destination": "docs/imports/hhy_gycs_master/original/docs/算法与判定规则.md",
+      "kind": "historical_document",
+      "owner": null,
+      "bytes": 13056,
+      "sha256": "4338277d9370bcfcf77839880d6993c73d969a0fbdb3161c2729e87516dd7d6b"
+    },
+    {
+      "archive_path": "docs/统一错误码与鉴权.md",
+      "destination": "docs/imports/hhy_gycs_master/original/docs/统一错误码与鉴权.md",
+      "kind": "historical_document",
+      "owner": null,
+      "bytes": 10636,
+      "sha256": "248bc22867d38181ee5b9d1a55fb2bac8bfbfbb0f2908cea55cd77164017d3c8"
+    },
+    {
+      "archive_path": "docs/运行配置.md",
+      "destination": "docs/imports/hhy_gycs_master/original/docs/运行配置.md",
+      "kind": "historical_document",
+      "owner": null,
+      "bytes": 11592,
+      "sha256": "e89e68328088a09fcb1f371e1d03c26da3c4412fde69323798585df73ebbca54"
+    },
+    {
+      "archive_path": "frontend/.env.local.example",
+      "destination": "frontend/.env.local.example",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 319,
+      "sha256": "01875f086d3e46be47b21354f535869d9746578d646a3c93bde385104ad2eb48"
+    },
+    {
+      "archive_path": "frontend/.gitignore",
+      "destination": "frontend/.gitignore",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 91,
+      "sha256": "7b2391b8fbe73fa31e3492eb6b41f3f75e0fffb1552cbab9e73ee8dc6c842a8b"
+    },
+    {
+      "archive_path": "frontend/next-env.d.ts",
+      "destination": "frontend/next-env.d.ts",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 228,
+      "sha256": "9dd9d642cdb87d4d5b3173217e0c45429b3e47a6f5cf5fb0ead6c644ec5fed01"
+    },
+    {
+      "archive_path": "frontend/next.config.mjs",
+      "destination": "frontend/next.config.mjs",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 347,
+      "sha256": "5525eed6454cce6fa3cb39f4cf65fa08d1823427e8cfaae3db80a7ed8944f69a"
+    },
+    {
+      "archive_path": "frontend/package-lock.json",
+      "destination": "frontend/package-lock.json",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 181301,
+      "sha256": "52360918bd37ccf3d6873456cb8587ebb6ea7d312a6aef8335348b531282ce5e"
+    },
+    {
+      "archive_path": "frontend/package.json",
+      "destination": "frontend/package.json",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 822,
+      "sha256": "c0b838bc1134d097e6332ce4392ec808278921a0668ea49d4eb42df00048b278"
+    },
+    {
+      "archive_path": "frontend/scripts/run-vitest.mjs",
+      "destination": "frontend/scripts/run-vitest.mjs",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 1307,
+      "sha256": "3d268ae38b91d5556586b0e70cea656af7ad505b8d14ca16d8cdf50c306745ee"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/job-profiles/JobProfileFormModal.tsx",
+      "destination": "frontend/src/app/(main)/job-profiles/JobProfileFormModal.tsx",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 9361,
+      "sha256": "53b29ad784f8781a841e0ff205af7351f7f516dc677cbfcc1695699431556523"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/job-profiles/api.ts",
+      "destination": "frontend/src/app/(main)/job-profiles/api.ts",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 1536,
+      "sha256": "dd472d22db216435db94c5363a2a771064ae7a63c497ae39f28118e514ae3f38"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/job-profiles/page.test.tsx",
+      "destination": "frontend/src/app/(main)/job-profiles/page.test.tsx",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 3884,
+      "sha256": "6b96c3d4b80450b3b325c93dd1661298bcb7b9f5448e792bc994c13eabaf65e6"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/job-profiles/page.tsx",
+      "destination": "frontend/src/app/(main)/job-profiles/page.tsx",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 6015,
+      "sha256": "3482fa7fb84bfc08d0897512acea44c2e8ebfb41772cb4279fe36e20e2f940d7"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/job-profiles/types.ts",
+      "destination": "frontend/src/app/(main)/job-profiles/types.ts",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 1981,
+      "sha256": "eab9a2ad54e3f131108e9c3130ab5fd93e2dd6564f40dd968eecbe81069e6971"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/layout.tsx",
+      "destination": "frontend/src/app/(main)/layout.tsx",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 543,
+      "sha256": "8aa08f288484a53347b9543f5ccf32f40ab447b39c3eba0b46eb7cac20120ad4"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/match/MatchPanel.test.tsx",
+      "destination": "frontend/src/app/(main)/match/MatchPanel.test.tsx",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 6051,
+      "sha256": "acfe648456af47ef4d3981031b55e866c2a50bea1116e815bf75095c0c969129"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/match/MatchPanel.tsx",
+      "destination": "frontend/src/app/(main)/match/MatchPanel.tsx",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 16255,
+      "sha256": "8f6bcd65c1dfe84c0487475bf334c863891cc67947db4ccbc78248ffdf15f068"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/match/api.ts",
+      "destination": "frontend/src/app/(main)/match/api.ts",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 1653,
+      "sha256": "a2f79aab979fe4c70dfec3661d916b7b61de33c19352342e2448bb2f739f7439"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/match/page.tsx",
+      "destination": "frontend/src/app/(main)/match/page.tsx",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 201,
+      "sha256": "104cb8b90c3fd2bb065fdc34113e21a6da4b2daa1c17969b757d5044baf96ee0"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/match/types.ts",
+      "destination": "frontend/src/app/(main)/match/types.ts",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 2028,
+      "sha256": "ff84c0f414b891b8ac4fdc734a1cdce8a386b4cb561a0427804ca1a1b3c68403"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/screen/QueuePanel.test.tsx",
+      "destination": "frontend/src/app/(main)/screen/QueuePanel.test.tsx",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 5671,
+      "sha256": "5caf12b7b1024999c125d1824296fa5e70efd9ce0aaea6f32196c44041da11eb"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/screen/QueuePanel.tsx",
+      "destination": "frontend/src/app/(main)/screen/QueuePanel.tsx",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 11270,
+      "sha256": "34dc7e849296031bc5cde52ae969c081d5033d67e1fc0b70f00bf567fbc66b17"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/screen/ScreenBatchPanel.test.tsx",
+      "destination": "frontend/src/app/(main)/screen/ScreenBatchPanel.test.tsx",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 5223,
+      "sha256": "d017f3084907140e3c7924ecd94faf481a23995943877dc15aac1af52d2a9ca7"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/screen/ScreenBatchPanel.tsx",
+      "destination": "frontend/src/app/(main)/screen/ScreenBatchPanel.tsx",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 16886,
+      "sha256": "24eacc216947b630bb47abce9380e821ee138c5f4cdd1895e1797ac40db90258"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/screen/UploadPanel.test.tsx",
+      "destination": "frontend/src/app/(main)/screen/UploadPanel.test.tsx",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 3432,
+      "sha256": "5d0fc80d1318f5575eb2775519a1cc72cd515ac810588e7a3f4d910cf0adfc00"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/screen/UploadPanel.tsx",
+      "destination": "frontend/src/app/(main)/screen/UploadPanel.tsx",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 7304,
+      "sha256": "493a5a12145ebab0d8a452d4c305f390cef46429f9b9da7371b9fd60e7afca99"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/screen/api.ts",
+      "destination": "frontend/src/app/(main)/screen/api.ts",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 5050,
+      "sha256": "b251a570e04dc9e21e779c58fd72c74b540e0753f385c59719b91add3d8c3eec"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/screen/page.tsx",
+      "destination": "frontend/src/app/(main)/screen/page.tsx",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 801,
+      "sha256": "ef69eecf57a979a4ba0612021b28c0898a0d0dc5cfab12ce1633ac0489e7d94f"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/screen/types.ts",
+      "destination": "frontend/src/app/(main)/screen/types.ts",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 5269,
+      "sha256": "544aaef2217246efeb053a5c5bda95b349bcda0663730d6a0370b25fc9fbdddc"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/screen/utils.test.ts",
+      "destination": "frontend/src/app/(main)/screen/utils.test.ts",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 2465,
+      "sha256": "5f21790268672802cadf4d2cf80a7e3401ab2244d429b42848e05e58b8f4c78f"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/screen/utils.ts",
+      "destination": "frontend/src/app/(main)/screen/utils.ts",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 3103,
+      "sha256": "c87aada116fadeedc237f241cf065d3928627778e6327b3fbf8c9e1d96da305f"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/talents/DuplicatesDrawer.test.tsx",
+      "destination": "frontend/src/app/(main)/talents/DuplicatesDrawer.test.tsx",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 4065,
+      "sha256": "aabd8c207b3b48592b09d9f02b34f7c1dbb0144bac9145afc3537fa99a4efd41"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/talents/DuplicatesDrawer.tsx",
+      "destination": "frontend/src/app/(main)/talents/DuplicatesDrawer.tsx",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 6534,
+      "sha256": "2d1339ab15b05c7138fb862cad90e1409a5927a9f318402183b78da27990424b"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/talents/TalentListPanel.test.tsx",
+      "destination": "frontend/src/app/(main)/talents/TalentListPanel.test.tsx",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 4630,
+      "sha256": "66b8392a49e9becc81fa70fefad5231a8a8263e8c5705e0c9084b09a33611503"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/talents/TalentListPanel.tsx",
+      "destination": "frontend/src/app/(main)/talents/TalentListPanel.tsx",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 12057,
+      "sha256": "b6bedec4522a478c9506287087d5548f2923fa0c5d22e489a61a502bcf5a97a0"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/talents/[id]/AbilityRadar.tsx",
+      "destination": "frontend/src/app/(main)/talents/[id]/AbilityRadar.tsx",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 3636,
+      "sha256": "654965bb23fe544fd0771d7b8d7dddf3262ac04474167943d71fd91c0d483eb8"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/talents/[id]/DetailView.test.tsx",
+      "destination": "frontend/src/app/(main)/talents/[id]/DetailView.test.tsx",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 7958,
+      "sha256": "03d9fb0d25bcbee2ac503153f5dab81fd6cbf63cd00379b7381903396880b1c0"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/talents/[id]/DetailView.tsx",
+      "destination": "frontend/src/app/(main)/talents/[id]/DetailView.tsx",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 18476,
+      "sha256": "9c44fbdc33d63061b70d30c60e89659366c830e4bedcc74c2415ac4a69b4b8c4"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/talents/[id]/DuplicateResolveModal.tsx",
+      "destination": "frontend/src/app/(main)/talents/[id]/DuplicateResolveModal.tsx",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 5006,
+      "sha256": "2d23d13d3869694721bf3537d014e299ad726e59c4101253ca253b78a70a0727"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/talents/[id]/EditProfileModal.tsx",
+      "destination": "frontend/src/app/(main)/talents/[id]/EditProfileModal.tsx",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 5225,
+      "sha256": "f655c229a1cf2c60d7f9c694b9534da3a7fdfb2673f59d06298feb032686b3d2"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/talents/[id]/TagEditModal.tsx",
+      "destination": "frontend/src/app/(main)/talents/[id]/TagEditModal.tsx",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 5814,
+      "sha256": "eeea9d3fba3e3b5c2907479d3ca1e969a2541bd2a3feccd7870715718fb22410"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/talents/[id]/page.tsx",
+      "destination": "frontend/src/app/(main)/talents/[id]/page.tsx",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 657,
+      "sha256": "2c36534881b066834e69b436f74b887526bad793a6db05844aed597d0b05ddd0"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/talents/api.ts",
+      "destination": "frontend/src/app/(main)/talents/api.ts",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 4171,
+      "sha256": "15119469bf51067567e4ae0dd9123b20ae6717e63b31bf4e341cb21e06cc8dc8"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/talents/page.tsx",
+      "destination": "frontend/src/app/(main)/talents/page.tsx",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 1433,
+      "sha256": "9d534e597d3c42eeef5821f5337157bc1485bdb42b38b5f88d95b6c17f60efeb"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/talents/types.ts",
+      "destination": "frontend/src/app/(main)/talents/types.ts",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 5249,
+      "sha256": "ff0c921c9ea51adb969b1ca2d58cea021a7f9e7924162950ceba5dc00c374ac6"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/talents/utils.test.ts",
+      "destination": "frontend/src/app/(main)/talents/utils.test.ts",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 1490,
+      "sha256": "9a2da489e5338ba9539450e6dfae69f2413e1f71a47483942006f966c1983c77"
+    },
+    {
+      "archive_path": "frontend/src/app/(main)/talents/utils.ts",
+      "destination": "frontend/src/app/(main)/talents/utils.ts",
+      "kind": "active_source",
+      "owner": "B",
+      "bytes": 2191,
+      "sha256": "65f55f28343e7ed30ad038c461dcd43abf3f5011448cdb1e9439e760696d9609"
+    },
+    {
+      "archive_path": "frontend/src/app/layout.tsx",
+      "destination": "frontend/src/app/layout.tsx",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 525,
+      "sha256": "9dc4489324068d070d197c1c749d22108ce9c862c1722fc8a070c8d370f40a71"
+    },
+    {
+      "archive_path": "frontend/src/app/login/LoginView.test.tsx",
+      "destination": "frontend/src/app/login/LoginView.test.tsx",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 3647,
+      "sha256": "0c783debf5d463e8c61a9120ef1a59cd45df741dc7fc3fbe086cdf429459c08b"
+    },
+    {
+      "archive_path": "frontend/src/app/login/LoginView.tsx",
+      "destination": "frontend/src/app/login/LoginView.tsx",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 5471,
+      "sha256": "14788cc5e92e9a4e947fe3cd596ebe0dcf05cee0ea41481964924de10b16beff"
+    },
+    {
+      "archive_path": "frontend/src/app/login/page.tsx",
+      "destination": "frontend/src/app/login/page.tsx",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 1303,
+      "sha256": "f82c468ed8923a31045e7b438376d4c076b3e2d21d1cab86d6ce790b05a36d1c"
+    },
+    {
+      "archive_path": "frontend/src/app/page.tsx",
+      "destination": "frontend/src/app/page.tsx",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 222,
+      "sha256": "feb36f22c4eb12d7a1ae10991210434ac599342e7c268e429e55f0fd41ebecb9"
+    },
+    {
+      "archive_path": "frontend/src/components/AntdProvider.tsx",
+      "destination": "frontend/src/components/AntdProvider.tsx",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 1637,
+      "sha256": "488465e97f9ab3d1ee6b8a634705006490d03876fa56722230b73fee2ec8f0b2"
+    },
+    {
+      "archive_path": "frontend/src/components/AppShell.test.tsx",
+      "destination": "frontend/src/components/AppShell.test.tsx",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 1471,
+      "sha256": "5615c18002500278c2668f9c16aca75ce583a57efa37368d49136fb0ff8c3022"
+    },
+    {
+      "archive_path": "frontend/src/components/AppShell.tsx",
+      "destination": "frontend/src/components/AppShell.tsx",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 3885,
+      "sha256": "f671f5175951d13b1b9c98059c5a5e5d09a888d0b7ecfb17e294298ebc93fccd"
+    },
+    {
+      "archive_path": "frontend/src/components/AuthGuard.test.tsx",
+      "destination": "frontend/src/components/AuthGuard.test.tsx",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 4834,
+      "sha256": "e73e0b4f3b4e7f8a62f98b1f496b152af0e209d49058176478e7733e4b2f1ae6"
+    },
+    {
+      "archive_path": "frontend/src/components/AuthGuard.tsx",
+      "destination": "frontend/src/components/AuthGuard.tsx",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 4517,
+      "sha256": "32dfabda11b000579450ed4f9a46e09d42c8240f0c41a79bc98344db461bb13a"
+    },
+    {
+      "archive_path": "frontend/src/components/PagePlaceholder.tsx",
+      "destination": "frontend/src/components/PagePlaceholder.tsx",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 1534,
+      "sha256": "fd880860c3362a368e0fe7d5b4f1d461e820c891e1deee17297e15d94dfffddb"
+    },
+    {
+      "archive_path": "frontend/src/lib/auth.ts",
+      "destination": "frontend/src/lib/auth.ts",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 2649,
+      "sha256": "9fcce872329b72be7432fd3701072daa52967d426078161230c4b0f707d363ee"
+    },
+    {
+      "archive_path": "frontend/src/lib/http.ts",
+      "destination": "frontend/src/lib/http.ts",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 8293,
+      "sha256": "6c143562779c0d614c7254fe874998ddede41c149bc0b8c93263b3e6498c6fb0"
+    },
+    {
+      "archive_path": "frontend/src/lib/types.ts",
+      "destination": "frontend/src/lib/types.ts",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 847,
+      "sha256": "1491db235641679b8b877c5a1394cca2651898a59be744c33a15819f747660fe"
+    },
+    {
+      "archive_path": "frontend/src/lib/usePolling.test.tsx",
+      "destination": "frontend/src/lib/usePolling.test.tsx",
+      "kind": "active_source",
+      "owner": "D",
+      "bytes": 5149,
+      "sha256": "18117110f8f89120e32d596aa430aad28e44ce7836fad2bfde903030f83ebdd4"
+    },
+    {
+      "archive_path": "frontend/src/lib/usePolling.ts",
+      "destination": "frontend/src/lib/usePolling.ts",
+      "kind": "active_source",
+      "owner": "D",
+      "bytes": 5552,
+      "sha256": "2af18f5b7a5c01fde170326a18e4ba3ae504d379d8058ebe04de95843388858b"
+    },
+    {
+      "archive_path": "frontend/src/styles/globals.css",
+      "destination": "frontend/src/styles/globals.css",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 540,
+      "sha256": "14450ff39b39e032795dbdcac2083d1bcb167b4ba09df25bd7c0b71b92b5b6f9"
+    },
+    {
+      "archive_path": "frontend/src/test/setup.ts",
+      "destination": "frontend/src/test/setup.ts",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 943,
+      "sha256": "4f971e7120d44216e31c331d02e5d44f55ace730741f494ecb43d9a440f2a1b1"
+    },
+    {
+      "archive_path": "frontend/tsconfig.json",
+      "destination": "frontend/tsconfig.json",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 597,
+      "sha256": "bee111bcabff8a2932120bbc25e480550e40fd1f5baa8ab83850ff1a90c4214d"
+    },
+    {
+      "archive_path": "frontend/vitest.config.ts",
+      "destination": "frontend/vitest.config.ts",
+      "kind": "active_source",
+      "owner": "A",
+      "bytes": 844,
+      "sha256": "5a4183f340239e5a04021e30238fcd8e552b5456b5794472844e450023e55dbf"
+    },
+    {
+      "archive_path": "业务逻辑说明.md",
+      "destination": "docs/imports/hhy_gycs_master/original/业务逻辑说明.md",
+      "kind": "historical_document",
+      "owner": null,
+      "bytes": 27409,
+      "sha256": "56b80a1750983ec7b5ec4ed0d542a86a8da6d00abd5a53c2c76b5621c14fb45b"
+    },
+    {
+      "archive_path": "开发日志.md",
+      "destination": "docs/imports/hhy_gycs_master/original/开发日志.md",
+      "kind": "historical_document",
+      "owner": null,
+      "bytes": 227264,
+      "sha256": "2b333a8590438a90b41a920237f44a8239b2143a113c7fdf6157d89f9aa0e68c"
+    },
+    {
+      "archive_path": "需求文档.md",
+      "destination": "docs/imports/hhy_gycs_master/original/需求文档.md",
+      "kind": "historical_document",
+      "owner": null,
+      "bytes": 42223,
+      "sha256": "65570254d1f887119f64f6b4327d3bb6fd3c94f5c1843947c636dc60859587bd"
+    }
+  ]
+}

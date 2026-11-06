@@ -1,41 +1,36 @@
-# D 工作包：模型任务框架、自由问数、报告、预置流程和工作台
+# D 工作包：模型任务、指标问数、报告、固定流程与工作台
 
-维护角色：D；成员姓名待小组内部绑定，不能从工具或 Git 用户名猜测。状态：未开始业务实现（2026-11-06 基线）。
+维护角色：D；姓名由组内绑定。日期：2026-11-06。状态：公共调用/调度源码已导入，指标、报告和正式固定流程待实现，本机运行未验证。
 
-先读根 AGENTS.md、README、根更新记录、四个角色目录的最新交接，再读统一需求、分工与技术框架。任务详情以 docs/四人分工与试行方案.md 的 D 节为准。
+先读根 AGENTS.md、README、更新记录、四个角色最新交接、目标路径规则及[统一需求 V2.2](../docs/需求文档.md)。接入事实见[D 契约基线](../docs/modules/D/源码接入基线.md)、[接入决策](../docs/源码接入与需求决策.md)和[来源参考区](../docs/imports/hhy_gycs_master/README.md)；全组安排见[四人分工](../docs/四人分工与试行方案.md)。README 运行入口尚未实测。
 
-## 写入范围
+## 继承的现成文件
 
-机器规则以 .collaboration/ownership.json 为准；以下是初始化时的范围：
+后端继承 core/llm_client.py、embedding_client.py、milvus_store.py、worker_state.py、core/prompts 的公共 loader/schemas 框架、tasks/runner.py、api/health.py。前端继承 lib/usePolling.ts 与 usePolling.test.tsx，保留 analytics/reports/workflows/dashboard/tasks 等既有新模块目录归属。
 
-- `frontend/src/features/analytics/**`
-- `backend/app/modules/analytics/**`
-- `frontend/src/features/reports/**`
-- `backend/app/modules/reports/**`
-- `frontend/src/features/workflows/**`
-- `backend/app/modules/workflows/**`
-- `frontend/src/features/dashboard/**`
-- `backend/app/modules/dashboard/**`
-- `frontend/src/features/tasks/**`
-- `backend/app/core/ai/**`
-- `backend/app/core/tasks/**`
-- `tests/D/**`
-- `scripts/D/**`
-- `docs/modules/D/**`
-- `docs/updates/D/**`
-- `docs/requests/D/**`
-- `tasks/D.md`
-- `backend/migrations/versions/D_*.py`
-- `backend/app/worker.py`
+prompts 集中目录按业务拆分：parse.txt/profile.txt 由 B 维护，match.txt 由 A 维护；D 只维护公共加载/版本/结构框架及本包业务提示，不单独修改别人的业务输出语义。parse_worker 属 B，screen_worker/match_worker 属 A；公共 http/auth/types、components、Next.js 布局及 main.py 入口属 A。
 
-AGENTS.md/CLAUDE.md 是治理例外，仅 A 可维护；只读来源、敏感/运行文件及未知路径不允许提交。文件不存在时可在归属范围内创建业务实现，不代表可初始化/覆盖别人的目录。
+唯一机器写入来源为[ownership.json](../.collaboration/ownership.json)，导入路径已登记；主要文件相对 backend/app 与 frontend/src。本文不复制完整清单，不因维护模型/任务框架取得其他模块业务权限。
 
-## 开工与交付
+## 剩余任务
 
-1. 身份确认是 D，使用 feature/D/<任务>；检查已有工作，不动别人的改动。
-2. 新接口先在 docs/modules/D/ 写契约，公共改动放 docs/requests/D/ 请求维护人处理。
-3. 只在本包内实现页面、接口、模型/数据与必要测试；同一职责复用公共服务。
-4. 验证本模块真实流程、失败/重试及相关权限，记录实际结果；未联调保持待联调。
-5. 在 docs/updates/D/ 新增记录，精确暂存、检查范围，再提交本人变更。
+1. 先复用 API lifespan 内的单进程 TaskRunner，保持 --workers 1 约束，核对注册、认领、并发、超时、有限重试、停机回写和恢复。现有 parse/screen/match 扫描不等于通用工作流；不新增平行调度框架，不宣称独立 worker 已落地。
+2. 保留来源 Spark 与独立 Embedding 事实，验证 Agnes agnes-3.0-flash 的协议、文本/结构化输出、失败响应和超时；Embedding 端点/凭据/维度独立核对，不默认 Agnes 具备 Embedding/OCR。保留 Milvus 语义检索及明确降级状态。
+3. 登记任务状态兼容映射：解析含 pending/running/success/failed/duplicate_pending/cancelled，批次含 pending/running/done/failed；不批量替换来源枚举，不把解析成功但向量失败藏成全成功。记录输入、模型/Prompt 版本和结果快照，不以 mock 或静态结果冒充真实模型。
+4. 一期白名单指标问数：目录包含 metric_id、来源、公式、时间字段、去重键、允许参数/分组、权限及输出 schema。自然语言只解析受控指标与参数，后端校验后查询真实数据，目录外明确不支持；不执行模型原始 SQL。跨模块自由查询仅列二期候选，尚未批准为二期承诺。
+5. 保存分析快照，提供真实表/图/解读，同快照生成 DOCX/PDF 并授权下载；补中文字体、长表、空数据、截断与解读失败处理。两种格式导出不重新问数。
+6. 实现两条固定预置流程“解析→档案→匹配”“测评完成→能力分析→培训草稿”，记录分步输入输出和失败恢复，重试不重复产物；人工评价、录用与培训分配保留人为确认。可编辑画布放二期。双端工作台使用真实业务和任务汇总，不填演示常量。
 
-初始进度只代表协作规则就绪，不代表上述业务已实现。后续进度更新优先新增本人记录，不反复修改本任务的范围定义。
+## 跨包依赖与交付接口
+
+A/B/C 各自落实只读数据服务、节点、业务提示、授权与指标口径；白名单内涉及模块组合的指标也需所属人确认，不由 D 猜字段或按姓名关联。person_id 先映射现有 talent_profile_id，版本及证据来自 B；D 不建平行主档。
+
+A 接入依赖、公共配置、启动/路由和页面布局；D 提交自有任务组件，由 A 组装，不直接改 A 的共享组件。B 负责知识/档案分段与索引生命周期，D 维护向量框架。契约写 docs/modules/D/，跨包请求写 docs/requests/D/，业务服务由原维护人修改。
+
+## 验收与检查点
+
+真实模型调用成功与失败分别可追溯；任务中断恢复与阶段重试不重复业务结果，健康状态如实反映依赖。白名单指标的允许筛选/分组与人工统计一致，歧义、无数据、超范围、未授权明细明确处理。DOCX/PDF 数值与同一快照一致，中文、长表和图表可读，文件下载重新授权；两条固定流程有真实节点历史，工作台可回查原记录。
+
+3–4 天为首轮检查窗口：先探针验证 Agnes、独立 Embedding/Milvus、单进程 runner 和中文报告，再评估指标/流程剩余工作，不保证全范围四天完成。外部运行探针未执行；历史 588 项测试不能作为本次业务通过，协作检查通过也不等于业务验收。
+
+后续代码变更按本人 clone/分支和机器范围实施，新增 docs/updates/D/ 交接，保持未测/待联调状态准确。本轮完成源码导入与协作基线调整；业务代码原样保留，外部运行探针未执行；不授予业务角色。

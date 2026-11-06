@@ -1,0 +1,602 @@
+[
+  {
+    "filename": "eval-01-张伟-backend-pass.docx",
+    "job_title": "高级后端工程师",
+    "expected_verdict": "passed",
+    "expect_reason_contains": [],
+    "trap": null
+  },
+  {
+    "filename": "eval-01-张伟-backend-pass.docx",
+    "job_title": "资深前端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失javascript",
+      "缺失react"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-01-张伟-backend-pass.docx",
+    "job_title": "Java 开发工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失java"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-02-李娜-backend-pass.docx",
+    "job_title": "高级后端工程师",
+    "expected_verdict": "passed",
+    "expect_reason_contains": [],
+    "trap": null
+  },
+  {
+    "filename": "eval-02-李娜-backend-pass.docx",
+    "job_title": "资深前端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失javascript",
+      "缺失react"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-02-李娜-backend-pass.docx",
+    "job_title": "Java 开发工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失java"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-03-王强-backend-pass.docx",
+    "job_title": "高级后端工程师",
+    "expected_verdict": "passed",
+    "expect_reason_contains": [],
+    "trap": null
+  },
+  {
+    "filename": "eval-03-王强-backend-pass.docx",
+    "job_title": "资深前端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失javascript",
+      "缺失react"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-03-王强-backend-pass.docx",
+    "job_title": "Java 开发工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失java"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-04-赵敏-backend-pass.docx",
+    "job_title": "高级后端工程师",
+    "expected_verdict": "passed",
+    "expect_reason_contains": [],
+    "trap": null
+  },
+  {
+    "filename": "eval-04-赵敏-backend-pass.docx",
+    "job_title": "资深前端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失javascript",
+      "缺失react"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-04-赵敏-backend-pass.docx",
+    "job_title": "Java 开发工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失java"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-05-陈晨-backend-edge-3y.docx",
+    "job_title": "高级后端工程师",
+    "expected_verdict": "passed",
+    "expect_reason_contains": [],
+    "trap": null
+  },
+  {
+    "filename": "eval-05-陈晨-backend-edge-3y.docx",
+    "job_title": "资深前端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失javascript",
+      "缺失react"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-05-陈晨-backend-edge-3y.docx",
+    "job_title": "Java 开发工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失java"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-06-周洁-backend-pass.docx",
+    "job_title": "高级后端工程师",
+    "expected_verdict": "passed",
+    "expect_reason_contains": [],
+    "trap": null
+  },
+  {
+    "filename": "eval-06-周洁-backend-pass.docx",
+    "job_title": "资深前端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失javascript",
+      "缺失react"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-06-周洁-backend-pass.docx",
+    "job_title": "Java 开发工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失java"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-07-吴磊-backend-pass.docx",
+    "job_title": "高级后端工程师",
+    "expected_verdict": "passed",
+    "expect_reason_contains": [],
+    "trap": null
+  },
+  {
+    "filename": "eval-07-吴磊-backend-pass.docx",
+    "job_title": "资深前端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失javascript",
+      "缺失react"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-07-吴磊-backend-pass.docx",
+    "job_title": "Java 开发工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失java"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-08-郑爽-backend-pass.docx",
+    "job_title": "高级后端工程师",
+    "expected_verdict": "passed",
+    "expect_reason_contains": [],
+    "trap": null
+  },
+  {
+    "filename": "eval-08-郑爽-backend-pass.docx",
+    "job_title": "资深前端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失javascript",
+      "缺失react"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-08-郑爽-backend-pass.docx",
+    "job_title": "Java 开发工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失java"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-09-孙悦-backend-no-degree.docx",
+    "job_title": "高级后端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "学历"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-09-孙悦-backend-no-degree.docx",
+    "job_title": "资深前端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失javascript",
+      "缺失react"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-09-孙悦-backend-no-degree.docx",
+    "job_title": "Java 开发工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "学历",
+      "缺失java"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-10-马涛-backend-edge-2y9m.docx",
+    "job_title": "高级后端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "年限"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-10-马涛-backend-edge-2y9m.docx",
+    "job_title": "资深前端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失javascript",
+      "缺失react"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-10-马涛-backend-edge-2y9m.docx",
+    "job_title": "Java 开发工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "年限",
+      "缺失java"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-11-林芳-backend-no-mysql.docx",
+    "job_title": "高级后端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失mysql"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-11-林芳-backend-no-mysql.docx",
+    "job_title": "资深前端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失javascript",
+      "缺失react"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-11-林芳-backend-no-mysql.docx",
+    "job_title": "Java 开发工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失java"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-12-何军-backend-fresh.docx",
+    "job_title": "高级后端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "年限"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-12-何军-backend-fresh.docx",
+    "job_title": "资深前端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失javascript",
+      "缺失react"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-12-何军-backend-fresh.docx",
+    "job_title": "Java 开发工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "年限",
+      "缺失java"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-13-冯旭-trap-javascript.docx",
+    "job_title": "高级后端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失python",
+      "缺失mysql"
+    ],
+    "trap": "javascript/java"
+  },
+  {
+    "filename": "eval-13-冯旭-trap-javascript.docx",
+    "job_title": "资深前端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失react"
+    ],
+    "trap": "javascript/java"
+  },
+  {
+    "filename": "eval-13-冯旭-trap-javascript.docx",
+    "job_title": "Java 开发工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失java"
+    ],
+    "trap": "javascript/java"
+  },
+  {
+    "filename": "eval-14-苏晴-trap-go-google.docx",
+    "job_title": "高级后端工程师",
+    "expected_verdict": "passed",
+    "expect_reason_contains": [],
+    "trap": "go/google"
+  },
+  {
+    "filename": "eval-14-苏晴-trap-go-google.docx",
+    "job_title": "资深前端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失javascript",
+      "缺失react"
+    ],
+    "trap": "go/google"
+  },
+  {
+    "filename": "eval-14-苏晴-trap-go-google.docx",
+    "job_title": "Java 开发工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失java"
+    ],
+    "trap": "go/google"
+  },
+  {
+    "filename": "eval-15-杜鹏-trap-cpp.docx",
+    "job_title": "高级后端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失python",
+      "缺失mysql"
+    ],
+    "trap": "c/cpp"
+  },
+  {
+    "filename": "eval-15-杜鹏-trap-cpp.docx",
+    "job_title": "资深前端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失javascript",
+      "缺失react"
+    ],
+    "trap": "c/cpp"
+  },
+  {
+    "filename": "eval-15-杜鹏-trap-cpp.docx",
+    "job_title": "Java 开发工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失java"
+    ],
+    "trap": "c/cpp"
+  },
+  {
+    "filename": "eval-16-姜蕾-trap-nosql.docx",
+    "job_title": "高级后端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失mysql"
+    ],
+    "trap": "sql/nosql"
+  },
+  {
+    "filename": "eval-16-姜蕾-trap-nosql.docx",
+    "job_title": "资深前端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失javascript",
+      "缺失react"
+    ],
+    "trap": "sql/nosql"
+  },
+  {
+    "filename": "eval-16-姜蕾-trap-nosql.docx",
+    "job_title": "Java 开发工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失java"
+    ],
+    "trap": "sql/nosql"
+  },
+  {
+    "filename": "eval-17-许飞-trap-react-native.docx",
+    "job_title": "高级后端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失python",
+      "缺失mysql"
+    ],
+    "trap": "react/react-native"
+  },
+  {
+    "filename": "eval-17-许飞-trap-react-native.docx",
+    "job_title": "资深前端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失javascript"
+    ],
+    "trap": "react/react-native"
+  },
+  {
+    "filename": "eval-17-许飞-trap-react-native.docx",
+    "job_title": "Java 开发工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失java"
+    ],
+    "trap": "react/react-native"
+  },
+  {
+    "filename": "eval-18-韩雪-frontend-pass.docx",
+    "job_title": "高级后端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失python",
+      "缺失mysql"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-18-韩雪-frontend-pass.docx",
+    "job_title": "资深前端工程师",
+    "expected_verdict": "passed",
+    "expect_reason_contains": [],
+    "trap": null
+  },
+  {
+    "filename": "eval-18-韩雪-frontend-pass.docx",
+    "job_title": "Java 开发工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失java"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-19-曹阳-frontend-pass.docx",
+    "job_title": "高级后端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "学历",
+      "年限",
+      "缺失python",
+      "缺失mysql"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-19-曹阳-frontend-pass.docx",
+    "job_title": "资深前端工程师",
+    "expected_verdict": "passed",
+    "expect_reason_contains": [],
+    "trap": null
+  },
+  {
+    "filename": "eval-19-曹阳-frontend-pass.docx",
+    "job_title": "Java 开发工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "学历",
+      "年限",
+      "缺失java"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-20-潘玉-frontend-junior.docx",
+    "job_title": "高级后端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "年限",
+      "缺失python",
+      "缺失mysql"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-20-潘玉-frontend-junior.docx",
+    "job_title": "资深前端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "年限"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-20-潘玉-frontend-junior.docx",
+    "job_title": "Java 开发工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "年限",
+      "缺失java"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-21-沈从-java-pass.docx",
+    "job_title": "高级后端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失python"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-21-沈从-java-pass.docx",
+    "job_title": "资深前端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失javascript",
+      "缺失react"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-21-沈从-java-pass.docx",
+    "job_title": "Java 开发工程师",
+    "expected_verdict": "passed",
+    "expect_reason_contains": [],
+    "trap": null
+  },
+  {
+    "filename": "eval-22-薛冰-backend-senior.docx",
+    "job_title": "高级后端工程师",
+    "expected_verdict": "passed",
+    "expect_reason_contains": [],
+    "trap": null
+  },
+  {
+    "filename": "eval-22-薛冰-backend-senior.docx",
+    "job_title": "资深前端工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失javascript",
+      "缺失react"
+    ],
+    "trap": null
+  },
+  {
+    "filename": "eval-22-薛冰-backend-senior.docx",
+    "job_title": "Java 开发工程师",
+    "expected_verdict": "rejected",
+    "expect_reason_contains": [
+      "缺失java"
+    ],
+    "trap": null
+  }
+]

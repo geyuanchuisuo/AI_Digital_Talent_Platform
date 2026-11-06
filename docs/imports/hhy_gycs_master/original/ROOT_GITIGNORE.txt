@@ -1,0 +1,41 @@
+# ===== 密钥与本地环境（绝不入库） =====
+.env
+.env.local
+backend/.env
+frontend/.env.local
+*.env
+!backend/.env.example
+!frontend/.env.local.example
+
+# ===== Python / 虚拟环境 / 测试缓存 =====
+.venv/
+backend/.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.pytest_tmp/
+.pytest_tmp_run/
+.coverage
+htmlcov/
+*.log
+
+# ===== 运行数据：本地上传落盘、旧版原件备份、DB 备份不入库 =====
+# 注意：`backend/data/eval/` 刻意保留——22 份评测简历与评测报告属于交付资产
+backend/data/uploads/
+backend/data/eval/resumes_original_20261106/
+backend/backups/
+*.sql.bak
+
+# ===== 前端依赖与构建产物（可重建） =====
+node_modules/
+.next/
+out/
+frontend/.vite-tmp/
+frontend/.vite-tmp/**
+
+# ===== 编辑器 / 工具侧产物 =====
+.vscode/
+.idea/
+.workbuddy/
+Thumbs.db
+.DS_Store
