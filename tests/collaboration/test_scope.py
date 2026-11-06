@@ -93,6 +93,11 @@ class GitIntegrationTests(unittest.TestCase):
     def stage(self):
         self.git('add', '--all')  # Disposable test repo only.
 
+    def personal_branch(self):
+        self.git('switch', '-c', 'member-b')
+        self.git('config', '--local', 'collab.actor', 'B')
+        self.git('config', '--local', 'collab.branch', 'member-b')
+
     def test_own_change_and_new_update_pass(self):
         self.put('backend/app/modules/talents/中文 文件.py')
         self.new_update()
@@ -137,21 +142,23 @@ class GitIntegrationTests(unittest.TestCase):
 
     def test_master_blocked_for_every_role(self):
         self.git('switch', '-c', 'master')
+        self.git('config', '--local', 'collab.branch', 'master')
         for actor in 'ABCD':
+            self.git('config', '--local', 'collab.actor', actor)
             result = self.run_checker('--actor', actor, '--staged')
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('Development on master is forbidden', result.stderr)
 
-    def test_master_yb_own_change_and_update_pass(self):
-        self.git('switch', '-c', 'master_YB')
+    def test_registered_personal_branch_own_change_and_update_pass(self):
+        self.personal_branch()
         self.put('backend/app/modules/talents/service.py')
         self.new_update()
         self.stage()
         result = self.run_checker('--staged')
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_master_yb_cross_scope_blocked(self):
-        self.git('switch', '-c', 'master_YB')
+    def test_registered_personal_branch_cross_scope_blocked(self):
+        self.personal_branch()
         self.put('backend/app/modules/training/other.py')
         self.new_update()
         self.stage()
@@ -159,13 +166,38 @@ class GitIntegrationTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('owner=C, actor=B', result.stderr)
 
-    def test_master_yb_missing_update_blocked(self):
-        self.git('switch', '-c', 'master_YB')
+    def test_registered_personal_branch_missing_update_blocked(self):
+        self.personal_branch()
         self.put('backend/app/modules/talents/service.py')
         self.stage()
         result = self.run_checker('--staged')
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('Code changes require a NEW', result.stderr)
+
+    def test_master_yb_is_not_globally_allowed(self):
+        self.git('switch', '-c', 'master_YB')
+        self.assertNotEqual(self.run_checker('--staged').returncode, 0)
+
+    def test_personal_branch_does_not_accept_another_actor(self):
+        self.personal_branch()
+        self.assertNotEqual(self.run_checker('--actor', 'C', '--staged').returncode, 0)
+
+    def test_setup_registers_personal_branch_locally(self):
+        self.git('switch', '-c', 'member-b')
+        setup = subprocess.run([sys.executable, str(self.repo / 'scripts/setup_collaboration.py'),
+                                '--actor', 'B', '--branch', 'member-b'], cwd=self.repo, capture_output=True)
+        self.assertEqual(setup.returncode, 0, setup.stderr)
+        self.assertEqual(self.git('config', '--local', '--get', 'collab.branch').stdout.strip(), b'member-b')
+        self.assertEqual(self.run_checker('--staged').returncode, 0)
+
+    def test_setup_rejects_master_without_config_changes(self):
+        self.git('branch', 'master')
+        setup = subprocess.run([sys.executable, str(self.repo / 'scripts/setup_collaboration.py'),
+                                '--actor', 'B', '--branch', 'master'], cwd=self.repo, capture_output=True)
+        self.assertNotEqual(setup.returncode, 0)
+        for key in ['collab.actor', 'collab.branch', 'core.hooksPath']:
+            result = subprocess.run(['git', '-C', str(self.repo), 'config', '--local', '--get', key], capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
 
     def test_committed_branch_range_checked(self):
         self.put('backend/app/modules/talents/service.py')

@@ -102,9 +102,11 @@ def main():
         branch = git(root, 'branch', '--show-current').decode().strip()
         if branch == 'master':
             raise ScopeError('Development on master is forbidden for everyone; switch to your development branch.')
-        if branch != 'master_YB' and not any(branch.startswith(f'{kind}/{actor}/') and len(branch.split('/')) >= 3
+        personal_branch = subprocess.run(['git', '-C', str(root), 'config', '--local', '--get', 'collab.branch'], capture_output=True).stdout.decode().strip()
+        local_actor = subprocess.run(['git', '-C', str(root), 'config', '--local', '--get', 'collab.actor'], capture_output=True).stdout.decode().strip()
+        if not (branch and branch == personal_branch and actor == local_actor) and not any(branch.startswith(f'{kind}/{actor}/') and len(branch.split('/')) >= 3
                    and branch.split('/')[-1] for kind in ('feature', 'fix', 'docs', 'integration')):
-            raise ScopeError(f'Use master_YB or feature/{actor}/<task> (or fix/docs/integration), got {branch!r}')
+            raise ScopeError(f'Use your locally registered personal branch or feature/{actor}/<task> (or fix/docs/integration), got {branch!r}')
         if args.base:
             git(root, 'rev-parse', '--verify', f'{args.base}^{{commit}}')
             paths = parse_diff(git(root, 'diff', '--no-ext-diff', '--no-renames', '--name-status', '-z', f'{args.base}...HEAD'))
