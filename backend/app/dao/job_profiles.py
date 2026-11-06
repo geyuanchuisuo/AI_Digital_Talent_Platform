@@ -11,6 +11,11 @@ from sqlalchemy.orm import Session
 from app.models import JobProfile, MatchBatch, ScreenBatch
 
 
+
+
+
+
+
 def get(db: Session, job_id: int) -> JobProfile | None:
     return db.get(JobProfile, job_id)
 
