@@ -1,6 +1,6 @@
 # 开发计划 · Todolist · 板块 A
 
-> 版本：v0.1.3　|　日期：2026-11-06 21:35　|　身份：A　|　分支：`feature/A/continuation`　|　基线：`df6dae1`
+> 版本：v0.1.4　|　日期：2026-11-06 22:28　|　身份：A　|　分支：`feature/A/continuation`　|　基线：`60f7967`（22:28 二次同步，A 的 3 个提交已 rebase）
 > 上游：`docs/需求文档.md` **V2.2**、`docs/源码接入与需求决策.md`、`docs/四人分工与试行方案.md` §2、`docs/技术框架.md`、`tasks/A.md`、`docs/modules/A/设计方案.md` v0.1.1、`.collaboration/ownership.json`。
 > 用法：**按 M1 → M6 顺序**；每项满足「验收点」才勾选，勾选必须写实际命令/结果/证据落点；编号 `T-Axx` 供沟通引用。进度同步 `docs/modules/A/开发日志.md` Layer 3/4 与 `docs/updates/A/` 交接记录。
 > ⚠️ 本表是台账，**不是完成声明**；`[x]` 只表示「有实证且已登记」。3–4 天是首轮检查窗口，M1 实跑后按证据重排。
@@ -11,7 +11,7 @@
 
 | 批次 | 内容 | 任务数 | 前置依赖 | 状态 |
 |---|---|---|---|---|
-| M0 | 分支同步与接力底座 | 5 | 无 | ✅ 完成（已提交 `cd76b80` + `c139566`，纯文档） |
+| M0 | 分支同步与接力底座 | 6 | 无 | ✅ 完成（已提交 `6f49dc3` + `834ebfc` + `3636165`，纯文档） |
 | M1 | 第 1 天环境与能力探针 | 5 | M0 | ⬜ **下一步，最高优先级** |
 | M2 | 身份、person_id 绑定、双端授权 | 5 | M1、B 映射契约 | ⬜ 部分阻塞 |
 | M3 | 人才需求、AI JD、招聘状态与邀约 | 4 | M1、Agnes 可用 | ⬜ 阻塞 |
@@ -23,11 +23,12 @@
 
 ## M0 · 分支同步与接力底座 ✅
 
-- [x] **T-A00a 同步远端 master** ✅ 2026-11-06 完成（`git fetch` 全分支 + 本地 `master` 快进 `07677bc → df6dae1`，未切到 master、未产生提交；见[开发日志](开发日志.md) Layer 3 §A-00）
+- [x] **T-A00a 同步远端 master** ✅ 2026-11-06 完成（`git fetch` 全分支 + 本地 `master` 快进 `07677bc → df6dae1`；22:28 二次同步 `df6dae1 → 60f7967`，见 T-A00f；未切到 master、未产生提交；见[开发日志](开发日志.md) Layer 3 §A-00 / §A-02）
 - [x] **T-A00b 建立并登记 A 工作分支** ✅ 完成（`feature/A/continuation` @ `df6dae1`；`setup_collaboration.py --actor A --branch ...` 写入 `collab.actor` / `collab.branch` / `core.hooksPath=.githooks`；`check_scope.py --staged` 与 `--base master` 均 `Scope OK, changed_paths=0`）
 - [x] **T-A00c 建立分层日志 + 勾选式 todolist + 设计方案** ✅ 完成（沿用旧 `main/` 体例：Layer 0–6 日志、本 todolist、[设计方案 v0.1](设计方案.md)；落在 `docs/modules/A/**` 授权目录，根级同名文件未创建）
 - [x] **T-A00d 首条交接记录 + 跨包请求 + 集成索引** ✅ 完成（`docs/updates/A/20261106-210900-...md`、`docs/requests/A/` 3 份、根 `更新记录.md` 追加一条）
 - [x] **T-A00e 全仓只读静态架构核查** ✅ 2026-11-06 21:26 完成（360 文件 / 60,758 行；132 py AST 0 错、内部导入 0 断裂、归属表覆盖偏差 31/278；勘误评分链路措辞；结论见[开发日志](开发日志.md) Layer 3 §A-01、H-A11/H-A12）。**仅静态，运行态未验证，不能替代 M1**
+- [x] **T-A00f 二次同步远端 master 与基线变基** ✅ 2026-11-06 22:28 完成（`git fetch --all --prune` → `git branch -f master origin/master` → `git rebase origin/master`；基线 `df6dae1 → 60f7967`，3 个本地提交重放零冲突，新号 `6f49dc3/834ebfc/3636165`；`--base master` 8 / `--staged` 0 / behind 0 ahead 3；见[开发日志](开发日志.md) Layer 3 §A-02、[交接记录](../../updates/A/20261106-222800-同步远端master与基线变基.md)）。**未 push、未合并 master**
 
 ## M1 · 第 1 天环境与能力探针（未开始 → **接力 Agent 从这里开工**）
 
@@ -92,6 +93,7 @@
 | [B 档案版本与证据契约](../../requests/A/20261106-B-档案版本与证据契约.md) | B | 待响应 | person_id 映射、不可变输入快照、证据读取接口 |
 | [D 模型任务与评分版本契约](../../requests/A/20261106-D-模型任务与评分版本契约.md) | D | 待响应 | Agnes 验证结论、模型/Prompt 版本标识、任务状态约定 |
 | [C 人工面试引用契约](../../requests/A/20261106-C-人工面试引用契约.md) | C | 待响应 | 招聘记录所需的引用 ID / 状态 / 可见范围 |
+| [D→A 工作流/RBAC/站内通知契约](../../requests/D/REQ-A-20261106-workflow-rbac-notification-contract.md) | D → **A**（本方待响应） | 待响应 | A 定义完整 Agent 工作流、服务端组织范围授权接口、通知事件/幂等/权限契约；**「先只做这些站内事件」精确清单需用户确认**，确认前不删既有事件、不自行扩大集合 |
 
 > 维护人在自己的 `docs/updates/<角色>/` 新增响应并链接回请求；请求方不得替对方改代码，也不得把「待响应」写成「已实现」。
 
@@ -101,3 +103,4 @@
 - v0.1.1（2026-11-06 21:26）：M0 补 T-A00e 静态架构核查（已完成、仅静态）；T-A44 标注 migrations 目录待建；R-A05 补环境缺口与端口错觉。M1 仍是唯一下一步。
 - v0.1.2（2026-11-06 21:34）：M0 全部内容已随 `cd76b80` 本地提交（**未 push、未合并 master**）；M0 任务数 4→5；提交后 `--base master` = `changed_paths=8`。M1 仍是唯一下一步。
 - v0.1.3（2026-11-06 21:35）：补记状态订正提交 `c139566`；实时 HEAD 以 `git log -1` 为准。M1 仍是唯一下一步。
+- v0.1.4（2026-11-06 22:28）：二次同步远端 master `60f7967` + rebase，M0 任务数 5→6、补 T-A00f、登记 D→A 新契约请求；**下一步改为用户要求的「交付环境封装」，随后才是 M1 探针**。
