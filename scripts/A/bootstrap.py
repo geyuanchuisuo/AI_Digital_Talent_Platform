@@ -329,20 +329,25 @@ def self_check(py: Path, backend_env: dict[str, str]) -> None:
 def start_services(py: Path, cfg: dict[str, str]) -> None:
     backend_port = int(cfg.get("APP_PORT") or "8000")
     frontend_port = int(cfg.get("FRONTEND_PORT") or "3000")
+    # 直接用 node 执行 next CLI：npm exec 会把 "-p" 当成 npm 自己的选项吞掉，
+    # Next 会把端口号当项目目录并报 "Invalid project directory"（T-A71 实测）。
+    next_bin = FRONTEND / "node_modules" / "next" / "dist" / "bin" / "next"
+    node = shutil.which("node")
+    direct_next = next_bin.exists() and node is not None
     procs = []
     try:
         log("启动后端 uvicorn（--workers 1 为硬约束）...")
+        # shell=False：Windows 下 shell=True 只会杀掉 cmd.exe，uvicorn 会变成孤儿进程
         procs.append(subprocess.Popen(
             [str(py), "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", str(backend_port), "--workers", "1"],
-            cwd=str(BACKEND), shell=(os.name == "nt")))
+            cwd=str(BACKEND)))
         log("启动前端 Next.js dev ...")
-        npm_cmd = "npm.cmd" if os.name == "nt" else "npm"
-        # package.json 的 dev 已带 -p 3000；只有自定义端口时才直接调 next，避免 -p 重复
-        if frontend_port == 3000:
-            fe_cmd = [npm_cmd, "run", "dev"]
+        if direct_next:
+            fe_cmd = [node, str(next_bin), "dev", "-p", str(frontend_port)]
         else:
-            fe_cmd = [npm_cmd, "exec", "next", "dev", "-p", str(frontend_port)]
-        procs.append(subprocess.Popen(fe_cmd, cwd=str(FRONTEND), shell=(os.name == "nt")))
+            npm_cmd = "npm.cmd" if os.name == "nt" else "npm"
+            fe_cmd = [npm_cmd, "exec", "--", "next", "dev", "-p", str(frontend_port)]
+        procs.append(subprocess.Popen(fe_cmd, cwd=str(FRONTEND), shell=(os.name == "nt" and not direct_next)))
         log(f"前端 http://localhost:{frontend_port}　后端 http://localhost:{backend_port}/api/health")
         log("按 Ctrl+C 停止服务")
         while True:
