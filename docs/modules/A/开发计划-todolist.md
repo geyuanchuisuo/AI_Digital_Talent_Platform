@@ -1,6 +1,6 @@
 # 开发计划 · Todolist · 板块 A
 
-> 版本：v0.1.7　|　日期：2026-11-06 23:45　|　身份：A　|　分支：`feature/A/continuation`　|　基线：`60f7967`（22:28 二次同步，A 的 3 个提交已 rebase）
+> 版本：v0.1.8　|　日期：2026-11-07 00:05　|　身份：A　|　分支：`feature/A/continuation`（upstream `origin/feature/A/continuation`）　|　发布后 `master` = `origin/master` = `HEAD` = `8ab2f30`（已含他人并发提交 `0a24747`，A 的 9 个提交已 rebase 并合入）
 > 上游：`docs/需求文档.md` **V2.2**、`docs/源码接入与需求决策.md`、`docs/四人分工与试行方案.md` §2、`docs/技术框架.md`、`tasks/A.md`、`docs/modules/A/设计方案.md` v0.1.1、`.collaboration/ownership.json`。
 > 用法：**按 M1 → M6 顺序**；每项满足「验收点」才勾选，勾选必须写实际命令/结果/证据落点；编号 `T-Axx` 供沟通引用。进度同步 `docs/modules/A/开发日志.md` Layer 3/4 与 `docs/updates/A/` 交接记录。
 > ⚠️ 本表是台账，**不是完成声明**；`[x]` 只表示「有实证且已登记」。3–4 天是首轮检查窗口，M1 实跑后按证据重排。
@@ -34,7 +34,7 @@
 
 - [x] **T-A70 一键自动创建运行环境** ✅ 2026-11-06 22:45 实现（`scripts/A/bootstrap.py` + `.cmd`/`.sh`、根 `.env.example`、`backend/.env.example` 真实默认值、`deploy/milvus/docker-compose.yml` +mysql、README 一键章节、[设计说明](交付环境封装.md)）。验证：`py_compile` / `--help`、临时目录配置生成 **11/11**、`docker compose config --quiet`（4 服务 + mysql 卷）、`check_scope --staged`。**端到端证据已由 T-A71 补齐**（见下条）；演练在隔离副本/独立端口完成，未触碰现有 3306/ai_talent。详见 [开发日志](开发日志.md) Layer 3 §A-03 / §A-04、[交接记录](../../updates/A/20261106-224500-交付环境封装.md)。
 - [x] **T-A71 隔离环境端到端演练** ✅ 2026-11-06 23:35 完成并通过：干净 clone 副本 `D:/HHHYYY/_aitalent_e2e_20261106` + 独立 MySQL 3307/`ai_talent_e2e`、Milvus 19531/`talent_vectors_e2e`、容器前缀 `aitalent_e2e`、后端 8100/前端 3100。真实跑通配置生成→4 容器→venv(Python 3.13.14)→`npm ci`(327 包)→13 表 + seed→`check_env` 全绿→`--start` 前后端就绪；`/api/health` 200(db/milvus/worker 全 true)、`/login`/`/screen`/`/talents` 200 无 `__next_error__`、登录 200 返回 JWT、4 个受保护接口 200、CORS 200；模拟 Ctrl+C 后 8100/3100 均释放；演练后 `3306/ai_talent` 13 表/users=1/job_profiles=1 **与演练前一致**。过程中发现并修复 2 个真缺陷（`npm exec -p` 被吞、Windows 孤儿进程）。**未验证**：`.cmd`/`.sh` 包装入口单独实跑、业务 pytest/vitest/浏览器点击流/真实模型调用。证据：[2335 交接记录](../../updates/A/20261106-2335-T-A71端到端演练通过.md)、[开发日志](开发日志.md) Layer 3 §A-04、[交付环境封装](交付环境封装.md) §4。
-- [ ] **T-A72 按授权发布** ⛔ **阻塞（2026-11-06 23:45）**：测试已通过，但 `git fetch` 返回远端 `403`，且运行环境对 `47.106.207.27` 的网络访问授权被拒；push / 合入 master **未执行**，8 个本地提交仍待推。按规则未重试、未尝试等效替代。需用户放行网络访问或修复 Gitea 凭据/代理后再执行，恢复步骤见 [2345 记录](../../updates/A/20261106-2345-推送受阻待授权.md)。
+- [x] **T-A72 按授权发布** ✅ 2026-11-07 00:05 完成（先同步再推）：网络授权放行后 `git fetch --all --prune`；`git push -u origin feature/A/continuation` 建远端分支；首次 `push master` 因他人并发提交 `0a24747` 被 `fetch first` 正确拒绝 → 重新 `fetch` + `git rebase origin/master`（9/9 零冲突、`README.md` 双方内容共存）→ `--base master` `Scope OK, changed_paths=23` → `push --force-with-lease` 更新个人分支 → 末次 `fetch` + 祖先检查 → `push origin master:master`（`0a24747..8ab2f30`）。复检：四个 ref 同为 `8ab2f30`、工作区干净、远端 master 树 7/7 交付文件齐备、README「一键交付」章节 1 处。**未验证**：发布版未重跑 T-A71 演练（rebase 只改提交号、树内容未变）、`.cmd`/`.sh` 单独实跑与业务 pytest/vitest/浏览器/真实模型调用。证据：[0005 交接记录](../../updates/A/20261107-0005-T-A72发布完成.md)、[开发日志](开发日志.md) Layer 3 §A-05；受阻历史见 [2345 记录](../../updates/A/20261106-2345-推送受阻待授权.md)（不回改）。
 ## M1 · 第 1 天环境与能力探针（未开始 → **接力 Agent 从这里开工**）
 
 - [ ] **T-A01 依赖、建库与启动探针** — 建 venv、`pip install -r backend/requirements.txt`、`init_db.py`、`check_env.py --skip-llm`、`uvicorn app.main:app --workers 1`、`curl /api/health`。验收点：7 项自检无 FAIL、`status=ok`、worker alive。`--workers 1` 是硬约束。证据：新增 `docs/updates/A/<时间戳>-M1首轮探针.md`
@@ -112,3 +112,4 @@
 - v0.1.5（2026-11-06 22:45）：新增独立批次 **M7**（T-A70 已实现、T-A71 隔离环境端到端演练待做）；交付封装未端到端验证，接力 Agent 第一优先级是 T-A71 补证据，其次才是 M1。
 - v0.1.6（2026-11-06 23:35）：**T-A71 已通过**（隔离副本真实实跑，含 2 个缺陷修复）；新增 T-A72 按授权发布。此后第一优先级是 T-A72，其次才是 M1 探针。
 - v0.1.7（2026-11-06 23:45）：T-A72 因远端 403 / 网络权限被拒而**阻塞**，未 push、未合并 master；第一优先级改为「等待用户放行网络或修复凭据」，恢复步骤已登记。
+- v0.1.8（2026-11-07 00:05）：**T-A72 已完成**——同步远端 → rebase 到他人并发提交 `0a24747` → push 个人分支 → 快进合入并 push `master`（`8ab2f30`）；远端 master 现含一键交付封装，客户默认 clone 即拿到。发布侧阻塞解除；**第一优先级回到 M1 探针**（T-A01 起），D→A 工作流/RBAC/通知契约仍待响应且站内事件清单待用户确认。
