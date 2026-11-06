@@ -35,6 +35,7 @@ class InterviewRound(PKMixin, CTimestampMixin, Base):
         String(20), nullable=False, default="pending", server_default=str_default("pending")
     )
     internal_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    client_request_id: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
     updated_by: Mapped[int | None] = mapped_column(Integer, nullable=True)

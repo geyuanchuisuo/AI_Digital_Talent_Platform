@@ -28,6 +28,7 @@ class RoundCreateRequest(_StrictModel):
     location_or_link: str | None = Field(default=None, max_length=500)
     interviewer_user_ids: list[int] = Field(min_length=1, max_length=20)
     internal_note: str | None = None
+    client_request_id: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class RoundUpdateRequest(_StrictModel):

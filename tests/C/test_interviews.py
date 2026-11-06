@@ -132,6 +132,37 @@ class InterviewFlowTest(unittest.TestCase):
         self.assertEqual(cancelled.status_code, 200)
         self.assertEqual(cancelled.json()["data"]["status"], "cancelled")
 
+    def test_create_round_idempotency(self):
+        body = {
+            "candidate_user_id": self.candidate.id,
+            "job_id": 7,
+            "round_no": 1,
+            "round_name": "技术一面",
+            "interviewer_user_ids": [self.interviewer.id],
+        }
+        no_key_1 = self.client.post(
+            "/api/interviews/rounds", json=body, headers=self.harness.headers(self.admin)
+        ).json()["data"]["id"]
+        no_key_2 = self.client.post(
+            "/api/interviews/rounds", json=body, headers=self.harness.headers(self.admin)
+        ).json()["data"]["id"]
+        self.assertNotEqual(no_key_1, no_key_2)
+
+        keyed = {**body, "client_request_id": "A-appointment-001"}
+        first = self.client.post(
+            "/api/interviews/rounds", json=keyed, headers=self.harness.headers(self.admin)
+        ).json()["data"]
+        second = self.client.post(
+            "/api/interviews/rounds", json=keyed, headers=self.harness.headers(self.admin)
+        ).json()["data"]
+        self.assertEqual(first["id"], second["id"])
+        self.assertEqual(second["client_request_id"], "A-appointment-001")
+
+        rounds = self.client.get(
+            "/api/interviews/rounds", headers=self.harness.headers(self.admin)
+        ).json()["data"]
+        self.assertEqual(rounds["total"], 3)
+
     def test_round_requires_candidate_or_profile(self):
         response = self.client.post(
             "/api/interviews/rounds",

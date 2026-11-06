@@ -62,6 +62,12 @@ def create_round(db: Session, payload: RoundCreateRequest, *, admin: User) -> In
     require_admin(admin)
     if payload.candidate_user_id is None and payload.talent_profile_id is None:
         raise BizError(400, "新增面试轮次至少需要关联候选人账号或人才主档")
+    if payload.client_request_id:
+        existing = db.scalar(
+            select(InterviewRound).where(InterviewRound.client_request_id == payload.client_request_id)
+        )
+        if existing is not None:
+            return existing
     row = InterviewRound(
         candidate_user_id=payload.candidate_user_id,
         talent_profile_id=payload.talent_profile_id,
@@ -75,6 +81,7 @@ def create_round(db: Session, payload: RoundCreateRequest, *, admin: User) -> In
         interviewer_user_ids_json=sorted({int(item) for item in payload.interviewer_user_ids}),
         status="pending",
         internal_note=payload.internal_note,
+        client_request_id=payload.client_request_id,
         version=1,
         created_by=admin.id,
         updated_by=admin.id,

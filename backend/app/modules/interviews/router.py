@@ -32,6 +32,7 @@ def _round_out(row: InterviewRound, user) -> dict[str, Any]:
         "location_or_link": row.location_or_link,
         "interviewer_user_ids": list(row.interviewer_user_ids_json or []),
         "status": row.status,
+        "client_request_id": row.client_request_id,
         "version": row.version,
         "created_at": row.created_at,
     }

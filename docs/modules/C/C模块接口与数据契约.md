@@ -30,7 +30,7 @@
 - 分配：plan/paper 版本、答题人 user_id、talent_profile_id（B 契约映射，可空）、状态、公开版本、答案开放标记、幂等键、复测序号。
 - 答案：题目快照、选择/文本、是否正确、得分（0–100）、评分状态（pending/graded/failed/manual）、失败原因。
 - 结果：版本化，保存维度百分制分、总分（DECIMAL(6,2) 展示，比较使用未舍入值）、是否通过；`assessment_reviews` 保存人工修分审计。
-- 面试轮次：候选人/岗位、轮次名、时间、方式、地点或链接、面试人列表、状态（pending/completed/cancelled）、内部备注、版本；变更写 `interview_round_events`。
+- 面试轮次：候选人/岗位、轮次名、时间、方式、地点或链接、面试人列表、状态（pending/completed/cancelled）、内部备注、客户端幂等键 `client_request_id`（唯一、可空）、版本；变更写 `interview_round_events`。
 - 面试反馈：每轮一条，评价/事实依据/优势/不足/推进建议（advance/hold/reject），作者与版本；**无面试总分字段**。
 - 课程：标题、介绍、真实材料链接、适用维度、有效状态、版本、统一改进说明（`feedback_note`，不随版本回写历史计划）。
 - 期次：课程、讲师、开始/结束时间；反馈窗口从该期次结束时间起 7 天。
@@ -67,9 +67,9 @@
 
 面试 `/api/interviews`：
 
-- `POST /rounds`、`GET /rounds`、`GET /rounds/{id}`、`PATCH /rounds/{id}`、`POST /rounds/{id}/cancel`（管理员）
+- `POST /rounds`、`GET /rounds`、`GET /rounds/{id}`、`PATCH /rounds/{id}`、`POST /rounds/{id}/cancel`（管理员；`POST` 可带 `client_request_id`，同键重复提交返回首次创建的轮次）
 - `GET /my/rounds`（候选人看本人安排，面试人看被授权轮次）
-- `PUT /rounds/{id}/feedback`、`GET /rounds/{id}/feedback`（管理员/获授权面试人；轮次须 completed）
+- `PUT /rounds/{id}/feedback`、`GET /rounds/{id}/feedback`（管理员/获授权面试人；轮次须 completed；`round_id` 唯一，重复保存为更新）
 - 无面试总分、无自动招聘推进；`status` 与招聘状态独立。
 
 培训 `/api/training`：
