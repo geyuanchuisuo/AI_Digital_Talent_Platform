@@ -126,7 +126,12 @@ def ensure_root_env() -> dict[str, str]:
         log("已从 .env.example 生成根 .env（客户只需填模型 Key）")
     cfg = parse_env(ROOT_ENV)
     # 环境变量优先级最高，方便 CI / 容器注入
-    for key in list(cfg) + ["LLM_API_KEY", "EMBEDDING_API_KEY", "MYSQL_PASSWORD", "MYSQL_HOST", "MYSQL_PORT", "MYSQL_DB", "MILVUS_URI"]:
+    for key in list(cfg) + [
+        "LLM_API_KEY", "EMBEDDING_API_KEY", "MYSQL_PASSWORD", "MYSQL_HOST",
+        "MYSQL_PORT", "MYSQL_DB", "MILVUS_URI", "MILVUS_PORT",
+        "MILVUS_METRICS_PORT", "MILVUS_COLLECTION", "COMPOSE_PROJECT_NAME",
+        "APP_PORT", "FRONTEND_PORT",
+    ]:
         if os.environ.get(key):
             cfg[key] = os.environ[key]
     return cfg
@@ -147,15 +152,30 @@ def customer_overrides(cfg: dict[str, str]) -> dict[str, str]:
     return {k: v for k, v in cfg.items() if v != "" and not is_placeholder(v)}
 
 
+def derived_runtime(cfg: dict[str, str]) -> dict[str, str]:
+    """由端口配置派生连接串，避免客户改了端口却仍连默认端口。
+
+    典型场景：客户机 3306/19530 被别的项目占用，需在根 .env 指定
+    MYSQL_PORT / MILVUS_PORT，让 bootstrap 起隔离端口的容器并连到它们。
+    """
+    out: dict[str, str] = {}
+    milvus_port = cfg.get("MILVUS_PORT", "")
+    explicit_uri = cfg.get("MILVUS_URI", "")
+    if milvus_port and (not explicit_uri or is_placeholder(explicit_uri)):
+        out["MILVUS_URI"] = f"http://localhost:{milvus_port}"
+    return out
+
+
 def ensure_backend_env(cfg: dict[str, str]) -> dict[str, str]:
     """从 backend/.env.example 取默认值 + 根 .env 覆盖 + 自动生成项，写出 backend/.env。
 
     重跑时只同步客户显式改过的键，保留已生成的 JWT_SECRET / MYSQL_PASSWORD 等自动项，
     这样「填完 Key 再重跑一次即可生效」成立，又不会覆盖客户配置。
     """
+    overrides = customer_overrides(cfg)
+    overrides.update(derived_runtime(cfg))
     if BACKEND_ENV.exists():
         existing = parse_env(BACKEND_ENV)
-        overrides = customer_overrides(cfg)
         changed = {k: v for k, v in overrides.items() if existing.get(k) != v}
         if changed:
             existing.update(changed)
@@ -165,7 +185,7 @@ def ensure_backend_env(cfg: dict[str, str]) -> dict[str, str]:
             log("backend/.env 已存在，保留客户现有配置（不覆盖）")
         return existing
     values = parse_env(BACKEND_ENV_EXAMPLE)
-    values.update(customer_overrides(cfg))
+    values.update(overrides)
     values.setdefault("MYSQL_PASSWORD", DEFAULT_MYSQL_PASSWORD)
     if is_placeholder(values.get("MYSQL_PASSWORD")):
         values["MYSQL_PASSWORD"] = DEFAULT_MYSQL_PASSWORD
@@ -213,8 +233,17 @@ def venv_python() -> Path:
 
 
 def ensure_infra(backend_env: dict[str, str], no_docker: bool) -> None:
-    mysql_port = int(backend_env.get("MYSQL_PORT", "3306"))
-    milvus_port = 19530
+    mysql_port = int(backend_env.get("MYSQL_PORT") or "3306")
+    # 端口优先取显式 MILVUS_PORT，否则从 MILVUS_URI 解析，最后才用 19530
+    raw_milvus_port = backend_env.get("MILVUS_PORT") or ""
+    if raw_milvus_port:
+        milvus_port = int(raw_milvus_port)
+    else:
+        uri = backend_env.get("MILVUS_URI", "")
+        try:
+            milvus_port = int(uri.rsplit(":", 1)[1].split("/")[0])
+        except (ValueError, IndexError):
+            milvus_port = 19530
     need_mysql = not port_open(mysql_port)
     need_milvus = not port_open(milvus_port)
     if not need_mysql and not need_milvus:
@@ -231,7 +260,16 @@ def ensure_infra(backend_env: dict[str, str], no_docker: bool) -> None:
     if need_milvus:
         services += ["etcd", "minio", "standalone"]
     env = {"MYSQL_ROOT_PASSWORD": backend_env.get("MYSQL_PASSWORD", DEFAULT_MYSQL_PASSWORD),
-           "MYSQL_DB": backend_env.get("MYSQL_DB", "ai_talent")}
+           "MYSQL_DB": backend_env.get("MYSQL_DB", "ai_talent"),
+           "MYSQL_PORT": str(mysql_port),
+           "MILVUS_PORT": str(milvus_port),
+           # 默认 metrics 端口随 Milvus 端口联动（19530→9091），避免隔离演练时撞上已有容器
+           "MILVUS_METRICS_PORT": backend_env.get("MILVUS_METRICS_PORT", str(milvus_port - 10439))}
+    # 仅当客户显式指定项目名时才注入，默认保持 compose 原有项目名与卷名不变
+    project = backend_env.get("COMPOSE_PROJECT_NAME")
+    if project:
+        env["COMPOSE_PROJECT_NAME"] = project
+        env["CONTAINER_PREFIX"] = project
     run(["docker", "compose", "-f", str(COMPOSE), "up", "-d", *services], cwd=ROOT, env=env)
     log(f"已启动容器服务：{', '.join(services)}（数据卷持久化，重跑不会丢数据）")
     if need_mysql and not wait_port(mysql_port, 180, "MySQL"):
