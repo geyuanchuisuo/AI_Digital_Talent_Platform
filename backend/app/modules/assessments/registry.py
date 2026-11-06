@@ -29,12 +29,16 @@ from app.modules.assessments.router import router as assessments_router
 from app.modules.interviews.models import InterviewFeedback, InterviewRound, InterviewRoundEvent
 from app.modules.interviews.router import router as interviews_router
 from app.modules.training.models import (
+    TrainingAttendance,
     TrainingCourse,
+    TrainingFeedback,
+    TrainingFeedbackTheme,
     TrainingGrowthEvent,
     TrainingLearningRecord,
     TrainingPlan,
     TrainingPlanItem,
     TrainingPlanVersion,
+    TrainingSession,
 )
 from app.modules.training.router import router as training_router
 
@@ -51,6 +55,10 @@ ALL_MODELS: tuple[type, ...] = (
     InterviewFeedback,
     InterviewRoundEvent,
     TrainingCourse,
+    TrainingSession,
+    TrainingAttendance,
+    TrainingFeedback,
+    TrainingFeedbackTheme,
     TrainingPlan,
     TrainingPlanItem,
     TrainingPlanVersion,

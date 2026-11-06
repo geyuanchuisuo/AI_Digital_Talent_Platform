@@ -12,20 +12,26 @@ from app.core.response import ok, paginated
 from app.database import get_db
 from app.modules.training import service
 from app.modules.training.models import (
+    TrainingAttendance,
     TrainingCourse,
     TrainingGrowthEvent,
     TrainingLearningRecord,
     TrainingPlan,
     TrainingPlanItem,
     TrainingPlanVersion,
+    TrainingSession,
 )
 from app.modules.training.schemas import (
+    AttendanceMarkRequest,
     CourseCreateRequest,
     CourseUpdateRequest,
     DraftRequest,
+    FeedbackNoteRequest,
+    FeedbackSubmitRequest,
     PlanCreateRequest,
     PlanUpdateRequest,
     ProgressUpdateRequest,
+    SessionCreateRequest,
 )
 
 router = APIRouter(prefix="/api/training", tags=["training"])
@@ -40,12 +46,18 @@ def _course_out(row: TrainingCourse) -> dict[str, Any]:
         "dimension_names": list(row.dimension_names_json or []),
         "status": row.status,
         "version": row.version,
+        "feedback_note": row.feedback_note,
+        "feedback_note_at": row.feedback_note_at,
         "created_at": row.created_at,
         "updated_at": row.updated_at,
     }
 
 
-def _item_out(item: TrainingPlanItem, record: TrainingLearningRecord | None = None) -> dict[str, Any]:
+def _item_out(
+    item: TrainingPlanItem,
+    record: TrainingLearningRecord | None = None,
+    feedback: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     data = {
         "id": item.id,
         "plan_id": item.plan_id,
@@ -61,6 +73,7 @@ def _item_out(item: TrainingPlanItem, record: TrainingLearningRecord | None = No
             "reported_at": record.reported_at if record else None,
             "is_self_reported": bool(record.is_self_reported) if record else True,
         },
+        "feedback": feedback,
     }
     return data
 
@@ -70,6 +83,7 @@ def _plan_out(
     items: list[TrainingPlanItem] | None = None,
     *,
     records: dict[int, TrainingLearningRecord] | None = None,
+    feedback_by_course: dict[int, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     data: dict[str, Any] = {
         "id": plan.id,
@@ -86,7 +100,11 @@ def _plan_out(
     }
     if items is not None:
         records = records or {}
-        data["items"] = [_item_out(item, records.get(item.id)) for item in items]
+        feedback_by_course = feedback_by_course or {}
+        data["items"] = [
+            _item_out(item, records.get(item.id), feedback_by_course.get(item.course_id))
+            for item in items
+        ]
     return data
 
 
@@ -111,6 +129,26 @@ def _growth_out(row: TrainingGrowthEvent) -> dict[str, Any]:
         "summary": row.summary,
         "payload": dict(row.payload_json or {}),
         "created_at": row.created_at,
+    }
+
+
+def _session_out(row: TrainingSession) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "course_id": row.course_id,
+        "instructor_name": row.instructor_name,
+        "starts_at": row.starts_at,
+        "ends_at": row.ends_at,
+        "created_at": row.created_at,
+    }
+
+
+def _attendance_out(row: TrainingAttendance) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "session_id": row.session_id,
+        "employee_user_id": row.employee_user_id,
+        "attended_at": row.attended_at,
     }
 
 
@@ -148,6 +186,123 @@ def update_course(
     db: Annotated[Session, Depends(get_db)],
 ):
     row = service.update_course(db, course_id, payload, admin=user)
+    return ok(_course_out(row))
+
+
+# ---------------------------------------------------------------- 期次、出勤与评价
+
+@router.post("/courses/{course_id}/sessions", summary="新建课程期次（管理员）")
+def create_session(
+    course_id: int,
+    payload: SessionCreateRequest,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    row = service.create_session(db, course_id, payload, admin=user)
+    return ok(_session_out(row))
+
+
+@router.get("/courses/{course_id}/sessions", summary="课程期次列表（管理员）")
+def list_sessions(
+    course_id: int,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    rows = service.list_sessions(db, course_id, admin=user)
+    return ok({"items": [_session_out(row) for row in rows], "total": len(rows)})
+
+
+@router.post("/sessions/{session_id}/attendance", summary="登记实际出勤（管理员）")
+def mark_attendance(
+    session_id: int,
+    payload: AttendanceMarkRequest,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    row = service.mark_attendance(db, session_id, payload, admin=user)
+    return ok(_attendance_out(row))
+
+
+@router.get("/sessions/{session_id}/attendance", summary="期次出勤名单（管理员）")
+def list_attendance(
+    session_id: int,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    rows = service.list_attendance(db, session_id, admin=user)
+    return ok({"items": [_attendance_out(row) for row in rows], "total": len(rows)})
+
+
+@router.get("/courses/{course_id}/feedback/mine", summary="本人培训评价状态（员工）")
+def my_feedback(
+    course_id: int,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    return ok(service.my_feedback(db, course_id, user=user))
+
+
+@router.post("/courses/{course_id}/feedback", summary="提交课程评价（员工，窗口内）")
+def submit_feedback(
+    course_id: int,
+    payload: FeedbackSubmitRequest,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    service.submit_feedback(db, course_id, payload, user=user)
+    return ok(service.my_feedback(db, course_id, user=user))
+
+
+@router.patch("/courses/{course_id}/feedback", summary="修改课程评价（员工，窗口内）")
+def update_feedback(
+    course_id: int,
+    payload: FeedbackSubmitRequest,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    service.submit_feedback(db, course_id, payload, user=user)
+    return ok(service.my_feedback(db, course_id, user=user))
+
+
+@router.post("/courses/{course_id}/feedback/withdraw", summary="撤回课程评价（员工，窗口内）")
+def withdraw_feedback(
+    course_id: int,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    service.withdraw_feedback(db, course_id, user=user)
+    return ok(service.my_feedback(db, course_id, user=user))
+
+
+@router.get("/courses/{course_id}/feedback/summary", summary="匿名反馈汇总（管理员，样本门槛）")
+def feedback_summary(
+    course_id: int,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    return ok(service.feedback_summary(db, course_id, admin=user))
+
+
+@router.post(
+    "/courses/{course_id}/feedback-themes/refresh",
+    summary="匿名文字意见主题归纳（管理员，真实模型）",
+)
+def refresh_feedback_themes(
+    course_id: int,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    return ok(service.refresh_feedback_themes(db, course_id, admin=user))
+
+
+@router.put("/courses/{course_id}/feedback-note", summary="发布统一改进说明（管理员）")
+def update_feedback_note(
+    course_id: int,
+    payload: FeedbackNoteRequest,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    row = service.update_feedback_note(db, course_id, payload, admin=user)
     return ok(_course_out(row))
 
 
@@ -231,19 +386,24 @@ def my_plans(
     db: Annotated[Session, Depends(get_db)],
 ):
     rows = service.my_plans(db, user)
-    return ok(
-        {
-            "items": [
-                _plan_out(
-                    item["plan"],
-                    item["items"],
-                    records=service.learning_records(db, item["items"], user.id),
-                )
-                for item in rows
-            ],
-            "total": len(rows),
-        }
-    )
+    items_payload = []
+    for item in rows:
+        feedback_by_course: dict[int, dict[str, Any]] = {}
+        for plan_item in item["items"]:
+            if plan_item.course_id in feedback_by_course:
+                continue
+            course = db.get(TrainingCourse, plan_item.course_id)
+            if course is not None:
+                feedback_by_course[course.id] = service.feedback_state(db, course, user)
+        items_payload.append(
+            _plan_out(
+                item["plan"],
+                item["items"],
+                records=service.learning_records(db, item["items"], user.id),
+                feedback_by_course=feedback_by_course,
+            )
+        )
+    return ok({"items": items_payload, "total": len(rows)})
 
 
 @router.get("/plans/{plan_id}", summary="培训计划详情（管理员）")

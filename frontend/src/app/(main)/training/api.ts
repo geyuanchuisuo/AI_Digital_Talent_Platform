@@ -5,9 +5,13 @@ import type { PageData } from '@/lib/types';
 
 import type {
   GrowthEvent,
+  TrainingAttendance,
   TrainingCourse,
+  TrainingFeedbackState,
+  TrainingFeedbackSummary,
   TrainingLearningRecord,
   TrainingPlan,
+  TrainingSession,
 } from './types';
 
 export function fetchCourses(params: { keyword?: string; status?: string; page: number; page_size: number }) {
@@ -111,4 +115,65 @@ export function updateProgress(itemId: number, payload: { status: string; note?:
 
 export function fetchGrowth(params: { employee_user_id?: number; page: number; page_size: number }) {
   return get<PageData<GrowthEvent>>('/training/growth', { params });
+}
+
+/** 期次与出勤（管理员） */
+export function createSession(courseId: number, payload: { instructor_name?: string | null; starts_at: string; ends_at: string }) {
+  return post<TrainingSession>(`/training/courses/${courseId}/sessions`, payload);
+}
+
+export function fetchSessions(courseId: number) {
+  return get<{ items: TrainingSession[]; total: number }>(`/training/courses/${courseId}/sessions`);
+}
+
+export function markAttendance(sessionId: number, employeeUserId: number) {
+  return post<TrainingAttendance>(`/training/sessions/${sessionId}/attendance`, {
+    employee_user_id: employeeUserId,
+  });
+}
+
+export function fetchAttendance(sessionId: number) {
+  return get<{ items: TrainingAttendance[]; total: number }>(`/training/sessions/${sessionId}/attendance`);
+}
+
+/** 员工评价：本人状态、提交/修改、撤回；窗口由后端校验 */
+export function fetchMyFeedback(courseId: number) {
+  return get<TrainingFeedbackState>(`/training/courses/${courseId}/feedback/mine`);
+}
+
+export interface FeedbackPayload {
+  content_score: number;
+  instructor_score: number;
+  comment?: string | null;
+}
+
+export function submitFeedback(courseId: number, payload: FeedbackPayload) {
+  return post<TrainingFeedbackState>(`/training/courses/${courseId}/feedback`, payload);
+}
+
+export function updateFeedback(courseId: number, payload: FeedbackPayload) {
+  return patch<TrainingFeedbackState>(`/training/courses/${courseId}/feedback`, payload);
+}
+
+export function withdrawFeedback(courseId: number) {
+  return post<TrainingFeedbackState>(`/training/courses/${courseId}/feedback/withdraw`);
+}
+
+/** 匿名汇总与主题归纳（管理员，样本门槛由后端控制） */
+export function fetchFeedbackSummary(courseId: number) {
+  return get<TrainingFeedbackSummary>(`/training/courses/${courseId}/feedback/summary`);
+}
+
+export function refreshFeedbackThemes(courseId: number) {
+  return post<{ generated: boolean; reason: string | null; comment_count: number; theme_count: number }>(
+    `/training/courses/${courseId}/feedback-themes/refresh`,
+  );
+}
+
+export function updateFeedbackNote(courseId: number, note: string) {
+  return request<TrainingCourse>({
+    method: 'PUT',
+    url: `/training/courses/${courseId}/feedback-note`,
+    data: { note },
+  });
 }

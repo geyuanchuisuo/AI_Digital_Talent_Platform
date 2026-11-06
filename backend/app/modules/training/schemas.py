@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -64,3 +65,23 @@ class PlanUpdateRequest(_StrictModel):
 class ProgressUpdateRequest(_StrictModel):
     status: LearningStatus
     note: str | None = Field(default=None, max_length=500)
+
+
+class SessionCreateRequest(_StrictModel):
+    instructor_name: str | None = Field(default=None, max_length=100)
+    starts_at: datetime
+    ends_at: datetime
+
+
+class AttendanceMarkRequest(_StrictModel):
+    employee_user_id: int
+
+
+class FeedbackSubmitRequest(_StrictModel):
+    content_score: int = Field(ge=1, le=5)
+    instructor_score: int = Field(ge=1, le=5)
+    comment: str | None = Field(default=None, max_length=1000)
+
+
+class FeedbackNoteRequest(_StrictModel):
+    note: str = Field(min_length=1, max_length=2000)

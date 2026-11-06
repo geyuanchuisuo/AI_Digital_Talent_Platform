@@ -16,11 +16,11 @@
 
 ## 2. 数据表（C 归属，模型位于 backend/app/modules）
 
-17 张表，均使用 `app.database.Base`、`PKMixin`、C 自有可移植时间 Mixin（`created_at/updated_at` 默认 `CURRENT_TIMESTAMP`，应用层维护 `updated_at`，避免 MySQL `ON UPDATE` DDL 阻断 SQLite 测试）。
+21 张表，均使用 `app.database.Base`、`PKMixin`、C 自有可移植时间 Mixin（`created_at/updated_at` 默认 `CURRENT_TIMESTAMP`，应用层维护 `updated_at`，避免 MySQL `ON UPDATE` DDL 阻断 SQLite 测试）。
 
 测评：`assessment_questions`、`assessment_plans`、`assessment_papers`、`assessment_assignments`、`assessment_answers`、`assessment_results`、`assessment_reviews`、`assessment_review_items`。
 面试：`interview_rounds`、`interview_feedback`、`interview_round_events`。
-培训：`training_courses`、`training_plans`、`training_plan_items`、`training_plan_versions`、`training_learning_records`、`training_growth_events`。
+培训：`training_courses`、`training_sessions`、`training_attendances`、`training_feedbacks`、`training_feedback_themes`、`training_plans`、`training_plan_items`、`training_plan_versions`、`training_learning_records`、`training_growth_events`。
 
 关键字段与语义：
 
@@ -32,7 +32,11 @@
 - 结果：版本化，保存维度百分制分、总分（DECIMAL(6,2) 展示，比较使用未舍入值）、是否通过；`assessment_reviews` 保存人工修分审计。
 - 面试轮次：候选人/岗位、轮次名、时间、方式、地点或链接、面试人列表、状态（pending/completed/cancelled）、内部备注、版本；变更写 `interview_round_events`。
 - 面试反馈：每轮一条，评价/事实依据/优势/不足/推进建议（advance/hold/reject），作者与版本；**无面试总分字段**。
-- 课程：标题、介绍、真实材料链接、适用维度、有效状态、版本。
+- 课程：标题、介绍、真实材料链接、适用维度、有效状态、版本、统一改进说明（`feedback_note`，不随版本回写历史计划）。
+- 期次：课程、讲师、开始/结束时间；反馈窗口从该期次结束时间起 7 天。
+- 出勤：期次 + 员工唯一，仅登记过的员工具备该课程评价资格。
+- 评价：课程 + 员工唯一（跨期合并为一份），课程/讲师 1–5 分、可选匿名文字、状态 submitted/withdrawn、来源期次与时间。
+- 反馈主题：课程维度保存模型归纳后的主题标签与支持份数，只保存达到 5 份支持的主题，不保存原文。
 - 培训计划：员工 user_id、目标岗位、来源（ai/manual）、状态（draft/assigned）、证据快照、计划版本；项目保存课程快照，不随课程后续编辑回写；`training_plan_versions` 保存历史快照。
 - 学习记录：按计划项+员工唯一，状态 not_started/learning/completed，备注、自报时间；完成仅代表自报。
 - 成长事件：追加式记录测评完成、培训分配、课程完成。
@@ -78,6 +82,9 @@
 - `PUT /plan-items/{item_id}/progress`（员工本人自报学习状态）
 - `POST /plans/draft-from-assessment/{assignment_id}`（固定流程入口；招聘测评返回 `generated=false` 与跳过原因，不生成候选人培训）
 - `GET /growth`（管理员按员工/人员查询；员工查本人）
+- `POST /courses/{id}/sessions`、`GET /courses/{id}/sessions`、`POST /sessions/{id}/attendance`、`GET /sessions/{id}/attendance`（管理员：期次与实际出勤）
+- `GET /courses/{id}/feedback/mine`（员工本人状态）、`POST /courses/{id}/feedback`、`PATCH /courses/{id}/feedback`、`POST /courses/{id}/feedback/withdraw`（员工本人，窗口内）
+- `GET /courses/{id}/feedback/summary`、`POST /courses/{id}/feedback-themes/refresh`、`PUT /courses/{id}/feedback-note`（管理员：匿名汇总、主题归纳、统一改进说明）
 
 ## 5. 后端执行与依赖边界
 
@@ -90,9 +97,20 @@
 
 动态自适应选题、AI 面试、音视频/监考/人脸/防挂机、面试总分与自动推进、候选人培训、培训自动分配/报名、课程审批候补、九宫格/人才池、自动人事决策、有效学时证明。
 
-## 7. 本轮实现与验证状态（2026-11-06）
+## 7. 培训评价规则（D-34 / REQ-TRN-001 AC-6，2026-11-06 纳入一期）
 
-- 已实现：`backend/app/modules/assessments`（模型/评分/服务/路由/registry）、`interviews`、`training` 三域与 17 张表；前端 `frontend/src/app/(main)/{assessments,interviews,training}` 页面、类型与接口封装。
-- 已验证：`python -m unittest discover -s tests/C -p "test_*.py" -v` 运行 12 项全部通过（SQLite 内存库 + FastAPI TestClient + 注入式评分/草稿替身，覆盖固定组卷、维度权重、未舍入总分线与相等通过、交卷幂等、评分失败不计零分与重试、结果版本/公开、答案开放、面试可见性裁剪、培训分配/修订/自报/成长事件）。
-- 未验证：MySQL/Alembic 实际迁移、真实 LLM 评分与草稿、真实 JWT 与账号权限、前端 typecheck/build 与浏览器页面、A 的 `main.py`/`models/__init__.py`/`AppShell` 集成。上述未验证项不得表述为验收通过。
+1. 资格：仅员工本人；必须在对应课程期次有出勤登记。反馈窗口为该期次 `ends_at` 起 7 天（含截止时刻）；课程未结束或窗口关闭时拒绝提交/修改/撤回。
+2. 去重：同一员工对同一课程跨期最多一份反馈；再次提交更新同一行并切换到最近一次有效出勤期次，汇总始终按一人一份计数。
+3. 内容：课程满意度、讲师满意度各 1–5 分，可选文字意见（≤1000 字）；撤回在窗口内生效，撤回后不计入汇总，窗口关闭后本人仍可只读查看。
+4. 匿名汇总：仅管理员（`admin/hr`）可查看；有效反馈少于 5 份时只返回份数，不返回均分与主题；达到 5 份才返回课程/讲师均分。接口永不返回文字原文或员工身份。
+5. 主题归纳：管理员触发真实模型（`c-training-feedback-theme-v1`）对匿名文字归纳标签，只保存并展示支持份数 ≥5 的主题；模型失败返回 503 且不写入主题。
+6. 改进说明：管理员依据汇总发布统一 `feedback_note`，不改课程版本；员工在本人评价状态中可见。
+7. 角色边界：一期无讲师/部门经理角色，匿名汇总暂由管理员持有；后续开放需 A 提供角色与授权映射，C 不放宽现有权限。
+
+## 8. 本轮实现与验证状态（2026-11-06）
+
+- 已实现：`backend/app/modules/assessments`（模型/评分/服务/路由/registry）、`interviews`、`training` 三域与 21 张表；前端 `frontend/src/app/(main)/{assessments,interviews,training}` 页面、类型与接口封装。
+- 已验证：`python -m unittest discover -s tests/C -p "test_*.py" -v` 运行 17 项全部通过（SQLite 内存库 + FastAPI TestClient + 注入式评分/草稿/主题替身，覆盖固定组卷、维度权重、未舍入总分线与相等通过、交卷幂等、评分失败不计零分与重试、结果版本/公开、答案开放、面试可见性裁剪、培训分配/修订/自报/成长事件、评价资格/7 天窗口/跨期合并/撤回/5 份门槛/主题 5 份支持/模型失败 503）。
+- 已验证：`npm run typecheck`（frontend）通过。
+- 未验证：MySQL/Alembic 实际迁移、真实 LLM 评分/草稿/主题归纳、真实 JWT 与账号权限、前端 build 与浏览器页面、A 的 `main.py`/`models/__init__.py`/`AppShell` 集成。上述未验证项不得表述为验收通过。
 - 接入方式：A 可 `from app.modules.assessments.registry import ALL_MODELS, ALL_ROUTERS`，在 `models/__init__.py` 导入模型（或 `init_db` 显式导入）并在 `main.py` 逐个 `include_router`；具体请求见 `docs/requests/C/20261106-A-公共集成接入请求.md`。

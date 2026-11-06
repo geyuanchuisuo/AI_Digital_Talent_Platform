@@ -26,8 +26,75 @@ class TrainingCourse(PKMixin, CTimestampMixin, Base):
         String(20), nullable=False, default="active", server_default=str_default("active")
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    feedback_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    feedback_note_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
     updated_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class TrainingSession(PKMixin, CTimestampMixin, Base):
+    """课程期次：反馈窗口与出勤资格的唯一起点。"""
+
+    __tablename__ = "training_sessions"
+    __table_args__ = MYSQL_TABLE_OPTIONS
+
+    course_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    instructor_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    starts_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class TrainingAttendance(PKMixin, CTimestampMixin, Base):
+    """实际出勤记录；只有在此登记过的员工才具备评价资格。"""
+
+    __tablename__ = "training_attendances"
+    __table_args__ = (
+        UniqueConstraint("session_id", "employee_user_id", name="uk_attendance_session_employee"),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    session_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    employee_user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    attended_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
+
+
+class TrainingFeedback(PKMixin, CTimestampMixin, Base):
+    """员工对同一课程跨期最多一份有效反馈；文字意见不再对外返回原文。"""
+
+    __tablename__ = "training_feedbacks"
+    __table_args__ = (
+        UniqueConstraint("course_id", "employee_user_id", name="uk_feedback_course_employee"),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    course_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    employee_user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    session_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    content_score: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    instructor_score: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="submitted", server_default=str_default("submitted")
+    )
+    submitted_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
+    withdrawn_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class TrainingFeedbackTheme(PKMixin, CTimestampMixin, Base):
+    """模型从匿名文字意见归纳的主题；只保存达到最小样本门槛的主题。"""
+
+    __tablename__ = "training_feedback_themes"
+    __table_args__ = (
+        UniqueConstraint("course_id", "theme", name="uk_feedback_theme_course"),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    course_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    theme: Mapped[str] = mapped_column(String(100), nullable=False)
+    feedback_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    prompt_version: Mapped[str] = mapped_column(String(50), nullable=False)
+    generated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
 
 
 class TrainingPlan(PKMixin, CTimestampMixin, Base):

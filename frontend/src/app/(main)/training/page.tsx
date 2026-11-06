@@ -18,6 +18,7 @@ import {
   Input,
   InputNumber,
   Modal,
+  Rate,
   Select,
   Space,
   Table,
@@ -37,17 +38,35 @@ import {
   assignPlan,
   createCourse,
   createPlan,
+  createSession,
   draftPlan,
+  fetchAttendance,
   fetchCourses,
+  fetchFeedbackSummary,
   fetchGrowth,
   fetchMyPlans,
   fetchPlans,
+  fetchSessions,
   getPlan,
+  markAttendance,
+  refreshFeedbackThemes,
   revisePlan,
+  submitFeedback,
   updateCourse,
+  updateFeedback,
+  updateFeedbackNote,
   updateProgress,
+  withdrawFeedback,
 } from './api';
-import type { GrowthEvent, TrainingCourse, TrainingPlan, TrainingPlanItem } from './types';
+import type {
+  GrowthEvent,
+  TrainingAttendance,
+  TrainingCourse,
+  TrainingFeedbackSummary,
+  TrainingPlan,
+  TrainingPlanItem,
+  TrainingSession,
+} from './types';
 
 const PAGE_SIZE = 10;
 
@@ -75,6 +94,9 @@ function MyTraining() {
   const [growthLoading, setGrowthLoading] = useState(false);
   const [active, setActive] = useState<number | null>(null);
   const [open, setOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedbackItem, setFeedbackItem] = useState<TrainingPlanItem | null>(null);
+  const [feedbackForm] = Form.useForm();
 
   const loadPlans = useCallback(async () => {
     setLoading(true);
@@ -111,6 +133,50 @@ function MyTraining() {
       message.success(`已更新为${LEARNING_LABEL[status as keyof typeof LEARNING_LABEL] ?? status}`);
       await loadPlans();
       await loadGrowth();
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    }
+  };
+
+  const openFeedback = (item: TrainingPlanItem) => {
+    setFeedbackItem(item);
+    feedbackForm.setFieldsValue({
+      content_score: item.feedback?.feedback?.content_score ?? 5,
+      instructor_score: item.feedback?.feedback?.instructor_score ?? 5,
+      comment: item.feedback?.feedback?.comment ?? '',
+    });
+    setFeedbackOpen(true);
+  };
+
+  const saveFeedback = async () => {
+    if (!feedbackItem) return;
+    const values = await feedbackForm.validateFields();
+    try {
+      const payload = {
+        content_score: values.content_score,
+        instructor_score: values.instructor_score,
+        comment: (values.comment ?? '').trim() || null,
+      };
+      if (feedbackItem.feedback?.feedback) {
+        await updateFeedback(feedbackItem.course_id, payload);
+      } else {
+        await submitFeedback(feedbackItem.course_id, payload);
+      }
+      message.success('评价已保存');
+      setFeedbackOpen(false);
+      await loadPlans();
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    }
+  };
+
+  const removeFeedback = async () => {
+    if (!feedbackItem) return;
+    try {
+      await withdrawFeedback(feedbackItem.course_id);
+      message.success('评价已撤回，不再计入汇总');
+      setFeedbackOpen(false);
+      await loadPlans();
     } catch (error) {
       message.error(getErrorMessage(error));
     }
@@ -189,6 +255,26 @@ function MyTraining() {
         </Space>
       ),
     },
+    {
+      title: '课程评价',
+      key: 'feedback',
+      width: 130,
+      render: (_, row) => {
+        const feedback = row.feedback;
+        if (!feedback?.attended && !feedback?.feedback) {
+          return <Typography.Text type="secondary">未参加</Typography.Text>;
+        }
+        const submitted = feedback?.feedback?.status === 'submitted';
+        return (
+          <Space direction="vertical" size={4}>
+            {feedback?.feedback ? (
+              <Tag color={submitted ? 'success' : 'default'}>{submitted ? '已评价' : '已撤回'}</Tag>
+            ) : null}
+            <a onClick={() => openFeedback(row)}>{feedback?.eligible ? (submitted ? '修改评价' : '评价课程') : '查看评价'}</a>
+          </Space>
+        );
+      },
+    },
   ];
 
   const growthColumns: ColumnsType<GrowthEvent> = [
@@ -245,7 +331,313 @@ function MyTraining() {
           </Space>
         )}
       </Drawer>
+
+      <Modal
+        title={feedbackItem ? `课程评价 · ${feedbackItem.course_snapshot?.title || `#${feedbackItem.course_id}`}` : '课程评价'}
+        width={560}
+        open={feedbackOpen}
+        footer={null}
+        destroyOnClose
+        onCancel={() => setFeedbackOpen(false)}
+      >
+        {!feedbackItem ? (
+          <Empty />
+        ) : (
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            {feedbackItem.feedback?.reason ? (
+              <Typography.Text type="secondary">{feedbackItem.feedback.reason}</Typography.Text>
+            ) : null}
+            {feedbackItem.feedback?.window_closes_at ? (
+              <Typography.Text type="secondary">
+                反馈截止：{feedbackItem.feedback.window_closes_at}（提交后 7 天内可修改或撤回）
+              </Typography.Text>
+            ) : null}
+            {feedbackItem.feedback?.improvement_note ? (
+              <Card size="small" title="培训统一改进说明">
+                {feedbackItem.feedback.improvement_note}
+              </Card>
+            ) : null}
+            <Form form={feedbackForm} layout="vertical" disabled={!feedbackItem.feedback?.eligible}>
+              <Form.Item name="content_score" label="课程内容满意度" rules={[{ required: true }]}>
+                <Rate count={5} />
+              </Form.Item>
+              <Form.Item name="instructor_score" label="讲师满意度" rules={[{ required: true }]}>
+                <Rate count={5} />
+              </Form.Item>
+              <Form.Item name="comment" label="文字意见（匿名，不对外展示原文）" extra="最多 1000 字；仅用于主题归纳">
+                <Input.TextArea rows={3} maxLength={1000} showCount />
+              </Form.Item>
+            </Form>
+            <Space>
+              {feedbackItem.feedback?.eligible ? (
+                <>
+                  <Button type="primary" onClick={() => void saveFeedback()}>
+                    保存评价
+                  </Button>
+                  {feedbackItem.feedback?.feedback?.status === 'submitted' ? (
+                    <Button danger onClick={() => void removeFeedback()}>
+                      撤回评价
+                    </Button>
+                  ) : null}
+                </>
+              ) : (
+                <Button onClick={() => setFeedbackOpen(false)}>关闭</Button>
+              )}
+            </Space>
+          </Space>
+        )}
+      </Modal>
     </Space>
+  );
+}
+
+/** 管理员：课程期次与实际出勤登记 */
+function SessionManager({ course, open, onClose }: { course: TrainingCourse | null; open: boolean; onClose: () => void }) {
+  const [sessions, setSessions] = useState<TrainingSession[]>([]);
+  const [selected, setSelected] = useState<TrainingSession | null>(null);
+  const [attendance, setAttendance] = useState<TrainingAttendance[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [form] = Form.useForm();
+  const [attendanceForm] = Form.useForm();
+
+  const loadSessions = useCallback(async (courseId: number) => {
+    setLoading(true);
+    try {
+      const data = await fetchSessions(courseId);
+      setSessions(data.items);
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const loadAttendance = useCallback(async (sessionId: number) => {
+    try {
+      const data = await fetchAttendance(sessionId);
+      setAttendance(data.items);
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!open || !course) return;
+    form.resetFields();
+    setSelected(null);
+    setAttendance([]);
+    void loadSessions(course.id);
+  }, [open, course, form, loadSessions]);
+
+  const createOne = async () => {
+    if (!course) return;
+    const values = await form.validateFields();
+    try {
+      await createSession(course.id, {
+        instructor_name: values.instructor_name ?? null,
+        starts_at: values.starts_at,
+        ends_at: values.ends_at,
+      });
+      message.success('期次已创建');
+      form.resetFields();
+      await loadSessions(course.id);
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    }
+  };
+
+  const choose = async (session: TrainingSession) => {
+    setSelected(session);
+    await loadAttendance(session.id);
+  };
+
+  const addAttendance = async () => {
+    if (!selected) return;
+    const values = await attendanceForm.validateFields();
+    try {
+      await markAttendance(selected.id, values.employee_user_id);
+      message.success('出勤已登记');
+      attendanceForm.resetFields();
+      await loadAttendance(selected.id);
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    }
+  };
+
+  const sessionColumns: ColumnsType<TrainingSession> = [
+    { title: '讲师', dataIndex: 'instructor_name', render: (v) => v ?? '—' },
+    { title: '开始', dataIndex: 'starts_at', width: 170 },
+    { title: '结束', dataIndex: 'ends_at', width: 170 },
+    {
+      title: '操作',
+      key: 'action',
+      width: 100,
+      render: (_, row) => <a onClick={() => void choose(row)}>管理出勤</a>,
+    },
+  ];
+
+  const attendanceColumns: ColumnsType<TrainingAttendance> = [
+    { title: '员工 user_id', dataIndex: 'employee_user_id', render: (v) => `#${v}` },
+    { title: '登记时间', dataIndex: 'attended_at' },
+  ];
+
+  return (
+    <Drawer
+      title={course ? `期次与出勤 · ${course.title}` : '期次与出勤'}
+      width={760}
+      open={open}
+      onClose={onClose}
+    >
+      <Space direction="vertical" size={16} style={{ width: '100%' }}>
+        <Card size="small" title="新建期次">
+          <Form form={form} layout="inline">
+            <Form.Item name="instructor_name" label="讲师">
+              <Input placeholder="可选" style={{ width: 120 }} />
+            </Form.Item>
+            <Form.Item name="starts_at" label="开始" rules={[{ required: true, message: '请填开始时间' }]}>
+              <Input placeholder="2026-11-06T09:00" style={{ width: 170 }} />
+            </Form.Item>
+            <Form.Item name="ends_at" label="结束" rules={[{ required: true, message: '请填结束时间' }]}>
+              <Input placeholder="2026-11-06T17:00" style={{ width: 170 }} />
+            </Form.Item>
+            <Button type="primary" onClick={() => void createOne()}>
+              创建
+            </Button>
+          </Form>
+          <Typography.Text type="secondary">时间格式 YYYY-MM-DDTHH:mm；反馈窗口从结束时间起 7 天。</Typography.Text>
+        </Card>
+
+        <Table rowKey="id" loading={loading} columns={sessionColumns} dataSource={sessions} pagination={false} />
+
+        {selected ? (
+          <Card size="small" title={`出勤名单 · 期次 #${selected.id}`}>
+            <Form form={attendanceForm} layout="inline" style={{ marginBottom: 12 }}>
+              <Form.Item name="employee_user_id" rules={[{ required: true, message: '请填员工 user_id' }]}>
+                <InputNumber min={1} placeholder="员工 user_id" />
+              </Form.Item>
+              <Button type="primary" onClick={() => void addAttendance()}>
+                登记出勤
+              </Button>
+            </Form>
+            <Table rowKey="id" columns={attendanceColumns} dataSource={attendance} pagination={false} />
+          </Card>
+        ) : null}
+      </Space>
+    </Drawer>
+  );
+}
+
+/** 管理员：匿名反馈汇总、主题归纳与统一改进说明 */
+function CourseFeedback({ course, open, onClose }: { course: TrainingCourse | null; open: boolean; onClose: () => void }) {
+  const [summary, setSummary] = useState<TrainingFeedbackSummary | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [noteForm] = Form.useForm();
+
+  const load = useCallback(async (courseId: number) => {
+    setLoading(true);
+    try {
+      const data = await fetchFeedbackSummary(courseId);
+      setSummary(data);
+      noteForm.setFieldsValue({ note: data.improvement_note ?? '' });
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }, [noteForm]);
+
+  useEffect(() => {
+    if (!open || !course) return;
+    setSummary(null);
+    void load(course.id);
+  }, [open, course, load]);
+
+  const refreshThemes = async () => {
+    if (!course) return;
+    try {
+      const data = await refreshFeedbackThemes(course.id);
+      if (!data.generated) message.warning(data.reason || '暂无可归纳文字意见');
+      else message.success(`已归纳 ${data.theme_count} 个达到 5 份支持的主题`);
+      await load(course.id);
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    }
+  };
+
+  const publishNote = async () => {
+    if (!course) return;
+    const values = await noteForm.validateFields();
+    try {
+      await updateFeedbackNote(course.id, values.note);
+      message.success('改进说明已发布');
+      await load(course.id);
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    }
+  };
+
+  return (
+    <Drawer
+      title={course ? `匿名反馈汇总 · ${course.title}` : '匿名反馈汇总'}
+      width={680}
+      open={open}
+      onClose={onClose}
+    >
+      {!summary ? (
+        <Empty description={loading ? '加载中' : '暂无数据'} />
+      ) : (
+        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          {summary.enough_samples ? (
+            <Descriptions column={2} size="small" bordered>
+              <Descriptions.Item label="有效反馈">{summary.feedback_count} 份</Descriptions.Item>
+              <Descriptions.Item label="课程均分">{summary.content_avg ?? '—'}</Descriptions.Item>
+              <Descriptions.Item label="讲师均分">{summary.instructor_avg ?? '—'}</Descriptions.Item>
+              <Descriptions.Item label="主题数量">{summary.themes.length}</Descriptions.Item>
+            </Descriptions>
+          ) : (
+            <Typography.Text type="secondary">
+              有效反馈 {summary.feedback_count} 份，少于 5 份不展示均分与主题。
+            </Typography.Text>
+          )}
+          <Card
+            size="small"
+            title="文字意见主题（每个主题至少 5 份支持）"
+            extra={
+              <Button size="small" onClick={() => void refreshThemes()}>
+                重新归纳
+              </Button>
+            }
+          >
+            {summary.themes.length ? (
+              <Space wrap>
+                {summary.themes.map((item) => (
+                  <Tag key={item.theme} color="blue">
+                    {item.theme} · {item.count} 份
+                  </Tag>
+                ))}
+              </Space>
+            ) : (
+              <Typography.Text type="secondary">暂无达到门槛的主题；不展示原始文字意见。</Typography.Text>
+            )}
+          </Card>
+          <Card size="small" title="统一改进说明">
+            <Form form={noteForm} layout="vertical">
+              <Form.Item name="note" rules={[{ required: true, max: 2000, message: '请填写改进说明' }]}>
+                <Input.TextArea rows={3} maxLength={2000} showCount placeholder="依据匿名汇总统一发布，不针对个人" />
+              </Form.Item>
+            </Form>
+            <Button type="primary" onClick={() => void publishNote()}>
+              发布说明
+            </Button>
+            {summary.improvement_note_at ? (
+              <Typography.Text type="secondary" style={{ marginLeft: 12 }}>
+                上次发布：{summary.improvement_note_at}
+              </Typography.Text>
+            ) : null}
+          </Card>
+        </Space>
+      )}
+    </Drawer>
   );
 }
 
@@ -258,6 +650,10 @@ function CourseAdmin() {
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<TrainingCourse | null>(null);
+  const [sessionCourse, setSessionCourse] = useState<TrainingCourse | null>(null);
+  const [sessionOpen, setSessionOpen] = useState(false);
+  const [feedbackCourse, setFeedbackCourse] = useState<TrainingCourse | null>(null);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [form] = Form.useForm();
 
   const load = useCallback(async () => {
@@ -345,11 +741,27 @@ function CourseAdmin() {
     {
       title: '操作',
       key: 'action',
-      width: 150,
+      width: 260,
       render: (_, row) => (
-        <Space size={8}>
+        <Space size={8} wrap>
           <a onClick={() => openEdit(row)}>编辑</a>
           <a onClick={() => void toggleStatus(row)}>{row.status === 'active' ? '下线' : '上线'}</a>
+          <a
+            onClick={() => {
+              setSessionCourse(row);
+              setSessionOpen(true);
+            }}
+          >
+            期次/出勤
+          </a>
+          <a
+            onClick={() => {
+              setFeedbackCourse(row);
+              setFeedbackOpen(true);
+            }}
+          >
+            反馈汇总
+          </a>
         </Space>
       ),
     },
@@ -412,6 +824,9 @@ function CourseAdmin() {
           </Form.Item>
         </Form>
       </Modal>
+
+      <SessionManager course={sessionCourse} open={sessionOpen} onClose={() => setSessionOpen(false)} />
+      <CourseFeedback course={feedbackCourse} open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
     </Card>
   );
 }

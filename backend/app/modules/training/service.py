@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Callable
 from urllib.parse import urlparse
 
@@ -19,25 +19,40 @@ from app.core.errors import BizError
 from app.models import User
 from app.modules.assessments.models import AssessmentAssignment, AssessmentResult
 from app.modules.assessments.service import is_admin, require_admin
-from app.modules.training import drafting
+from app.modules.training import drafting, feedback_themes
 from app.modules.training.models import (
+    TrainingAttendance,
     TrainingCourse,
+    TrainingFeedback,
+    TrainingFeedbackTheme,
     TrainingGrowthEvent,
     TrainingLearningRecord,
     TrainingPlan,
     TrainingPlanItem,
     TrainingPlanVersion,
+    TrainingSession,
 )
 from app.modules.training.schemas import (
+    AttendanceMarkRequest,
     CourseCreateRequest,
     CourseUpdateRequest,
     DraftRequest,
+    FeedbackNoteRequest,
+    FeedbackSubmitRequest,
     PlanCreateRequest,
     PlanItemIn,
     PlanUpdateRequest,
+    SessionCreateRequest,
 )
 
 DraftGenerator = Callable[..., drafting.DraftResult]
+ThemeExtractor = Callable[[list[str]], list[list[str]]]
+
+FEEDBACK_WINDOW_DAYS = 7
+MIN_FEEDBACK_SAMPLES = 5
+
+# 测试可替换；生产调用真实模型
+theme_extractor: ThemeExtractor = feedback_themes.extract_themes
 
 
 def _validate_course_url(url: str) -> str:
@@ -653,3 +668,362 @@ def draft_from_assessment(
         assessment_assignment_id=assignment.id,
     )
     return create_ai_draft(db, payload, admin=admin, generator=generator)
+
+
+# ---------------------------------------------------------------- 期次与出勤
+
+def _naive_local(value: datetime) -> datetime:
+    """统一为本地无时区时间；前端可能提交带偏移的 ISO 时间。"""
+    if value.tzinfo is None:
+        return value
+    return value.astimezone().replace(tzinfo=None)
+
+
+def _require_course(db: Session, course_id: int) -> TrainingCourse:
+    course = db.get(TrainingCourse, course_id)
+    if course is None:
+        raise BizError(404, "课程不存在")
+    return course
+
+
+def create_session(
+    db: Session, course_id: int, payload: SessionCreateRequest, *, admin: User
+) -> TrainingSession:
+    require_admin(admin)
+    _require_course(db, course_id)
+    starts_at = _naive_local(payload.starts_at)
+    ends_at = _naive_local(payload.ends_at)
+    if ends_at <= starts_at:
+        raise BizError(400, "课程结束时间必须晚于开始时间")
+    row = TrainingSession(
+        course_id=course_id,
+        instructor_name=(payload.instructor_name or "").strip() or None,
+        starts_at=starts_at,
+        ends_at=ends_at,
+        created_by=admin.id,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def list_sessions(db: Session, course_id: int, *, admin: User) -> list[TrainingSession]:
+    require_admin(admin)
+    _require_course(db, course_id)
+    return list(
+        db.scalars(
+            select(TrainingSession)
+            .where(TrainingSession.course_id == course_id)
+            .order_by(TrainingSession.starts_at.desc(), TrainingSession.id.desc())
+        )
+    )
+
+
+def mark_attendance(
+    db: Session, session_id: int, payload: AttendanceMarkRequest, *, admin: User
+) -> TrainingAttendance:
+    require_admin(admin)
+    session = db.get(TrainingSession, session_id)
+    if session is None:
+        raise BizError(404, "课程期次不存在")
+    employee = _require_employee(db, payload.employee_user_id)
+    existing = db.scalar(
+        select(TrainingAttendance).where(
+            TrainingAttendance.session_id == session_id,
+            TrainingAttendance.employee_user_id == employee.id,
+        )
+    )
+    if existing is not None:
+        return existing
+    row = TrainingAttendance(
+        session_id=session_id,
+        employee_user_id=employee.id,
+        attended_at=datetime.now(),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def list_attendance(db: Session, session_id: int, *, admin: User) -> list[TrainingAttendance]:
+    require_admin(admin)
+    session = db.get(TrainingSession, session_id)
+    if session is None:
+        raise BizError(404, "课程期次不存在")
+    return list(
+        db.scalars(
+            select(TrainingAttendance)
+            .where(TrainingAttendance.session_id == session_id)
+            .order_by(TrainingAttendance.id.asc())
+        )
+    )
+
+
+# ---------------------------------------------------------------- 反馈
+
+def _require_employee_caller(user: User) -> None:
+    if user.role != "employee":
+        raise BizError(403, "只有员工本人可提交或查看培训评价")
+
+
+def _attendance_session(db: Session, course_id: int, employee_user_id: int) -> TrainingSession | None:
+    """最近一次已结束、且本人有出勤记录的期次。"""
+    return db.scalars(
+        select(TrainingSession)
+        .join(TrainingAttendance, TrainingAttendance.session_id == TrainingSession.id)
+        .where(
+            TrainingSession.course_id == course_id,
+            TrainingAttendance.employee_user_id == employee_user_id,
+            TrainingSession.ends_at <= datetime.now(),
+        )
+        .order_by(TrainingSession.ends_at.desc(), TrainingSession.id.desc())
+    ).first()
+
+
+def _future_attendance_session(db: Session, course_id: int, employee_user_id: int) -> TrainingSession | None:
+    return db.scalars(
+        select(TrainingSession)
+        .join(TrainingAttendance, TrainingAttendance.session_id == TrainingSession.id)
+        .where(
+            TrainingSession.course_id == course_id,
+            TrainingAttendance.employee_user_id == employee_user_id,
+            TrainingSession.ends_at > datetime.now(),
+        )
+        .order_by(TrainingSession.ends_at.asc())
+    ).first()
+
+
+def _feedback_row(db: Session, course_id: int, employee_user_id: int) -> TrainingFeedback | None:
+    return db.scalar(
+        select(TrainingFeedback).where(
+            TrainingFeedback.course_id == course_id,
+            TrainingFeedback.employee_user_id == employee_user_id,
+        )
+    )
+
+
+def _feedback_out(row: TrainingFeedback) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "course_id": row.course_id,
+        "session_id": row.session_id,
+        "content_score": row.content_score,
+        "instructor_score": row.instructor_score,
+        "comment": row.comment,
+        "status": row.status,
+        "submitted_at": row.submitted_at,
+        "withdrawn_at": row.withdrawn_at,
+        "updated_at": row.updated_at,
+    }
+
+
+def feedback_state(db: Session, course: TrainingCourse, user: User) -> dict[str, Any]:
+    """员工侧评价状态：是否具备资格、窗口截止、本人提交与统一改进说明。"""
+    _require_employee_caller(user)
+    session = _attendance_session(db, course.id, user.id)
+    row = _feedback_row(db, course.id, user.id)
+    future = None if session is not None else _future_attendance_session(db, course.id, user.id)
+
+    if session is None:
+        reason = (
+            "课程尚未结束，反馈窗口未开放"
+            if future is not None
+            else "仅实际参加课程期次并登记出勤的员工可以评价"
+        )
+        return {
+            "attended": False,
+            "eligible": False,
+            "reason": reason,
+            "window_closes_at": None,
+            "feedback": _feedback_out(row) if row else None,
+            "improvement_note": course.feedback_note,
+            "improvement_note_at": course.feedback_note_at,
+        }
+
+    closes_at = session.ends_at + timedelta(days=FEEDBACK_WINDOW_DAYS)
+    eligible = datetime.now() <= closes_at
+    return {
+        "attended": True,
+        "eligible": eligible,
+        "reason": None if eligible else "反馈窗口已关闭，已提交内容仍可查看",
+        "window_closes_at": closes_at,
+        "feedback": _feedback_out(row) if row else None,
+        "improvement_note": course.feedback_note,
+        "improvement_note_at": course.feedback_note_at,
+    }
+
+
+def submit_feedback(
+    db: Session, course_id: int, payload: FeedbackSubmitRequest, *, user: User
+) -> TrainingFeedback:
+    """提交或修改本人评价；窗口内幂等按课程+员工更新同一行。"""
+    _require_employee_caller(user)
+    course = _require_course(db, course_id)
+    state = feedback_state(db, course, user)
+    if not state["eligible"]:
+        raise BizError(403 if not state["attended"] else 400, state["reason"] or "不能提交反馈")
+    session = _attendance_session(db, course.id, user.id)
+    if session is None:
+        raise BizError(403, "缺少有效出勤记录，不能提交反馈")
+
+    row = _feedback_row(db, course.id, user.id)
+    if row is None:
+        row = TrainingFeedback(
+            course_id=course.id,
+            employee_user_id=user.id,
+            session_id=session.id,
+            content_score=payload.content_score,
+            instructor_score=payload.instructor_score,
+            comment=(payload.comment or "").strip() or None,
+            status="submitted",
+            submitted_at=datetime.now(),
+        )
+        db.add(row)
+    else:
+        row.session_id = session.id
+        row.content_score = payload.content_score
+        row.instructor_score = payload.instructor_score
+        row.comment = (payload.comment or "").strip() or None
+        row.status = "submitted"
+        row.withdrawn_at = None
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def withdraw_feedback(db: Session, course_id: int, *, user: User) -> TrainingFeedback:
+    """窗口内撤回；撤回后不计入汇总，窗口关闭后不可再改。"""
+    _require_employee_caller(user)
+    course = _require_course(db, course_id)
+    row = _feedback_row(db, course.id, user.id)
+    if row is None:
+        raise BizError(404, "尚未提交过该课程的评价")
+    state = feedback_state(db, course, user)
+    if not state["eligible"]:
+        raise BizError(400, state["reason"] or "反馈窗口已关闭，不能撤回")
+    row.status = "withdrawn"
+    row.withdrawn_at = datetime.now()
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def my_feedback(db: Session, course_id: int, *, user: User) -> dict[str, Any]:
+    _require_employee_caller(user)
+    return feedback_state(db, _require_course(db, course_id), user)
+
+
+def feedback_summary(db: Session, course_id: int, *, admin: User) -> dict[str, Any]:
+    """仅管理员查看的匿名汇总；少于门槛不返回均分与主题。"""
+    require_admin(admin)
+    course = _require_course(db, course_id)
+    rows = list(
+        db.scalars(
+            select(TrainingFeedback).where(
+                TrainingFeedback.course_id == course_id,
+                TrainingFeedback.status == "submitted",
+            )
+        )
+    )
+    count = len(rows)
+    enough = count >= MIN_FEEDBACK_SAMPLES
+    content_avg = round(sum(row.content_score for row in rows) / count, 2) if enough else None
+    instructor_avg = round(sum(row.instructor_score for row in rows) / count, 2) if enough else None
+    themes = list(
+        db.scalars(
+            select(TrainingFeedbackTheme)
+            .where(TrainingFeedbackTheme.course_id == course_id)
+            .order_by(TrainingFeedbackTheme.feedback_count.desc(), TrainingFeedbackTheme.id.asc())
+        )
+    )
+    return {
+        "course_id": course_id,
+        "feedback_count": count,
+        "enough_samples": enough,
+        "content_avg": content_avg,
+        "instructor_avg": instructor_avg,
+        "themes": [
+            {"theme": row.theme, "count": row.feedback_count}
+            for row in themes
+            if row.feedback_count >= MIN_FEEDBACK_SAMPLES
+        ],
+        "improvement_note": course.feedback_note,
+        "improvement_note_at": course.feedback_note_at,
+    }
+
+
+def refresh_feedback_themes(
+    db: Session,
+    course_id: int,
+    *,
+    admin: User,
+    extractor: ThemeExtractor | None = None,
+) -> dict[str, Any]:
+    """调用真实模型归纳匿名文字意见；只保存达到 5 份支持的主题。"""
+    require_admin(admin)
+    _require_course(db, course_id)
+    rows = list(
+        db.scalars(
+            select(TrainingFeedback).where(
+                TrainingFeedback.course_id == course_id,
+                TrainingFeedback.status == "submitted",
+            )
+        )
+    )
+    comments = [(row.comment or "").strip() for row in rows if (row.comment or "").strip()]
+    db.query(TrainingFeedbackTheme).filter(TrainingFeedbackTheme.course_id == course_id).delete(
+        synchronize_session=False
+    )
+    if not comments:
+        db.commit()
+        return {"generated": False, "reason": "暂无文字意见可归纳", "comment_count": 0, "theme_count": 0}
+
+    effective = extractor or theme_extractor
+    try:
+        assignments = effective(comments)
+    except BizError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - 模型失败必须明确提示，不能伪造主题
+        raise BizError(503, f"主题归纳失败，请稍后重试：{type(exc).__name__}") from exc
+    if len(assignments) != len(comments):
+        raise BizError(503, "主题归纳结果不完整，请稍后重试")
+
+    counts: dict[str, int] = {}
+    for themes in assignments:
+        for theme in dict.fromkeys(themes):
+            counts[theme] = counts.get(theme, 0) + 1
+    qualified = {theme: value for theme, value in counts.items() if value >= MIN_FEEDBACK_SAMPLES}
+    now = datetime.now()
+    for theme, value in qualified.items():
+        db.add(
+            TrainingFeedbackTheme(
+                course_id=course_id,
+                theme=theme,
+                feedback_count=value,
+                prompt_version=feedback_themes.THEME_PROMPT_VERSION,
+                generated_at=now,
+            )
+        )
+    db.commit()
+    return {
+        "generated": True,
+        "reason": None,
+        "comment_count": len(comments),
+        "theme_count": len(qualified),
+    }
+
+
+def update_feedback_note(
+    db: Session, course_id: int, payload: FeedbackNoteRequest, *, admin: User
+) -> TrainingCourse:
+    """管理员依据汇总发布统一改进说明；不修改课程版本。"""
+    require_admin(admin)
+    course = _require_course(db, course_id)
+    course.feedback_note = payload.note.strip()
+    course.feedback_note_at = datetime.now()
+    course.updated_by = admin.id
+    db.commit()
+    db.refresh(course)
+    return course

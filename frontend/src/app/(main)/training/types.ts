@@ -8,6 +8,60 @@ export interface TrainingCourse {
   dimension_names: string[];
   status: 'active' | 'inactive';
   version: number;
+  feedback_note: string | null;
+  feedback_note_at: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface TrainingSession {
+  id: number;
+  course_id: number;
+  instructor_name: string | null;
+  starts_at: string;
+  ends_at: string;
+  created_at: string;
+}
+
+export interface TrainingAttendance {
+  id: number;
+  session_id: number;
+  employee_user_id: number;
+  attended_at: string;
+}
+
+export interface TrainingFeedback {
+  id: number;
+  course_id: number;
+  session_id: number;
+  content_score: number;
+  instructor_score: number;
+  comment: string | null;
+  status: 'submitted' | 'withdrawn';
+  submitted_at: string;
+  withdrawn_at: string | null;
+  updated_at: string;
+}
+
+export interface TrainingFeedbackState {
+  attended: boolean;
+  eligible: boolean;
+  reason: string | null;
+  window_closes_at: string | null;
+  feedback: TrainingFeedback | null;
+  improvement_note: string | null;
+  improvement_note_at: string | null;
+}
+
+export interface TrainingFeedbackSummary {
+  course_id: number;
+  feedback_count: number;
+  enough_samples: boolean;
+  content_avg: number | null;
+  instructor_avg: number | null;
+  themes: Array<{ theme: string; count: number }>;
+  improvement_note: string | null;
+  improvement_note_at: string | null;
 }
 
 export interface TrainingLearningRecord {
@@ -38,6 +92,7 @@ export interface TrainingPlanItem {
     reported_at: string | null;
     is_self_reported: boolean;
   };
+  feedback?: TrainingFeedbackState | null;
 }
 
 export interface TrainingPlanVersion {

@@ -125,7 +125,7 @@ function AnswerDrawer({
   const [detail, setDetail] = useState<AssessmentDetail | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<(AssessmentResultOut & {
-    review_items?: { question_id: number; is_completed: boolean; question_snapshot: { stem: string } }[];
+    review_items?: { question_id: number; is_completed: boolean; question_snapshot: { stem: string; correct_answer?: string; reference_points?: string } }[];
   }) | null>(null);
 
   const load = useCallback(async () => {
@@ -205,7 +205,7 @@ function AnswerDrawer({
       extra={
         <Space>
           {assignment?.status === 'grading' && <Button onClick={() => void handleRetry()}>重试评分</Button>}
-          {assignment?.status === 'completed' && detail.result && (
+          {assignment?.status === 'completed' && detail?.result && (
             <Button onClick={() => void viewResult()}>查看结果与复习</Button>
           )}
           {editable && (
