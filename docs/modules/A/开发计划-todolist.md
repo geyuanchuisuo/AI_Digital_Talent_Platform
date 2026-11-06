@@ -1,6 +1,6 @@
 # 开发计划 · Todolist · 板块 A
 
-> 版本：v0.1.8　|　日期：2026-11-07 00:05　|　身份：A　|　分支：`feature/A/continuation`（upstream `origin/feature/A/continuation`）　|　发布后 `master` = `origin/master` = `HEAD` = `8ab2f30`（已含他人并发提交 `0a24747`，A 的 9 个提交已 rebase 并合入）
+> 版本：v0.1.9　|　日期：2026-11-07 00:46　|　身份：A　|　分支：`feature/A/continuation`　|　`master` = `origin/master` = `HEAD` = `662c3ab`（00:05 合入 + 00:07 发布登记）
 > 上游：`docs/需求文档.md` **V2.2**、`docs/源码接入与需求决策.md`、`docs/四人分工与试行方案.md` §2、`docs/技术框架.md`、`tasks/A.md`、`docs/modules/A/设计方案.md` v0.1.1、`.collaboration/ownership.json`。
 > 用法：**按 M1 → M6 顺序**；每项满足「验收点」才勾选，勾选必须写实际命令/结果/证据落点；编号 `T-Axx` 供沟通引用。进度同步 `docs/modules/A/开发日志.md` Layer 3/4 与 `docs/updates/A/` 交接记录。
 > ⚠️ 本表是台账，**不是完成声明**；`[x]` 只表示「有实证且已登记」。3–4 天是首轮检查窗口，M1 实跑后按证据重排。
@@ -37,12 +37,13 @@
 - [x] **T-A72 按授权发布** ✅ 2026-11-07 00:05 完成（先同步再推）：网络授权放行后 `git fetch --all --prune`；`git push -u origin feature/A/continuation` 建远端分支；首次 `push master` 因他人并发提交 `0a24747` 被 `fetch first` 正确拒绝 → 重新 `fetch` + `git rebase origin/master`（9/9 零冲突、`README.md` 双方内容共存）→ `--base master` `Scope OK, changed_paths=23` → `push --force-with-lease` 更新个人分支 → 末次 `fetch` + 祖先检查 → `push origin master:master`（`0a24747..8ab2f30`）。复检：四个 ref 同为 `8ab2f30`、工作区干净、远端 master 树 7/7 交付文件齐备、README「一键交付」章节 1 处。**未验证**：发布版未重跑 T-A71 演练（rebase 只改提交号、树内容未变）、`.cmd`/`.sh` 单独实跑与业务 pytest/vitest/浏览器/真实模型调用。证据：[0005 交接记录](../../updates/A/20261107-0005-T-A72发布完成.md)、[开发日志](开发日志.md) Layer 3 §A-05；受阻历史见 [2345 记录](../../updates/A/20261106-2345-推送受阻待授权.md)（不回改）。
 ## M1 · 第 1 天环境与能力探针（未开始 → **接力 Agent 从这里开工**）
 
-- [ ] **T-A01 依赖、建库与启动探针** — 建 venv、`pip install -r backend/requirements.txt`、`init_db.py`、`check_env.py --skip-llm`、`uvicorn app.main:app --workers 1`、`curl /api/health`。验收点：7 项自检无 FAIL、`status=ok`、worker alive。`--workers 1` 是硬约束。证据：新增 `docs/updates/A/<时间戳>-M1首轮探针.md`
+- [ ] **T-A01 依赖、建库与启动探针** — 建 venv、`pip install -r backend/requirements.txt`、`init_db.py`、`check_env.py --skip-llm`、`uvicorn app.main:app --workers 1`、`curl /api/health`。验收点：7 项自检无 FAIL、`status=ok`、worker alive、`--workers 1` 硬约束。⏸ **00:46 自动部分已实跑**：自检 6 ✅/1 ⚠️/0 FAIL、init_db 幂等、health 200 且 worker alive，但 pytest 588 用例有 **4 项稳定失败**（配置契约 1 + 无 Key 的向量 3）、前端 vitest 14 文件 / 66 用例 2 失败（`ScreenBatchPanel` T-27、`TalentListPanel` 回收站恢复），按「不满足验收点不勾选」保持 `[ ]`；证据 [0050 记录](../../updates/A/20261107-0050-M1探针与架构冲突检测.md)、[待确认清单](架构待确认问题清单.md) C-01/C-02/C-03/C-06
 - [ ] **T-A02 现有招聘链路浏览器复现** — `hr/hr123456` 登录 → 建岗位 → 传 1 份 `docs/imports/hhy_gycs_master/eval/resumes/*.docx` → 解析 → 筛选 → 匹配 → 人工改判。验收点：**记录实际浏览器是否验证**、接口返回、耗时；不得用源码存在替代实测。
 - [ ] **T-A03 权限与失败边界反例** — 无 token / 停用账号 / 重复提交 / 单份失败 / 重启后任务恢复。验收点：401/403、幂等不重复建结果、runner 恢复不永久卡 running。
 - [ ] **T-A04 契约差距核对** — 抓 `/api/job-profiles`、`/api/screen/batches`、`/api/match/batches` 与 OpenAPI，逐字段比对 `docs/modules/A/源码接入基线.md`。验收点：差异写进 `docs/modules/A/` 契约文件并登记 Layer 4。
 - [ ] **T-A05 外部能力核对（与 D 协同）** — Agnes `agnes-3.0-flash` 鉴权/超时/结构化输出、独立 Embedding、Milvus collection 维度。验收点：**未验证即写未验证**，不假定 Agnes 提供 Embedding/OCR。
 - [ ] **T-A06 按探针结果重排工期** — 更新本表 M2–M6 状态、阻塞与下一检查点；不把 3–4 天写成承诺。
+- [x] **T-A07 跨模块架构冲突检测** ✅ 2026-11-07 00:46 完成：归属表全量覆盖（主干源码 0 无归属、C 分支 53 文件全归 C）、`git merge-tree` 对 3 个他人分支无文件级冲突、13 表断言 vs C 的 21 模型、C 模块路由/菜单未注册、配置契约与测试隔离等冲突全部定级编号。结论与待拍板项见 [待确认清单](架构待确认问题清单.md)、[0050 记录](../../updates/A/20261107-0050-M1探针与架构冲突检测.md)。**未合并任何分支、未 push**
 
 ## M2 · 身份、person_id 绑定与双端授权（F09 / 需求 §3、§12.1）
 
@@ -113,3 +114,5 @@
 - v0.1.6（2026-11-06 23:35）：**T-A71 已通过**（隔离副本真实实跑，含 2 个缺陷修复）；新增 T-A72 按授权发布。此后第一优先级是 T-A72，其次才是 M1 探针。
 - v0.1.7（2026-11-06 23:45）：T-A72 因远端 403 / 网络权限被拒而**阻塞**，未 push、未合并 master；第一优先级改为「等待用户放行网络或修复凭据」，恢复步骤已登记。
 - v0.1.8（2026-11-07 00:05）：**T-A72 已完成**——同步远端 → rebase 到他人并发提交 `0a24747` → push 个人分支 → 快进合入并 push `master`（`8ab2f30`）；远端 master 现含一键交付封装，客户默认 clone 即拿到。发布侧阻塞解除；**第一优先级回到 M1 探针**（T-A01 起），D→A 工作流/RBAC/通知契约仍待响应且站内事件清单待用户确认。
+
+- v0.1.9（2026-11-07 00:46）：用户「先把架构都跑出来，人工测试放最后，问题放一起睡醒一起回」。M1 自动探针与架构冲突检测已实跑（588 后端用例 / 14 前端测试文件 / 健康与鉴权反例 / 归属与合并预演），发现 8 类技术冲突 + 8 组需求裁决，全部汇总到 [架构待确认问题清单](架构待确认问题清单.md)。T-A01 因 4 项稳定失败未勾选；新增并勾选 T-A07。**第一优先级改为「等用户一次性回复」**，人工浏览器测试排最后，业务开发未启动、未 push。
