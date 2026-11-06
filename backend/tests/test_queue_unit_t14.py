@@ -88,11 +88,43 @@ def test_item_field_mapping() -> None:
     assert item["resume_file_id"] == 9
     assert item["filename"] == "张三.pdf"
     assert item["status"] == "failed"
+    assert item["task_status"] == "failed"
+    assert item["duplicate_pending"] is False
     assert item["stage"] == "vector"
     assert item["retries"] == 2
     assert item["truncated"] is True
     assert item["created_at"] == datetime(2026, 11, 5, 10, 0, 0)
     assert item["talent_profile_id"] is None
+
+
+@pytest.mark.parametrize(
+    ("raw", "contract"),
+    [
+        ("pending", "waiting"),
+        ("running", "running"),
+        ("success", "completed"),
+        ("failed", "failed"),
+        ("duplicate_pending", "completed"),
+        ("cancelled", "cancelled"),
+        ("unknown", "unknown"),
+    ],
+)
+def test_contract_status_mapping(raw: str, contract: str) -> None:
+    assert queue_service.to_contract_status(raw) == contract
+
+
+def test_duplicate_pending_keeps_business_substatus() -> None:
+    item = queue_service.build_item(
+        make_task("duplicate_pending"), make_file(), talent_profile_id=5
+    )
+    assert item["task_status"] == "completed"
+    assert item["duplicate_pending"] is True
+
+
+def test_action_payload_uses_contract_status() -> None:
+    payload = queue_service._action_payload(make_task("success"))
+    assert payload["status"] == "success"
+    assert payload["task_status"] == "completed"
 
 
 def test_list_queue_rejects_unknown_status_before_db_query() -> None:

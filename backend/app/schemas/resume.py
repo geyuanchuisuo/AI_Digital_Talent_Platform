@@ -74,7 +74,12 @@ class QueueItem(BaseModel):
     resume_file_id: int
     filename: str
     upload_batch_id: str
-    status: str = Field(description="pending/running/success/failed/duplicate_pending/cancelled")
+    status: str = Field(description="旧字段：pending/running/success/failed/duplicate_pending/cancelled")
+    task_status: str = Field(description="对外契约：waiting/running/completed/failed/cancelled")
+    duplicate_pending: bool = Field(
+        default=False,
+        description="为 true 时 task_status=completed，但仍需人工处理重复",
+    )
     stage: str | None = Field(default=None, description="extract/profile/vector；pending 时可为 null")
     retries: int
     error: str | None = None
@@ -119,5 +124,6 @@ class TaskActionData(BaseModel):
 
     task_id: int
     status: str
+    task_status: str = Field(description="对外契约：waiting/running/completed/failed/cancelled")
     stage: str | None
     retries: int

@@ -50,6 +50,22 @@ _STATUS_TEXT = {
     "cancelled": "已取消",
 }
 
+#: 数据库状态 → 对外任务状态契约（见 docs/modules/B/接口与数据契约.md §3）。
+#: 旧 status 保留兼容；duplicate_pending 对外为 completed，并用 duplicate_pending 子状态区分。
+CONTRACT_STATUS_MAP = {
+    "pending": "waiting",
+    "running": "running",
+    "success": "completed",
+    "failed": "failed",
+    "duplicate_pending": "completed",
+    "cancelled": "cancelled",
+}
+
+
+def to_contract_status(status: str) -> str:
+    """把数据库任务状态映射为对外契约值；未知状态原样返回，不掩盖异常。"""
+    return CONTRACT_STATUS_MAP.get(status, status)
+
 
 def validate_concurrency(value: int) -> int:
     """1–5 整数校验；越界抛 400（接口 §4 要求 400，不能用 Pydantic 的 422）。"""
@@ -68,6 +84,8 @@ def build_item(task: ParseTask, resume_file: ResumeFile, talent_profile_id: int 
         "filename": resume_file.filename,
         "upload_batch_id": resume_file.upload_batch_id,
         "status": task.status,
+        "task_status": to_contract_status(task.status),
+        "duplicate_pending": task.status == "duplicate_pending",
         "stage": task.stage,
         "retries": task.retries,
         "error": task.error,
@@ -139,7 +157,11 @@ def _get_task(db: Session, task_id: int) -> ParseTask:
 
 def _action_payload(task: ParseTask) -> dict:
     return TaskActionData(
-        task_id=task.id, status=task.status, stage=task.stage, retries=task.retries
+        task_id=task.id,
+        status=task.status,
+        task_status=to_contract_status(task.status),
+        stage=task.stage,
+        retries=task.retries,
     ).model_dump()
 
 

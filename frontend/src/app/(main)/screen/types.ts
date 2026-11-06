@@ -15,6 +15,9 @@ export type QueueStatus =
   | 'duplicate_pending'
   | 'cancelled';
 
+/** 对外任务状态契约（`task_status`），旧 `status` 仍保留兼容 */
+export type ContractTaskStatus = 'waiting' | 'running' | 'completed' | 'failed' | 'cancelled';
+
 export interface QueueSummary {
   pending: number;
   running: number;
@@ -32,6 +35,8 @@ export interface QueueItem {
   filename: string;
   upload_batch_id: string;
   status: QueueStatus;
+  task_status: ContractTaskStatus;
+  duplicate_pending: boolean;
   stage: string | null;
   retries: number;
   error: string | null;
@@ -66,6 +71,7 @@ export interface QueueSettingsData {
 export interface TaskActionData {
   task_id: number;
   status: QueueStatus;
+  task_status: ContractTaskStatus;
   stage: string | null;
   retries: number;
 }
