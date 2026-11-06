@@ -100,9 +100,11 @@ def main():
             raise ScopeError('Set collab.actor to A/B/C/D or pass --actor; never guess your role.')
         policy = json.loads((root / '.collaboration/ownership.json').read_text(encoding='utf-8'))
         branch = git(root, 'branch', '--show-current').decode().strip()
-        if not any(branch.startswith(f'{kind}/{actor}/') and len(branch.split('/')) >= 3
+        if branch == 'master':
+            raise ScopeError('Development on master is forbidden for everyone; switch to your development branch.')
+        if branch != 'master_YB' and not any(branch.startswith(f'{kind}/{actor}/') and len(branch.split('/')) >= 3
                    and branch.split('/')[-1] for kind in ('feature', 'fix', 'docs', 'integration')):
-            raise ScopeError(f'Use feature/{actor}/<task> (or fix/docs/integration), got {branch!r}')
+            raise ScopeError(f'Use master_YB or feature/{actor}/<task> (or fix/docs/integration), got {branch!r}')
         if args.base:
             git(root, 'rev-parse', '--verify', f'{args.base}^{{commit}}')
             paths = parse_diff(git(root, 'diff', '--no-ext-diff', '--no-renames', '--name-status', '-z', f'{args.base}...HEAD'))

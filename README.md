@@ -14,7 +14,9 @@
 
 先读 [AGENTS.md](AGENTS.md)、[更新记录](更新记录.md)、[协作操作指南](docs/协作操作指南.md) 和 [模块归属](docs/模块归属.md)。确认本人 A/B/C/D 角色，再读对应 [A](tasks/A.md) / [B](tasks/B.md) / [C](tasks/C.md) / [D](tasks/D.md) 任务卡及最新交接。
 
-规则和脚本需要提交到远端，其他人 pull 后才会取得；本次没有自动提交或 push。Git 不会自动安装 hooks：协作基线提交后，每人在自己的 clone 运行 `python scripts/setup_collaboration.py --actor B`（B 换成本人），再使用 `feature/B/<任务>` 分支。不要在角色未知时运行或猜测身份。
+需求与协作基线已于 2026-11-06 发布到 `origin/master`（`5c3df08`）。任何成员与 Agent 都不得在 `master` 开发或创建开发提交；它仅用于经明确授权的集成与发布。本工作副本主要在 `master_YB` 开发，其他成员使用自己的非 `master` 开发分支。
+
+Git 不会自动安装 hooks：每人在自己的 clone 确认角色后运行 `python scripts/setup_collaboration.py --actor B`（B 换成本人）。本工作副本保留 `master_YB`，其他成员默认使用 `feature/B/<任务>` 分支。分支名不代表角色，不要在角色未知时运行或猜测身份。规则与脚本的新变更提交到远端后，其他人 pull 才会取得。
 
 已提供提交前路径检查、独立更新记录及跨模块请求模板；它们减少误改，不是不可绕过的权限系统。共享文件由指定角色集成，远端保护与评审另由仓库负责人配置。业务尚未实现，协作工具的通过不等于产品测试通过。
 

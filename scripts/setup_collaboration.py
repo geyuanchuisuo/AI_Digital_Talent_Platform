@@ -30,7 +30,7 @@ def main():
     run('-C', str(root), 'config', '--local', 'collab.actor', args.actor)
     run('-C', str(root), 'config', '--local', 'core.hooksPath', '.githooks')
     print(f'Configured this clone: actor={args.actor}, hooksPath=.githooks')
-    print('Use your own clone; change to your feature/<actor>/<task> branch before committing.')
+    print('Use your own clone and development branch: master_YB here, otherwise feature/<actor>/<task>. Never develop on master.')
     return 0
 
 

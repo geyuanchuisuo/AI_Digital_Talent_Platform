@@ -135,6 +135,38 @@ class GitIntegrationTests(unittest.TestCase):
         self.git('switch', '-c', 'feature/C/another')
         self.assertNotEqual(self.run_checker('--staged').returncode, 0)
 
+    def test_master_blocked_for_every_role(self):
+        self.git('switch', '-c', 'master')
+        for actor in 'ABCD':
+            result = self.run_checker('--actor', actor, '--staged')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('Development on master is forbidden', result.stderr)
+
+    def test_master_yb_own_change_and_update_pass(self):
+        self.git('switch', '-c', 'master_YB')
+        self.put('backend/app/modules/talents/service.py')
+        self.new_update()
+        self.stage()
+        result = self.run_checker('--staged')
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_master_yb_cross_scope_blocked(self):
+        self.git('switch', '-c', 'master_YB')
+        self.put('backend/app/modules/training/other.py')
+        self.new_update()
+        self.stage()
+        result = self.run_checker('--staged')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('owner=C, actor=B', result.stderr)
+
+    def test_master_yb_missing_update_blocked(self):
+        self.git('switch', '-c', 'master_YB')
+        self.put('backend/app/modules/talents/service.py')
+        self.stage()
+        result = self.run_checker('--staged')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Code changes require a NEW', result.stderr)
+
     def test_committed_branch_range_checked(self):
         self.put('backend/app/modules/talents/service.py')
         self.new_update()
