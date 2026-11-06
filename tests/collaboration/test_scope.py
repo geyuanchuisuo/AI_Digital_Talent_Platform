@@ -1,0 +1,175 @@
+import importlib.util
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+
+
+ROOT = Path(__file__).resolve().parents[2]
+SPEC = importlib.util.spec_from_file_location('scope', ROOT / 'scripts/check_scope.py')
+scope = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(scope)
+POLICY = json.loads((ROOT / '.collaboration/ownership.json').read_text(encoding='utf-8'))
+
+
+class PolicyTests(unittest.TestCase):
+    def test_each_role_owns_its_module_and_records(self):
+        examples = {'A': 'matching', 'B': 'talents', 'C': 'assessments', 'D': 'analytics'}
+        for actor, module in examples.items():
+            for path in [f'backend/app/modules/{module}/service.py',
+                         f'frontend/src/features/{module}/Page.tsx',
+                         f'docs/updates/{actor}/20261106-note.md', f'tasks/{actor}.md',
+                         f'backend/migrations/versions/{actor}_001_example.py']:
+                self.assertEqual(scope.check_paths([path], actor, POLICY), [])
+                for other in set('ABCD') - {actor}:
+                    self.assertTrue(scope.check_paths([path], other, POLICY), (other, path))
+
+    def test_private_and_unknown_paths_rejected_for_everyone(self):
+        for path in ['.env', 'backend/.env.local', 'data/report.pdf', '.idea/misc.xml',
+                     'docs/requirements/sources/需求文档.md', 'docs/test/seed_data.sql',
+                     'frontend/src/features/talents2/Page.tsx', 'new_unknown.py',
+                     'backend/app/core/authentication/x.py']:
+            for actor in 'ABCD':
+                self.assertTrue(scope.check_paths([path], actor, POLICY), (actor, path))
+
+    def test_governance_cannot_be_rewritten_by_module_owner(self):
+        self.assertEqual(scope.owner_of('backend/app/modules/talents/AGENTS.md', POLICY), 'A')
+        self.assertTrue(scope.check_paths(['backend/app/modules/talents/AGENTS.md'], 'B', POLICY))
+        self.assertIsNone(scope.owner_of('backend/app/modules/talents/AGENTS.override.md', POLICY))
+
+    def test_unsafe_paths_and_migration_prefixes(self):
+        for path in ['../x', '/x', 'C:/x', 'backend/../x', 'a\\b', 'a//b']:
+            with self.assertRaises(scope.ScopeError):
+                scope.owner_of(path, POLICY)
+        self.assertIsNone(scope.owner_of('backend/migrations/versions/C_extra/A_001.py', POLICY))
+
+    def test_rename_parser_checks_both_paths(self):
+        raw = b'R100\x00backend/app/modules/talents/old.py\x00backend/app/modules/training/new.py\x00'
+        paths = scope.parse_diff(raw)
+        self.assertEqual(len(paths), 2)
+        self.assertTrue(scope.check_paths(paths, 'B', POLICY))
+        self.assertTrue(scope.check_paths(paths, 'C', POLICY))
+
+
+@unittest.skipUnless(shutil.which('git'), 'Git required')
+class GitIntegrationTests(unittest.TestCase):
+    def git(self, *args):
+        return subprocess.run(['git', '-C', str(self.repo), *args], check=True, capture_output=True)
+
+    def put(self, path, text='example\n'):
+        file = self.repo / path
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text(text, encoding='utf-8')
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix='talent-scope-')
+        self.addCleanup(self.tmp.cleanup)
+        self.repo = Path(self.tmp.name)
+        self.git('init', '-b', 'main')
+        self.git('config', 'user.name', 'Scope Test')
+        self.git('config', 'user.email', 'scope-test@example.invalid')
+        self.put('.collaboration/ownership.json', json.dumps(POLICY))
+        for name in ['scripts/check_scope.py', 'scripts/setup_collaboration.py', '.githooks/pre-commit']:
+            self.put(name, (ROOT / name).read_text(encoding='utf-8'))
+        self.put('backend/app/modules/talents/old.py')
+        self.put('docs/updates/B/old.md', '# Old recorded result\n')
+        self.git('add', '--all')  # Disposable test repo only.
+        self.git('update-index', '--chmod=+x', '.githooks/pre-commit')
+        self.git('commit', '-m', 'test baseline')
+        self.git('switch', '-c', 'feature/B/parser')
+
+    def run_checker(self, *args):
+        return subprocess.run([sys.executable, str(self.repo / 'scripts/check_scope.py'),
+                               '--actor', 'B', *args], cwd=self.repo, capture_output=True,
+                              text=True, encoding='utf-8', env={**os.environ, 'PYTHONIOENCODING': 'utf-8'})
+
+    def new_update(self):
+        self.put('docs/updates/B/20261106-120000-result.md', '# Real result\n')
+
+    def stage(self):
+        self.git('add', '--all')  # Disposable test repo only.
+
+    def test_own_change_and_new_update_pass(self):
+        self.put('backend/app/modules/talents/中文 文件.py')
+        self.new_update()
+        self.stage()
+        result = self.run_checker('--staged')
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_other_module_is_blocked(self):
+        self.put('backend/app/modules/training/service.py')
+        self.new_update()
+        self.stage()
+        self.assertNotEqual(self.run_checker('--staged').returncode, 0)
+
+    def test_missing_new_update_blocked(self):
+        self.put('backend/app/modules/talents/service.py')
+        self.stage()
+        self.assertNotEqual(self.run_checker('--staged').returncode, 0)
+
+    def test_rewriting_previous_update_is_blocked(self):
+        self.put('docs/updates/B/old.md', '# silently rewritten\n')
+        self.new_update()
+        self.stage()
+        self.assertNotEqual(self.run_checker('--staged').returncode, 0)
+
+    def test_cross_module_move_blocked(self):
+        (self.repo / 'backend/app/modules/training').mkdir(parents=True)
+        self.git('mv', 'backend/app/modules/talents/old.py', 'backend/app/modules/training/moved.py')
+        self.new_update()
+        self.stage()
+        self.assertNotEqual(self.run_checker('--staged').returncode, 0)
+
+    def test_own_delete_with_update_passes(self):
+        self.git('rm', 'backend/app/modules/talents/old.py')
+        self.new_update()
+        self.stage()
+        result = self.run_checker('--staged')
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_role_branch_mismatch_blocked(self):
+        self.git('switch', '-c', 'feature/C/another')
+        self.assertNotEqual(self.run_checker('--staged').returncode, 0)
+
+    def test_committed_branch_range_checked(self):
+        self.put('backend/app/modules/talents/service.py')
+        self.new_update()
+        self.stage()
+        self.git('commit', '-m', 'own module')
+        result = self.run_checker('--base', 'main')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.put('backend/app/modules/training/other.py')
+        self.stage()
+        self.git('commit', '-m', 'cross boundary')  # Hook deliberately not installed in this repo.
+        self.assertNotEqual(self.run_checker('--base', 'main').returncode, 0)
+
+    def test_setup_and_hook_reject_cross_scope(self):
+        setup = subprocess.run([sys.executable, str(self.repo / 'scripts/setup_collaboration.py'),
+                                '--actor', 'B'], cwd=self.repo, capture_output=True)
+        self.assertEqual(setup.returncode, 0, setup.stderr)
+        self.put('backend/app/modules/training/other.py')
+        self.new_update()
+        self.stage()
+        result = subprocess.run(['git', '-C', str(self.repo), 'commit', '-m', 'should reject'], capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(b'Scope check failed', result.stderr)
+
+    def test_setup_preserves_existing_hooks_path(self):
+        self.git('config', 'core.hooksPath', 'existing-hooks')
+        setup = subprocess.run([sys.executable, str(self.repo / 'scripts/setup_collaboration.py'),
+                                '--actor', 'B'], cwd=self.repo, capture_output=True)
+        self.assertNotEqual(setup.returncode, 0)
+        self.assertEqual(self.git('config', '--get', 'core.hooksPath').stdout.strip(), b'existing-hooks')
+
+    def test_missing_actor_fails_closed(self):
+        result = subprocess.run([sys.executable, str(self.repo / 'scripts/check_scope.py'), '--staged'],
+                                cwd=self.repo, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+
+
+if __name__ == '__main__':
+    unittest.main()

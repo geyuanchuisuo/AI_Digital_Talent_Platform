@@ -1,0 +1,8 @@
+* text=auto
+.githooks/* text eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+
+# Preserve source snapshots byte-for-byte for docs/requirements/来源校验.json.
+docs/requirements/sources/** -text

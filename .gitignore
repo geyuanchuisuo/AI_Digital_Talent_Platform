@@ -1,0 +1,20 @@
+# Local credentials and runtime outputs
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+.idea/
+.vscode/
+.venv/
+node_modules/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+/data/
+*.log

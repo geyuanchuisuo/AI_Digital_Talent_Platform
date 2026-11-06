@@ -1,0 +1,10 @@
+#!/bin/sh
+# Explicit opt-in via scripts/setup_collaboration.py; Git runs this from repo root.
+if command -v python >/dev/null 2>&1; then
+    exec python scripts/check_scope.py --staged
+elif command -v py >/dev/null 2>&1; then
+    exec py -3 scripts/check_scope.py --staged
+else
+    echo "Python is required for the collaboration scope check." >&2
+    exit 1
+fi
