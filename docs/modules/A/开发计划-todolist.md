@@ -1,6 +1,6 @@
 # 开发计划 · Todolist · 板块 A
 
-> 版本：v0.1.4　|　日期：2026-11-06 22:28　|　身份：A　|　分支：`feature/A/continuation`　|　基线：`60f7967`（22:28 二次同步，A 的 3 个提交已 rebase）
+> 版本：v0.1.5　|　日期：2026-11-06 22:45　|　身份：A　|　分支：`feature/A/continuation`　|　基线：`60f7967`（22:28 二次同步，A 的 3 个提交已 rebase）
 > 上游：`docs/需求文档.md` **V2.2**、`docs/源码接入与需求决策.md`、`docs/四人分工与试行方案.md` §2、`docs/技术框架.md`、`tasks/A.md`、`docs/modules/A/设计方案.md` v0.1.1、`.collaboration/ownership.json`。
 > 用法：**按 M1 → M6 顺序**；每项满足「验收点」才勾选，勾选必须写实际命令/结果/证据落点；编号 `T-Axx` 供沟通引用。进度同步 `docs/modules/A/开发日志.md` Layer 3/4 与 `docs/updates/A/` 交接记录。
 > ⚠️ 本表是台账，**不是完成声明**；`[x]` 只表示「有实证且已登记」。3–4 天是首轮检查窗口，M1 实跑后按证据重排。
@@ -30,6 +30,10 @@
 - [x] **T-A00e 全仓只读静态架构核查** ✅ 2026-11-06 21:26 完成（360 文件 / 60,758 行；132 py AST 0 错、内部导入 0 断裂、归属表覆盖偏差 31/278；勘误评分链路措辞；结论见[开发日志](开发日志.md) Layer 3 §A-01、H-A11/H-A12）。**仅静态，运行态未验证，不能替代 M1**
 - [x] **T-A00f 二次同步远端 master 与基线变基** ✅ 2026-11-06 22:28 完成（`git fetch --all --prune` → `git branch -f master origin/master` → `git rebase origin/master`；基线 `df6dae1 → 60f7967`，3 个本地提交重放零冲突，新号 `6f49dc3/834ebfc/3636165`；`--base master` 8 / `--staged` 0 / behind 0 ahead 3；见[开发日志](开发日志.md) Layer 3 §A-02、[交接记录](../../updates/A/20261106-222800-同步远端master与基线变基.md)）。**未 push、未合并 master**
 
+## M7 · 交付环境封装（用户 22:27 独立任务，不进入 M1–M6 主链）
+
+- [x] **T-A70 一键自动创建运行环境** ✅ 2026-11-06 22:45 实现（`scripts/A/bootstrap.py` + `.cmd`/`.sh`、根 `.env.example`、`backend/.env.example` 真实默认值、`deploy/milvus/docker-compose.yml` +mysql、README 一键章节、[设计说明](交付环境封装.md)）。验证：`py_compile` / `--help`、临时目录配置生成 **11/11**、`docker compose config --quiet`（4 服务 + mysql 卷）、`check_scope --staged`。**未验证**：客户机端到端一键流程（本机 3306/19530 被旧 main 占用，实跑 `init_db.py` 会碰同名库），须在隔离机器演练并补证据。详见 [开发日志](开发日志.md) Layer 3 §A-03、[交接记录](../../updates/A/20261106-224500-交付环境封装.md)。
+- [ ] **T-A71 隔离环境端到端演练** — 在干净机器或独立端口跑一次 `bootstrap.cmd`/`bootstrap.sh`，记录容器启动、venv/npm、建库 seed、`check_env`、前后端 health 与浏览器登录的**真实输出**；未跑不写通过。
 ## M1 · 第 1 天环境与能力探针（未开始 → **接力 Agent 从这里开工**）
 
 - [ ] **T-A01 依赖、建库与启动探针** — 建 venv、`pip install -r backend/requirements.txt`、`init_db.py`、`check_env.py --skip-llm`、`uvicorn app.main:app --workers 1`、`curl /api/health`。验收点：7 项自检无 FAIL、`status=ok`、worker alive。`--workers 1` 是硬约束。证据：新增 `docs/updates/A/<时间戳>-M1首轮探针.md`
@@ -104,3 +108,4 @@
 - v0.1.2（2026-11-06 21:34）：M0 全部内容已随 `cd76b80` 本地提交（**未 push、未合并 master**）；M0 任务数 4→5；提交后 `--base master` = `changed_paths=8`。M1 仍是唯一下一步。
 - v0.1.3（2026-11-06 21:35）：补记状态订正提交 `c139566`；实时 HEAD 以 `git log -1` 为准。M1 仍是唯一下一步。
 - v0.1.4（2026-11-06 22:28）：二次同步远端 master `60f7967` + rebase，M0 任务数 5→6、补 T-A00f、登记 D→A 新契约请求；**下一步改为用户要求的「交付环境封装」，随后才是 M1 探针**。
+- v0.1.5（2026-11-06 22:45）：新增独立批次 **M7**（T-A70 已实现、T-A71 隔离环境端到端演练待做）；交付封装未端到端验证，接力 Agent 第一优先级是 T-A71 补证据，其次才是 M1。

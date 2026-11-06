@@ -30,13 +30,38 @@ Git 不会自动安装 hooks：每人在自己的 clone 确认角色后运行 `p
 
 已提供提交前路径检查、独立更新记录及跨模块请求模板；它们减少误改，不是不可绕过的权限系统。共享文件由指定角色集成，远端保护与评审另由仓库负责人配置。业务尚未实现，协作工具的通过不等于产品测试通过。
 
+## 一键交付（推荐）：clone 后一条命令自动建好环境
+
+客户只需预装 **Python 3.11+ / Node.js 20+ / Docker Desktop**（系统级运行时，仓库无法代装），然后：
+
+| 系统 | 操作 |
+|---|---|
+| Windows | 双击 `scripts/A/bootstrap.cmd`，或在仓库根执行 `python scripts/A/bootstrap.py --start` |
+| Linux / macOS | `bash scripts/A/bootstrap.sh` |
+
+只建环境不启动服务：`python scripts/A/bootstrap.py`；复用客户已有 MySQL/Milvus：`python scripts/A/bootstrap.py --no-docker`。
+
+脚本自动完成，**幂等**（重跑不会覆盖客户已填的配置或已有数据）：
+
+1. 生成 `backend/.env`（随机 `JWT_SECRET`、MySQL 密码、真实供应商默认地址）与 `frontend/.env.local`（API 基址）
+2. 检测本机 3306 / 19530，缺哪个就用 `deploy/milvus/docker-compose.yml` 自动起 MySQL 8 或 Milvus 2.6（含 etcd、minio），数据落在命名卷
+3. 创建 `backend/.venv` 安装 `requirements.txt`；`frontend` 执行 `npm ci`（按 `package-lock.json` 锁版本）
+4. `init_db.py` 幂等建库建表 + seed 账号 `hr/hr123456` 与示例岗位（MySQL 启动慢时自动重试 5 次）
+5. `check_env.py` 自检；Milvus collection 由后端启动时 `lifespan` 自动创建
+6. `--start` 启动 `uvicorn --workers 1`（8000）与 `next dev`（3000），Ctrl+C 停止
+
+**唯一需要客户手填的**：仓库根 `.env` 的 `LLM_API_KEY` / `EMBEDDING_API_KEY`（首次运行自动从 `.env.example` 生成）。外部模型凭据不能写进 Git；不填也能把环境完整建好，只是简历解析、AI 评分、向量检索不可用，脚本会明确提示。默认供应商沿用历史实配：讯飞 Spark `spark-x2.6` + 阿里百炼 `text-embedding-v3`（1024 维），均为 OpenAI 兼容协议；Agnes 目标待 D 验证后，只需在根 `.env` 覆盖三行即可切换。
+
+访问：前端 http://localhost:3000，健康检查 http://localhost:8000/api/health，登录 `hr/hr123456`（**生产环境必须立即修改**）。`docker compose -f deploy/milvus/docker-compose.yml down` 保留数据卷，`down -v` 才会清数据。
+
+> 实现细节、边界与验证记录见 [交付环境封装](docs/modules/A/交付环境封装.md)。下面「独立环境准备」是手工步骤，供了解细节或排障用，交付场景不需要逐步执行。
 ## 独立环境准备与运行入口
 
 下面命令根据导入源码整理，**尚未在本机执行验证**。每人使用独立数据库、文件目录与本地配置；不要复用其他项目的运行数据。Python、Node、MySQL 及 pymilvus/Milvus 的具体版本按源码依赖与来源兼容记录先验证，再锁定；环境差异记录在个人交接。
 
 1. 阅读 `backend/requirements.txt`、`frontend/package.json` 与 `deploy/milvus/docker-compose.yml`。源码前端是 Next.js，不再按旧 Vite 建议另起项目。
 2. 创建本项目 Python 虚拟环境并安装后端依赖；前端使用 `npm ci` 按锁文件安装。依赖不包含在此次源码导入内。
-3. 将 `backend/.env.example` 复制为本地 `backend/.env`，将 `frontend/.env.local.example` 复制为 `frontend/.env.local`。填独立 MySQL 库、JWT_SECRET 和有效模型配置；模板中的供应商地址是占位值，不能只填 Key。前端配置不得包含模型密钥。
+3. 手工方式：将 `backend/.env.example` 复制为本地 `backend/.env`，将 `frontend/.env.local.example` 复制为 `frontend/.env.local`。填独立 MySQL 库、JWT_SECRET 和有效模型配置；模板默认值已对齐历史实配供应商（一键交付下由 bootstrap 自动生成，无需手工复制）。前端配置不得包含模型密钥。
 4. 对话目标仍为 Agnes `agnes-3.0-flash` / `https://api.agnes-ai.cn/v1`，协议及结构化输出待 D 验证。来源历史实配为 Spark + 独立 Embedding；需要向量功能时单独配置 Embedding 模型/维度与 Milvus，不能假定 Agnes 提供该能力。
 5. 如需现有语义检索，在 `deploy/milvus/` 使用所附编排启动独立实例；先检查端口、容器及卷名，避免和其他项目冲突。由各人本机维护运行数据，不提交 Git。
 6. 在 `backend/` 执行 `python scripts/init_db.py`，再执行 `python scripts/check_env.py`。初始化会建库建表并写示例岗位及本地 HR 演示账号；实际权限和连接以本机验证为准。现有脚本用 `create_all`，后续表结构变更须由 A 补迁移策略，不能把重复执行当成升级已有表。
