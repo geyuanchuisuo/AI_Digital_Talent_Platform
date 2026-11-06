@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import QueuePanel from './QueuePanel';
 import { cancelTask, fetchBatches, fetchQueue, requeueTask, retryTask, updateConcurrency } from './api';
-import type { QueueListData, QueueItem } from './types';
+import type { ContractTaskStatus, QueueItem, QueueListData } from './types';
 
 vi.mock('./api', () => ({
   fetchQueue: vi.fn(),
@@ -23,10 +23,22 @@ const cancelTaskMock = vi.mocked(cancelTask);
 
 const BATCH = '01JABCDEFGHJKMNPQRSTVWXYZA';
 
+/** 旧 status → 契约 task_status 的映射（与 backend CONTRACT_STATUS_MAP 一致） */
+const CONTRACT_STATUS: Record<QueueItem['status'], ContractTaskStatus> = {
+  pending: 'waiting',
+  running: 'running',
+  success: 'completed',
+  failed: 'failed',
+  duplicate_pending: 'completed',
+  cancelled: 'cancelled',
+};
+
 function item(patch: Partial<QueueItem> & Pick<QueueItem, 'task_id' | 'filename' | 'status'>): QueueItem {
   return {
     resume_file_id: patch.task_id + 10,
     upload_batch_id: BATCH,
+    task_status: CONTRACT_STATUS[patch.status],
+    duplicate_pending: patch.status === 'duplicate_pending',
     stage: null,
     retries: 0,
     error: null,
@@ -78,9 +90,15 @@ describe('QueuePanel', () => {
       page_size: 100,
     });
     updateConcurrencyMock.mockReset().mockResolvedValue({ concurrency: 3, effective: 'next_scan' });
-    retryTaskMock.mockReset().mockResolvedValue({ task_id: 1, status: 'pending', stage: 'vector', retries: 3 });
-    requeueTaskMock.mockReset().mockResolvedValue({ task_id: 2, status: 'pending', stage: null, retries: 1 });
-    cancelTaskMock.mockReset().mockResolvedValue({ task_id: 5, status: 'cancelled', stage: null, retries: 0 });
+    retryTaskMock
+      .mockReset()
+      .mockResolvedValue({ task_id: 1, status: 'pending', task_status: 'waiting', stage: 'vector', retries: 3 });
+    requeueTaskMock
+      .mockReset()
+      .mockResolvedValue({ task_id: 2, status: 'pending', task_status: 'waiting', stage: null, retries: 1 });
+    cancelTaskMock
+      .mockReset()
+      .mockResolvedValue({ task_id: 5, status: 'cancelled', task_status: 'cancelled', stage: null, retries: 0 });
   });
 
   it('渲染汇总卡片、状态与阶段，按钮严格按 can_retry/can_requeue/可删状态显隐', async () => {
@@ -95,6 +113,8 @@ describe('QueuePanel', () => {
 
     // 状态 / 阶段 / 错误
     expect(screen.getAllByText('失败').length).toBeGreaterThan(0);
+    // 成功行展示契约 task_status=completed 的「已完成」，而非旧 status 的「成功」
+    expect(screen.getByText('已完成')).toBeTruthy();
     expect(screen.getByText('同步向量')).toBeTruthy();
     expect(screen.getByText('提取文本')).toBeTruthy();
     expect(screen.getByText('Milvus 连接失败: timeout')).toBeTruthy();

@@ -23,6 +23,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Sequence
@@ -35,6 +37,7 @@ from app.core.normalize import DEGREE_VALUES, normalize_email, normalize_phone, 
 from app.dao import resume_files as resume_file_dao
 from app.dao import talent_profiles as profile_dao
 from app.models import JobProfile, MatchBatch, MatchResult, ScreenBatch, ScreenResult, TalentProfile, TalentTag
+from app.models.resume import ParseTask, ParsedResume, ResumeFile
 from app.schemas.profile import ABILITY_KEYS, BASIS_MAX_CHARS
 from app.schemas.talent import TAG_TYPE_VALUES, TagEntry, TalentPatchRequest
 from app.service.profile_service import FIELD_COLUMNS, aggregate_structured, sync_profile_vector
@@ -595,4 +598,510 @@ def _profile_out(profile: TalentProfile, tag_rows: Sequence[TalentTag]) -> dict[
         "vector_status": profile.vector_status,
         "created_at": profile.created_at,
         "updated_at": profile.updated_at,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# A/C/D 共用：只读人员快照（阶段 1，无版本表/证据表）
+# --------------------------------------------------------------------------- #
+SNAPSHOT_BASELINE_VERSION = 1
+SNAPSHOT_MAX_BATCH = 100
+SNAPSHOT_MAX_LIMIT = 50
+EVIDENCE_MAX_BATCH = 50
+EVIDENCE_MAX_LIMIT = 50
+EVIDENCE_FIELD_PATHS = (
+    "profile",
+    "basic",
+    "skills",
+    "educations",
+    "employments",
+    "projects",
+    "certificates",
+)
+SNAPSHOT_FIELDS = (
+    "phone",
+    "email",
+    "birth_year",
+    "city",
+    "degree",
+    "work_years",
+    "current_title",
+    "expected_title",
+    "skills",
+    "educations",
+    "employments",
+    "projects",
+)
+EXPERIENCE_FIELDS = ("educations", "employments", "projects")
+
+
+class SnapshotError(Exception):
+    """快照服务错误基类；A/D 按异常类型映射 HTTP 状态。"""
+
+
+class SnapshotValidationError(SnapshotError, ValueError):
+    """批量/分页/字段路径非法。"""
+
+
+class SnapshotScopeError(SnapshotError, PermissionError):
+    """越权读取他人档案。"""
+
+
+@dataclass(frozen=True)
+class AccountScope:
+    """调用方身份：system/hr/admin 可读全部，personal 只能读本人。"""
+
+    role: str = "system"
+    person_id: int | None = None
+
+
+def _normalize_scope(scope: AccountScope | Mapping[str, Any] | None) -> AccountScope:
+    if scope is None:
+        return AccountScope()
+    if isinstance(scope, Mapping):
+        raw_person_id = scope.get("person_id")
+        if raw_person_id is not None and (isinstance(raw_person_id, bool) or not isinstance(raw_person_id, int)):
+            raise SnapshotValidationError("scope.person_id 必须是整数")
+        scope = AccountScope(role=str(scope.get("role") or "system"), person_id=raw_person_id)
+    if not isinstance(scope, AccountScope):
+        raise SnapshotValidationError("scope 类型非法")
+    if scope.role not in {"system", "hr", "admin", "personal"}:
+        raise SnapshotValidationError("scope.role 非法")
+    if scope.role == "personal" and scope.person_id is None:
+        raise SnapshotValidationError("personal 身份必须提供 person_id")
+    return scope
+
+
+def _ensure_scope(scope: AccountScope, person_ids: Sequence[int]) -> None:
+    if scope.role != "personal":
+        return
+    for person_id in person_ids:
+        if person_id != scope.person_id:
+            raise SnapshotScopeError("个人账号只能读取本人档案")
+
+
+def _normalize_person_ids(person_ids: Sequence[int], max_count: int) -> list[int]:
+    if isinstance(person_ids, (str, bytes)):
+        raise SnapshotValidationError("person_ids 必须是整数列表")
+    result: list[int] = []
+    seen: set[int] = set()
+    for raw in person_ids:
+        if isinstance(raw, bool) or not isinstance(raw, int) or raw <= 0:
+            raise SnapshotValidationError("person_id 必须是正整数")
+        if raw in seen:
+            continue
+        seen.add(raw)
+        result.append(raw)
+    if len(result) > max_count:
+        raise SnapshotValidationError(f"单次最多 {max_count} 个 person_id")
+    return result
+
+
+def _validate_limit(limit: int, max_value: int) -> int:
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= max_value:
+        raise SnapshotValidationError(f"limit 必须在 1–{max_value} 之间")
+    return limit
+
+
+def _encode_cursor(person_id: int) -> str:
+    return f"p:{person_id}"
+
+
+def _decode_cursor(cursor: str | None) -> int | None:
+    if not cursor:
+        return None
+    if not cursor.startswith("p:"):
+        raise SnapshotValidationError("cursor 非法")
+    try:
+        value = int(cursor[2:])
+    except ValueError as exc:
+        raise SnapshotValidationError("cursor 非法") from exc
+    if value <= 0:
+        raise SnapshotValidationError("cursor 非法")
+    return value
+
+
+def _mask_name(value: str | None) -> str | None:
+    if not value:
+        return None
+    if "*" in value:
+        return value
+    return value[0] + "*" * max(1, len(value) - 1)
+
+
+def _mask_phone(value: str | None) -> str | None:
+    if not value:
+        return None
+    if "*" in value:
+        return value
+    digits = "".join(ch for ch in value if ch.isdigit())
+    if len(digits) >= 7:
+        return f"{digits[:3]}****{digits[-4:]}"
+    return "****"
+
+
+def _mask_email(value: str | None) -> str | None:
+    if not value:
+        return None
+    if "*" in value:
+        return value
+    local, sep, domain = value.partition("@")
+    if not sep:
+        return "***"
+    return f"{local[:2]}***@{domain}"
+
+
+def _mask_basic(raw: Mapping[str, Any]) -> dict[str, Any]:
+    basic = dict(raw)
+    if "name" in basic:
+        basic["name"] = _mask_name(basic.get("name"))
+    if "phone" in basic:
+        basic["phone"] = _mask_phone(basic.get("phone"))
+    if "email" in basic:
+        basic["email"] = _mask_email(basic.get("email"))
+    return basic
+
+
+def _parsed_snapshot(parsed: ParsedResume | None, resume_file: ResumeFile | None) -> dict[str, Any] | None:
+    if parsed is None:
+        return None
+    structured = parsed.structured_json if isinstance(parsed.structured_json, dict) else {}
+    return {
+        "resume_file_id": parsed.resume_file_id,
+        "filename": resume_file.filename if resume_file is not None else None,
+        "basic": _mask_basic(structured.get("basic") or {}),
+        "educations": list(structured.get("educations") or []),
+        "employments": list(structured.get("employments") or []),
+        "skills": list(structured.get("skills") or []),
+        "projects": list(structured.get("projects") or []),
+        "certificates": list(structured.get("certificates") or []),
+        "expected_title": structured.get("expected_title"),
+        "work_years": structured.get("work_years"),
+    }
+
+
+def _missing_fields(profile: TalentProfile, parsed: ParsedResume | None) -> list[str]:
+    structured = parsed.structured_json if parsed is not None and isinstance(parsed.structured_json, dict) else {}
+    missing: list[str] = []
+    direct = {
+        "phone": profile.phone,
+        "email": profile.email,
+        "birth_year": profile.birth_year,
+        "city": profile.city,
+        "degree": profile.degree,
+        "work_years": profile.work_years,
+        "current_title": profile.current_title,
+        "expected_title": profile.expected_title,
+    }
+    for field, value in direct.items():
+        if value in (None, ""):
+            missing.append(field)
+    skills = list(profile.skills_json or []) or list(structured.get("skills") or [])
+    if not skills:
+        missing.append("skills")
+    for group in EXPERIENCE_FIELDS:
+        if not list(structured.get(group) or []):
+            missing.append(group)
+    if parsed is None:
+        missing.append("parsed")
+    return missing
+
+
+def _field_status(profile: TalentProfile, parsed: ParsedResume | None, missing: Sequence[str]) -> dict[str, str]:
+    status: dict[str, str] = {}
+    for field in SNAPSHOT_FIELDS:
+        if field in missing:
+            status[field] = "missing"
+        elif field in EXPERIENCE_FIELDS and parsed is None:
+            status[field] = "unavailable"
+        else:
+            status[field] = "present"
+    status["evidence"] = "unavailable"
+    return status
+
+
+def _empty_snapshot(
+    person_id: int,
+    status: str,
+    snapshot_at: str,
+    *,
+    profile_version: int | None = None,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "person_id": person_id,
+        "profile_version": profile_version,
+        "version_source": "baseline",
+        "snapshot_at": snapshot_at,
+        "status": status,
+        "coverage": "partial",
+        "profile": None,
+        "parsed": None,
+        "field_status": {},
+        "missing_fields": [],
+        "review_fields": [],
+        "evidence_status": "unavailable",
+        "evidence": [],
+    }
+    if reason:
+        payload["reason"] = reason
+    return payload
+
+
+def _load_snapshot_bundle(
+    db: Session, profile_ids: Sequence[int]
+) -> tuple[
+    dict[int, TalentProfile],
+    dict[int, list[TalentTag]],
+    dict[int, ParsedResume],
+    dict[int, ResumeFile],
+    dict[int, ParseTask],
+]:
+    ids = list(profile_ids)
+    profiles: dict[int, TalentProfile] = {}
+    tags: dict[int, list[TalentTag]] = {}
+    parsed: dict[int, ParsedResume] = {}
+    files: dict[int, ResumeFile] = {}
+    tasks: dict[int, ParseTask] = {}
+    if not ids:
+        return profiles, tags, parsed, files, tasks
+
+    profiles = {
+        row.id: row
+        for row in db.execute(select(TalentProfile).where(TalentProfile.id.in_(ids))).scalars()
+    }
+    tag_rows = db.execute(select(TalentTag).where(TalentTag.talent_profile_id.in_(ids))).scalars()
+    for row in tag_rows:
+        tags.setdefault(row.talent_profile_id, []).append(row)
+
+    parsed_rows = db.execute(
+        select(ParsedResume)
+        .where(ParsedResume.talent_profile_id.in_(ids))
+        .order_by(ParsedResume.id.desc())
+    ).scalars()
+    for row in parsed_rows:
+        if row.talent_profile_id is not None:
+            parsed.setdefault(row.talent_profile_id, row)
+
+    file_ids = list({row.resume_file_id for row in parsed.values()})
+    if file_ids:
+        files = {
+            row.id: row
+            for row in db.execute(select(ResumeFile).where(ResumeFile.id.in_(file_ids))).scalars()
+        }
+        tasks = {
+            row.resume_file_id: row
+            for row in db.execute(
+                select(ParseTask).where(ParseTask.resume_file_id.in_(file_ids))
+            ).scalars()
+        }
+    return profiles, tags, parsed, files, tasks
+
+
+def _build_snapshot(
+    *,
+    person_id: int,
+    profile: TalentProfile | None,
+    tag_rows: Sequence[TalentTag],
+    parsed: ParsedResume | None,
+    resume_file: ResumeFile | None,
+    parse_task: ParseTask | None,
+    requested_version: int | None,
+    snapshot_at: str,
+) -> dict[str, Any]:
+    if requested_version not in (None, SNAPSHOT_BASELINE_VERSION):
+        return _empty_snapshot(
+            person_id,
+            "version_not_found",
+            snapshot_at,
+            reason=f"版本 {requested_version} 不存在",
+        )
+    if profile is None:
+        return _empty_snapshot(person_id, "not_found", snapshot_at)
+    if profile.deleted_at is not None:
+        return _empty_snapshot(
+            person_id, "deleted", snapshot_at, profile_version=SNAPSHOT_BASELINE_VERSION, reason="档案已删除"
+        )
+
+    missing = _missing_fields(profile, parsed)
+    truncated = bool(parse_task.truncated) if parse_task is not None else False
+    coverage = "complete" if parsed is not None and not missing and not truncated else "partial"
+    return {
+        "person_id": profile.id,
+        "profile_version": SNAPSHOT_BASELINE_VERSION,
+        "version_source": "baseline",
+        "snapshot_at": snapshot_at,
+        "status": "ready",
+        "coverage": coverage,
+        "profile": {
+            "name": _mask_name(profile.name),
+            "gender": profile.gender,
+            "birth_year": profile.birth_year,
+            "phone": _mask_phone(profile.phone),
+            "email": _mask_email(profile.email),
+            "city": profile.city,
+            "degree": profile.degree,
+            "work_years": float(profile.work_years) if profile.work_years is not None else None,
+            "current_title": profile.current_title,
+            "expected_title": profile.expected_title,
+            "skills": list(profile.skills_json or []),
+            "tags": [
+                {"tag": row.tag, "tag_type": row.tag_type, "source": row.source} for row in tag_rows
+            ],
+            "ability_scores": profile.ability_scores_json,
+            "vector_status": profile.vector_status,
+            "manual_edited_fields": list(profile.manual_edited_fields or []),
+            "source": profile.source,
+            "created_at": profile.created_at,
+            "updated_at": profile.updated_at,
+        },
+        "parsed": _parsed_snapshot(parsed, resume_file),
+        "parse_status": parse_task.status if parse_task is not None else None,
+        "parse_stage": parse_task.stage if parse_task is not None else None,
+        "field_status": _field_status(profile, parsed, missing),
+        "missing_fields": missing,
+        "review_fields": [],
+        "evidence_status": "unavailable",
+        "evidence": [],
+        "truncated": truncated,
+    }
+
+
+def get_person_snapshot(
+    db: Session,
+    person_id: int,
+    *,
+    version: int | None = None,
+    scope: AccountScope | Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """按 person_id 读取只读快照；不存在/删除/版本不存在用 status 表达。"""
+    ids = _normalize_person_ids([person_id], 1)
+    normalized_scope = _normalize_scope(scope)
+    _ensure_scope(normalized_scope, ids)
+    bundle = _load_snapshot_bundle(db, ids)
+    profiles, tags, parsed, files, tasks = bundle
+    profile = profiles.get(person_id)
+    parsed_row = parsed.get(person_id)
+    file_row = files.get(parsed_row.resume_file_id) if parsed_row is not None else None
+    task_row = tasks.get(parsed_row.resume_file_id) if parsed_row is not None else None
+    return _build_snapshot(
+        person_id=person_id,
+        profile=profile,
+        tag_rows=tags.get(person_id, []),
+        parsed=parsed_row,
+        resume_file=file_row,
+        parse_task=task_row,
+        requested_version=version,
+        snapshot_at=datetime.now().astimezone().isoformat(timespec="seconds"),
+    )
+
+
+def get_person_snapshots(
+    db: Session,
+    person_ids: Sequence[int],
+    *,
+    version: int | None = None,
+    scope: AccountScope | Mapping[str, Any] | None = None,
+    cursor: str | None = None,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """批量读取：去重、按 person_id 升序游标分页，逐项状态不整批失败。"""
+    ids = _normalize_person_ids(person_ids, SNAPSHOT_MAX_BATCH)
+    normalized_scope = _normalize_scope(scope)
+    _ensure_scope(normalized_scope, ids)
+    limit = _validate_limit(limit, SNAPSHOT_MAX_LIMIT)
+    last_id = _decode_cursor(cursor)
+    ordered = sorted(ids)
+    if last_id is not None:
+        ordered = [person_id for person_id in ordered if person_id > last_id]
+    page_ids = ordered[:limit]
+    profiles, tags, parsed, files, tasks = _load_snapshot_bundle(db, page_ids)
+    snapshot_at = datetime.now().astimezone().isoformat(timespec="seconds")
+    items = []
+    for person_id in page_ids:
+        parsed_row = parsed.get(person_id)
+        file_row = files.get(parsed_row.resume_file_id) if parsed_row is not None else None
+        task_row = tasks.get(parsed_row.resume_file_id) if parsed_row is not None else None
+        items.append(
+            _build_snapshot(
+                person_id=person_id,
+                profile=profiles.get(person_id),
+                tag_rows=tags.get(person_id, []),
+                parsed=parsed_row,
+                resume_file=file_row,
+                parse_task=task_row,
+                requested_version=version,
+                snapshot_at=snapshot_at,
+            )
+        )
+    has_more = len(ordered) > len(page_ids)
+    return {
+        "items": items,
+        "requested_count": len(ids),
+        "returned_count": len(items),
+        "partial": any(item["status"] != "ready" for item in items),
+        "next_cursor": _encode_cursor(page_ids[-1]) if has_more and page_ids else None,
+    }
+
+
+def get_person_evidence(
+    db: Session,
+    person_ids: Sequence[int],
+    *,
+    version: int | None = None,
+    field_paths: Sequence[str] | None = None,
+    scope: AccountScope | Mapping[str, Any] | None = None,
+    cursor: str | None = None,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """阶段 1 证据占位：明确 unavailable，不伪造出处、不返回 404。"""
+    ids = _normalize_person_ids(person_ids, EVIDENCE_MAX_BATCH)
+    normalized_scope = _normalize_scope(scope)
+    _ensure_scope(normalized_scope, ids)
+    limit = _validate_limit(limit, EVIDENCE_MAX_LIMIT)
+    if field_paths is not None:
+        invalid = [path for path in field_paths if path not in EVIDENCE_FIELD_PATHS]
+        if invalid:
+            raise SnapshotValidationError(f"未知证据字段: {', '.join(invalid)}")
+    last_id = _decode_cursor(cursor)
+    ordered = sorted(ids)
+    if last_id is not None:
+        ordered = [person_id for person_id in ordered if person_id > last_id]
+    page_ids = ordered[:limit]
+
+    profiles: dict[int, TalentProfile] = {}
+    if page_ids:
+        profiles = {
+            row.id: row
+            for row in db.execute(
+                select(TalentProfile).where(TalentProfile.id.in_(page_ids))
+            ).scalars()
+        }
+    items = []
+    for person_id in page_ids:
+        profile = profiles.get(person_id)
+        if version not in (None, SNAPSHOT_BASELINE_VERSION):
+            status = "version_not_found"
+        elif profile is None:
+            status = "not_found"
+        elif profile.deleted_at is not None:
+            status = "deleted"
+        else:
+            status = "ready"
+        items.append(
+            {
+                "person_id": person_id,
+                "version": SNAPSHOT_BASELINE_VERSION,
+                "status": status,
+                "evidence_status": "unavailable",
+                "evidence": [],
+            }
+        )
+    has_more = len(ordered) > len(page_ids)
+    return {
+        "items": items,
+        "requested_count": len(ids),
+        "returned_count": len(items),
+        "partial": any(item["status"] != "ready" for item in items),
+        "next_cursor": _encode_cursor(page_ids[-1]) if has_more and page_ids else None,
     }

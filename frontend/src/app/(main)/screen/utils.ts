@@ -12,7 +12,7 @@
 
 import dayjs from 'dayjs';
 
-import type { QueueStatus, QueueSummary } from './types';
+import type { ContractTaskStatus, QueueStatus, QueueSummary } from './types';
 
 export const STATUS_META: Record<QueueStatus, { label: string; color: string }> = {
   pending: { label: '待处理', color: 'default' },
@@ -42,6 +42,31 @@ const STAGE_LABELS: Record<string, string> = {
 
 export function statusMeta(status: string): { label: string; color: string } {
   return STATUS_META[status as QueueStatus] ?? { label: status, color: 'default' };
+}
+
+/** 对外任务状态契约（`task_status`，契约 §4 的状态映射） */
+export const CONTRACT_STATUS_META: Record<ContractTaskStatus, { label: string; color: string }> = {
+  waiting: { label: '待处理', color: 'default' },
+  running: { label: '解析中', color: 'processing' },
+  completed: { label: '已完成', color: 'success' },
+  failed: { label: '失败', color: 'error' },
+  cancelled: { label: '已取消', color: 'default' },
+};
+
+/**
+ * 队列状态展示口径：优先契约 `task_status`；`duplicate_pending` 是旧库的
+ * `status` 概念，契约里表达为 `completed + duplicate_pending=true`，仍需突出提示。
+ * 无 `task_status` 时退回旧 `status`，保证滚动升级期间不出现空白列。
+ */
+export function contractStatusMeta(
+  taskStatus?: ContractTaskStatus | null,
+  duplicatePending?: boolean,
+  legacyStatus?: string,
+): { label: string; color: string } {
+  if (duplicatePending) return STATUS_META.duplicate_pending;
+  if (taskStatus) return CONTRACT_STATUS_META[taskStatus] ?? { label: taskStatus, color: 'default' };
+  if (legacyStatus) return statusMeta(legacyStatus);
+  return { label: '—', color: 'default' };
 }
 
 export function stageLabel(stage: string | null | undefined): string {

@@ -51,10 +51,10 @@ import type { BatchSummaryItem, QueueItem, QueueListData, QueueStatus, QueueSumm
 import {
   STATUS_TABS,
   canDeleteStatus,
+  contractStatusMeta,
   formatBatchId,
   formatTime,
   stageLabel,
-  statusMeta,
   summaryCount,
 } from './utils';
 
@@ -185,10 +185,10 @@ export default function QueuePanel({ reloadSignal }: QueuePanelProps) {
       title: '状态',
       dataIndex: 'status',
       width: 120,
-      render: (value: string) => {
-        const meta = statusMeta(value);
+      render: (_, row) => {
+        const meta = contractStatusMeta(row.task_status, row.duplicate_pending, row.status);
         const tag = <Tag color={meta.color}>{meta.label}</Tag>;
-        return value === 'duplicate_pending' ? (
+        return row.duplicate_pending ? (
           <Tooltip title="需在人才画像页完成查重确认，任务才会继续">{tag}</Tooltip>
         ) : (
           tag

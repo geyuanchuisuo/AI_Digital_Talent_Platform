@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   canDeleteStatus,
+  contractStatusMeta,
   formatBatchId,
   formatTime,
   stageLabel,
@@ -29,6 +30,26 @@ describe('screen utils', () => {
     expect(statusMeta('duplicate_pending').label).toBe('查重待确认');
     expect(statusMeta('cancelled').label).toBe('已取消');
     expect(statusMeta('unknown').label).toBe('unknown');
+  });
+
+  it('契约状态：优先 task_status，duplicate_pending 单独提示，旧 status 兜底', () => {
+    expect(contractStatusMeta('waiting').label).toBe('待处理');
+    expect(contractStatusMeta('running').label).toBe('解析中');
+    expect(contractStatusMeta('completed').label).toBe('已完成');
+    expect(contractStatusMeta('failed').label).toBe('失败');
+    expect(contractStatusMeta('cancelled').label).toBe('已取消');
+
+    // duplicate_pending = completed + 标记，仍显示查重待确认
+    expect(contractStatusMeta('completed', true).label).toBe('查重待确认');
+    expect(contractStatusMeta('completed', true).color).toBe('warning');
+
+    // 无契约字段时退回旧 status
+    expect(contractStatusMeta(null, false, 'duplicate_pending').label).toBe('查重待确认');
+    expect(contractStatusMeta(undefined, false, 'success').label).toBe('成功');
+    expect(contractStatusMeta(undefined, false, undefined).label).toBe('—');
+
+    // 未知契约值原样透出，不吞字段
+    expect(contractStatusMeta('other' as never).label).toBe('other');
   });
 
   it('阶段文案：extract/profile/vector，空值与未知值', () => {
