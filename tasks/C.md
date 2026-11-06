@@ -38,4 +38,4 @@ C 维护测评/培训业务提示与评分语义，需要 D 的 loader/schema/�
 - 测试：`python -m unittest discover -s tests/C -p "test_*.py" -v`，17 项通过（SQLite + 注入式评分/草稿/主题替身）；`npm run typecheck` 通过。
 - 未验证：MySQL 实际迁移、真实 LLM 评分/草稿/主题归纳、真实 JWT 权限、浏览器页面交互、来源 588 项历史测试不覆盖 C 新模块。
 
-后续在本人 clone/分支与机器范围内继续联调，代码变更新增 docs/updates/C/ 交接。本轮培训评价改动待用户授权后提交到 `master_YB`，当前未提交、未推送，不合并 master。
+后续在本人 clone/分支与机器范围内继续联调，代码变更新增 docs/updates/C/ 交接。本轮培训评价已提交到 `master_YB`（`9111471`），未推送前不合并 master，发布需另行授权。
