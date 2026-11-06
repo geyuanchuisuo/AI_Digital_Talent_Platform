@@ -735,6 +735,8 @@ def _mask_phone(value: str | None) -> str | None:
     if "*" in value:
         return value
     digits = "".join(ch for ch in value if ch.isdigit())
+    if len(digits) >= 13 and digits.startswith("86"):
+        digits = digits[2:]  # 去掉 +86 国家码，保留本地号段/尾号
     if len(digits) >= 7:
         return f"{digits[:3]}****{digits[-4:]}"
     return "****"

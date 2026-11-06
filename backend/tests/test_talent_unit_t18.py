@@ -453,7 +453,7 @@ class TestSnapshotContent:
         assert all(status[field] == "present" for field in svc.SNAPSHOT_FIELDS)
         assert status["evidence"] == "unavailable"
 
-        status = svc._field_status(profile, None, ["parsed"])
+        status = svc._field_status(profile, None, svc._missing_fields(profile, None))
         assert status["educations"] == "missing"
         assert status["phone"] == "present"
 

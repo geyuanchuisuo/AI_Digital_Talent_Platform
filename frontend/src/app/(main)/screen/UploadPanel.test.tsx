@@ -52,7 +52,13 @@ describe('UploadPanel', () => {
 
   it('上传成功展示批次号、重复项与拒绝项，可对失败原任务重新入队', async () => {
     uploadBatchMock.mockResolvedValue(RESULT);
-    requeueTaskMock.mockResolvedValue({ task_id: 12, status: 'pending', stage: null, retries: 1 });
+    requeueTaskMock.mockResolvedValue({
+      task_id: 12,
+      status: 'pending',
+      task_status: 'waiting',
+      stage: null,
+      retries: 1,
+    });
     const onChanged = vi.fn();
 
     const { container } = render(<UploadPanel onChanged={onChanged} />);
