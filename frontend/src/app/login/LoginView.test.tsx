@@ -61,6 +61,20 @@ describe('LoginView', () => {
     expect(getToken()).toBe('jwt-token');
   });
 
+  it('personal 角色登录分流到个人端首页 /home', async () => {
+    postMock.mockResolvedValue({
+      token: makeToken(3600),
+      expires_in: 3600,
+      user: { id: 2, username: 'personal', display_name: '演示个人账号', role: 'personal', person_id: 398 },
+    });
+
+    render(<LoginView redirectParam={null} />);
+    await fillAndSubmit('personal', 'personal123456');
+
+    await waitFor(() => expect(replace).toHaveBeenCalledWith('/home'));
+    expect(getToken()).toBeTruthy();
+  });
+
   it('登录后回到 redirect 指定的站内页面', async () => {
     postMock.mockResolvedValue({
       token: 'jwt-token',

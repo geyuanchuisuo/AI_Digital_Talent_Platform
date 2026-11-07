@@ -195,6 +195,8 @@
       "frontend/src/components/AuthGuard.test.tsx",
       "frontend/src/components/AuthGuard.tsx",
       "frontend/src/components/PagePlaceholder.tsx",
+      "frontend/src/components/PersonalShell.test.tsx",
+      "frontend/src/components/PersonalShell.tsx",
       "frontend/src/lib/auth.ts",
       "frontend/src/lib/http.ts",
       "frontend/src/lib/types.ts",

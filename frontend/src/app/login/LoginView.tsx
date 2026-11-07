@@ -19,7 +19,7 @@ import { Alert, Button, Card, Form, Input, Typography, message } from 'antd';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
-import { getToken, isTokenExpired, setAuth } from '@/lib/auth';
+import { getToken, getUser, isTokenExpired, setAuth } from '@/lib/auth';
 import { ApiError, post } from '@/lib/http';
 import type { AuthUser } from '@/lib/auth';
 
@@ -44,10 +44,20 @@ const REASON_TIPS: Record<string, { type: 'warning' | 'error'; text: string }> =
   disabled: { type: 'error', text: '账号已停用，请联系管理员' },
 };
 
-function safeRedirect(raw: string | null): string {
-  if (!raw) return '/screen';
-  if (!raw.startsWith('/') || raw.startsWith('//')) return '/screen';
+function safeRedirect(raw: string | null): string | null {
+  if (!raw) return null;
+  if (!raw.startsWith('/') || raw.startsWith('//')) return null;
   return raw;
+}
+
+/**
+ * 双端分流（2026-11-07，功能 4）：显式 `?redirect=` 优先（回跳原页面）；
+ * 否则按角色分发——`personal` 进个人端首页 `/home`，管理侧保持 `/screen`。
+ */
+function resolveTarget(redirectParam: string | null, role?: string): string {
+  const explicit = safeRedirect(redirectParam);
+  if (explicit) return explicit;
+  return role === 'personal' ? '/home' : '/screen';
 }
 
 export default function LoginView({
@@ -60,7 +70,7 @@ export default function LoginView({
   const router = useRouter();
   const [form] = Form.useForm<LoginFormValues>();
   const [submitting, setSubmitting] = useState(false);
-  const target = safeRedirect(redirectParam);
+  const target = resolveTarget(redirectParam, getUser()?.role);
   const tip = reasonParam ? REASON_TIPS[reasonParam] : undefined;
   const mountedRef = useRef(true);
 
@@ -88,7 +98,7 @@ export default function LoginView({
       });
       setAuth(data.token, data.user);
       message.success(`欢迎回来，${data.user.display_name || data.user.username}`);
-      router.replace(target);
+      router.replace(resolveTarget(redirectParam, data.user.role));
     } catch (error) {
       if (mountedRef.current) setSubmitting(false);
       if (error instanceof ApiError && error.code === 401) {
