@@ -34,8 +34,8 @@ C 维护测评/培训业务提示与评分语义，需要 D 的 loader/schema/�
 ## 当前进度（2026-11-07）
 
 - 后端：`backend/app/modules/{assessments,interviews,training,inventory}` 已实现 32 张表（原 22 + 盘点 5 + AI 面试间 3 + 培训报名/证据 2）、契约路由、权限裁剪、自适应策略/选题留痕/能力分析、固定组卷兼容、结果版本与公开、人工面试反馈、培训草稿/分配/自报/成长事件、培训期次/出勤/评价与匿名汇总、课程报名审批/候补（24h TTL）、学习证据与正式完成门槛、F10 九宫格盘点/人才池/异议/IDP、AI 面试间（真实模型评分+重试）；`registry_models.py` 提供 `ALL_MODELS`，`registry.py` 提供 `ALL_ROUTERS` 并 re-export 模型供 A 接入。迁移 `backend/migrations/versions/C_0003_phase1_expansion.py`。
-- 前端：`frontend/src/app/(main)/{assessments,interviews,training}` 已实现页面与接口封装，含自适应逐题答题、能力雷达/评级、员工评价、管理员期次/出勤与反馈汇总；盘点、AI 面试间、报名审批前端页待补；菜单入口仍需 A 修改 `AppShell`。
-- 测试：`$env:PYTHONPATH="backend"; python -m unittest discover -s tests/C -p "test_*.py" -v`，49 项通过（SQLite + 注入式评分/出题/草稿/主题替身）；`npm run typecheck` 与 `npm run build` 通过。
-- 未验证：MySQL/Alembic 实际迁移（C_0003 依赖 A 的 C_0001/C_0002 链）、真实 LLM 评分/出题/主题归纳/AI 面试评分、真实 JWT 权限、真实浏览器页面交互、来源历史测试不覆盖 C 新模块。
+- 前端：`frontend/src/app/(main)/{assessments,interviews,training,inventory}` 已实现页面与接口封装，含自适应逐题答题、能力雷达/评级、员工评价、管理员期次/出勤与反馈汇总，以及新增 `/inventory`（盘点/人才池/汇总/异议/IDP）、`/interviews/ai`（AI 面试会话与逐题作答）、`/training/enrollments`（报名审批与学习证据）；菜单入口仍需 A 修改 `AppShell`。
+- 测试：`$env:PYTHONPATH="backend"; python -m unittest discover -s tests/C -p "test_*.py" -v`，49 项通过（SQLite + 注入式评分/出题/草稿/主题/评委替身）；`npm run typecheck` 与 `npm run build` 通过（构建含 `/inventory`、`/interviews/ai`、`/training/enrollments`）。
+- 未验证：MySQL/Alembic 实际迁移（C_0003 依赖 A 的 C_0001/C_0002 链）、真实 LLM 评分/出题/主题归纳/AI 面试评分、真实 JWT 权限、真实浏览器页面交互（新增三页未实机查看）、来源历史测试不覆盖 C 新模块。
 
-后续在本人 clone/分支与机器范围内继续联调，代码变更新增 docs/updates/C/ 交接。本轮培训评价已提交到 `master_YB`（`9111471`），未推送前不合并 master，发布需另行授权。
+后续在本人 clone/分支与机器范围内继续联调，代码变更新增 docs/updates/C/ 交接。一期扩表已随 `0ed9bad` 发布到远端 master；本轮前端三页提交后在 `master_YB` 继续，发布需另行授权。

@@ -5,8 +5,10 @@ import type { PageData } from '@/lib/types';
 
 import type {
   GrowthEvent,
+  LearningEvidence,
   TrainingAttendance,
   TrainingCourse,
+  TrainingEnrollment,
   TrainingFeedbackState,
   TrainingFeedbackSummary,
   TrainingLearningRecord,
@@ -176,4 +178,40 @@ export function updateFeedbackNote(courseId: number, note: string) {
     url: `/training/courses/${courseId}/feedback-note`,
     data: { note },
   });
+}
+
+/** 报名审批/候补（24h 未审批自动释放由后端处理） */
+export function applyEnrollment(payload: { course_id: number; priority: 'required' | 'elective' }) {
+  return post<{ id: number; status: string; expires_at: string | null }>('/training/enrollments', payload);
+}
+
+export function decideEnrollment(
+  enrollmentId: number,
+  payload: { status: 'approved' | 'rejected' | 'cancelled'; note?: string | null },
+) {
+  return post<{ id: number; status: string }>(`/training/enrollments/${enrollmentId}/decide`, payload);
+}
+
+export function fetchEnrollments(params?: { course_id?: number }) {
+  return get<TrainingEnrollment[]>('/training/enrollments', { params });
+}
+
+/** 有效学习证据与正式完成认定 */
+export function submitLearningEvidence(payload: {
+  learning_record_id: number;
+  evidence_type: string;
+  payload: Record<string, unknown>;
+  score?: number;
+}) {
+  return post<{ id: number; score: number }>('/training/learning-evidence', payload);
+}
+
+export function confirmFormalCompletion(recordId: number) {
+  return post<{ id: number; formal_completed: boolean }>(
+    `/training/learning-records/${recordId}/confirm-completion`,
+  );
+}
+
+export function fetchLearningEvidence(recordId: number) {
+  return get<LearningEvidence[]>(`/training/learning-records/${recordId}/evidence`);
 }

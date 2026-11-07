@@ -170,6 +170,15 @@ class AiInterviewTest(unittest.TestCase):
         self.assertEqual(ans.json()["data"]["ai_score"], 88.0)
         fin = self.h.client.post(f"/api/ai-interviews/sessions/{s}/finish", headers=Harness.headers(self.cand))
         self.assertEqual(fin.json()["data"]["overall_score"], 88.0)
+        # 列表：管理员可见全部，候选人仅本人，无关员工为空
+        mine = self.h.client.get("/api/ai-interviews/sessions", headers=Harness.headers(self.cand)).json()["data"]
+        self.assertEqual([row["id"] for row in mine], [s])
+        self.assertEqual(mine[0]["status"], "completed")
+        other = self.h.create_user("o", role="employee")
+        self.assertEqual(
+            self.h.client.get("/api/ai-interviews/sessions", headers=Harness.headers(other)).json()["data"], [])
+        admin_rows = self.h.client.get("/api/ai-interviews/sessions", headers=Harness.headers(self.admin)).json()["data"]
+        self.assertIn(s, [row["id"] for row in admin_rows])
 
 
 if __name__ == "__main__":

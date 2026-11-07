@@ -58,6 +58,22 @@ def create_session(payload: SessionCreate, user: CurrentUser, db: Session = Depe
     return ok({"id": session.id})
 
 
+@router.get("/sessions")
+def list_sessions(user: CurrentUser, db: Session = Depends(get_db), candidate_user_id: int | None = None):
+    stmt = select(AiInterviewSession).order_by(AiInterviewSession.id.desc())
+    if user.role not in ADMIN_ROLES:
+        stmt = stmt.where(AiInterviewSession.candidate_user_id == user.id)
+    elif candidate_user_id is not None:
+        stmt = stmt.where(AiInterviewSession.candidate_user_id == candidate_user_id)
+    rows = db.execute(stmt).scalars().all()
+    return ok([
+        {"id": s.id, "candidate_user_id": s.candidate_user_id, "job_id": s.job_id,
+         "application_id": s.application_id, "status": s.status,
+         "overall_score": s.overall_score, "started_at": s.started_at, "finished_at": s.finished_at}
+        for s in rows
+    ])
+
+
 @router.post("/sessions/{session_id}/start")
 def start_session(session_id: int, user: CurrentUser, db: Session = Depends(get_db)):
     session = db.get(AiInterviewSession, session_id)
