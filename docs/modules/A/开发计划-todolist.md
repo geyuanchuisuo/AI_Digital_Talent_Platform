@@ -1,9 +1,10 @@
 # 开发计划 · Todolist · 板块 A
 
-> 版本：v0.1.10　|　日期：2026-11-07 01:00　|　身份：A　|　分支：`feature/A/continuation`　|　`master` = `origin/master` = **`2ca3980`**（C 00:32 推进）；A 分支已 rebase 零冲突，`a3b7eb1` + 本轮提交
+> 版本：v0.1.11　|　日期：2026-11-07 09:29　|　身份：A　|　分支：`feature/A/continuation`　|　`origin/master` = **`5d3b376`**（D 01:15 推进，推送前 rebase 收入）
 > 上游：`docs/需求文档.md` **V2.2**、`docs/源码接入与需求决策.md`、`docs/四人分工与试行方案.md` §2、`docs/技术框架.md`、`tasks/A.md`、`docs/modules/A/设计方案.md` v0.1.1、`.collaboration/ownership.json`。
 > 用法：**按 M1 → M6 顺序**；每项满足「验收点」才勾选，勾选必须写实际命令/结果/证据落点；编号 `T-Axx` 供沟通引用。进度同步 `docs/modules/A/开发日志.md` Layer 3/4 与 `docs/updates/A/` 交接记录。
 > ⚠️ 本表是台账，**不是完成声明**；`[x]` 只表示「有实证且已登记」。3–4 天是首轮检查窗口，M1 实跑后按证据重排。
+> 🔴 **架构问题清单已于 09:29 由用户逐条裁决完毕（[清单 §6](架构待确认问题清单.md)）；M2 暂缓（U-07），当前工作是 M1 收尾测试＋按 U-09 授权推送（前提：测试通过）。**
 
 ---
 
@@ -37,11 +38,11 @@
 - [x] **T-A72 按授权发布** ✅ 2026-11-07 00:05 完成（先同步再推）：网络授权放行后 `git fetch --all --prune`；`git push -u origin feature/A/continuation` 建远端分支；首次 `push master` 因他人并发提交 `0a24747` 被 `fetch first` 正确拒绝 → 重新 `fetch` + `git rebase origin/master`（9/9 零冲突、`README.md` 双方内容共存）→ `--base master` `Scope OK, changed_paths=23` → `push --force-with-lease` 更新个人分支 → 末次 `fetch` + 祖先检查 → `push origin master:master`（`0a24747..8ab2f30`）。复检：四个 ref 同为 `8ab2f30`、工作区干净、远端 master 树 7/7 交付文件齐备、README「一键交付」章节 1 处。**未验证**：发布版未重跑 T-A71 演练（rebase 只改提交号、树内容未变）、`.cmd`/`.sh` 单独实跑与业务 pytest/vitest/浏览器/真实模型调用。证据：[0005 交接记录](../../updates/A/20261107-0005-T-A72发布完成.md)、[开发日志](开发日志.md) Layer 3 §A-05；受阻历史见 [2345 记录](../../updates/A/20261106-2345-推送受阻待授权.md)（不回改）。
 ## M1 · 第 1 天环境与能力探针（未开始 → **接力 Agent 从这里开工**）
 
-- [ ] **T-A01 依赖、建库与启动探针** — 建 venv、`pip install -r backend/requirements.txt`、`init_db.py`、`check_env.py --skip-llm`、`uvicorn app.main:app --workers 1`、`curl /api/health`。验收点：7 项自检无 FAIL、`status=ok`、worker alive、`--workers 1` 硬约束。⏸ **00:46 自动部分已实跑**：自检 6 ✅/1 ⚠️/0 FAIL、init_db 幂等、health 200 且 worker alive，但 pytest 588 用例有 **4 项稳定失败**（配置契约 1 + 无 Key 的向量 3）、前端 vitest 14 文件 / 66 用例 2 失败（`ScreenBatchPanel` T-27、`TalentListPanel` 回收站恢复），按「不满足验收点不勾选」保持 `[ ]`；证据 [0050 记录](../../updates/A/20261107-0050-M1探针与架构冲突检测.md)、[待确认清单](架构待确认问题清单.md) C-01/C-02/C-03/C-06
+- [x] **T-A01 依赖、建库与启动探针** ✅ 2026-11-07 09:49 完成：主仓库隔离环境（3308/`aitalent_main`/19532/8101，不碰 3306/`ai_talent`、19530 旧实例、3307 e2e）由 `bootstrap.py` 一键建成——venv(Python 3.13.5) + npm ci 327 包 + `init_db` 幂等 13 表 + **完整模式自检 7/7 ✅（含真实 LLM `spark-x2.6` 9.3s finish_reason=stop、真实 Embedding `text-embedding-v3` 1024 维）**；`uvicorn --workers 1`（8101）启动后 `/api/health` 200、`status=ok`、db/milvus/worker 全 true（heartbeat 09:49、concurrency 2、backlog 全 0），验证后服务已停、8101 已释放。全量 pytest **0 失败**、vitest **66/66**（见 T-A01 下方与 [092927 交接记录](../../updates/A/20261107-092927-架构问题清单逐条裁决与落地.md)）。00:46 副本探针的历史：4 项失败已分别定位（C-01 断言已修、3 项向量 401 已由真实 Key 消除）；当时 vitest 2 失败本次未复现（测试环境/时序类，印证 0100 定位）
 - [ ] **T-A02 现有招聘链路浏览器复现** — `hr/hr123456` 登录 → 建岗位 → 传 1 份 `docs/imports/hhy_gycs_master/eval/resumes/*.docx` → 解析 → 筛选 → 匹配 → 人工改判。验收点：**记录实际浏览器是否验证**、接口返回、耗时；不得用源码存在替代实测。
 - [ ] **T-A03 权限与失败边界反例** — 无 token / 停用账号 / 重复提交 / 单份失败 / 重启后任务恢复。验收点：401/403、幂等不重复建结果、runner 恢复不永久卡 running。⏸ **00:46 只完成无 token / 伪造 token 两例**（5 个受保护接口 401 / 带 JWT 200）；停用账号、重复提交、单份失败、重启恢复需造业务数据，留待人工阶段，保持 `[ ]`
 - [x] **T-A04 契约差距核对** ✅ 2026-11-07 01:00 完成：实测 OpenAPI 30 路由、4 个列表接口结构、`auth/me` 字段、登录 `data.token`，逐字段比对 [源码接入基线](源码接入基线.md)，差异 K-01～K-06 写入 [接口契约核对.md](接口契约核对.md) 并登记 Layer 4。新发现 C-09（37 个 2xx 仅 1 个 schema）。**未造业务数据**，`screen/match` 批次与结果字段未做运行态验证
-- [ ] **T-A05 外部能力核对（与 D 协同）** — Agnes `agnes-3.0-flash` 鉴权/超时/结构化输出、独立 Embedding、Milvus collection 维度。验收点：**未验证即写未验证**，不假定 Agnes 提供 Embedding/OCR。
+- [x] **T-A05 外部能力核对（与 D 协同）** ✅ 2026-11-07 09:49 按裁决 U-04 完成当前实配部分：用户选定**复用旧 main Key**（`AI数字化人才平台-相关文档/main/backend/.env` → 本机根 `.env`，`git check-ignore` 确认不进 Git）。实测：LLM `spark-x2.6` 真实调用 9.3s finish_reason=stop 非空；Embedding `text-embedding-v3` 1024 维真实调用成功；Milvus 2.6.24（19532 独立实例）连通、pymilvus 3.0.2 兼容；**之前 3 个向量集成测试（HTTP 401）随真实 Key 全部转绿**。⚠️ **Agnes `agnes-3.0-flash` 仍未验证**（当前实配为历史 Spark+百炼；Agnes 是待 D 验证的切换目标，未验证即写未验证，不假定 Agnes 提供 Embedding/OCR）——留 D 验证后按 README「覆盖三行」口径切换
 - [ ] **T-A06 按探针结果重排工期** — 更新本表 M2–M6 状态、阻塞与下一检查点；不把 3–4 天写成承诺。
 - [x] **T-A07 跨模块架构冲突检测** ✅ 2026-11-07 00:46 完成：归属表全量覆盖（主干源码 0 无归属、C 分支 53 文件全归 C）、`git merge-tree` 对 3 个他人分支无文件级冲突、13 表断言 vs C 的 21 模型、C 模块路由/菜单未注册、配置契约与测试隔离等冲突全部定级编号。结论与待拍板项见 [待确认清单](架构待确认问题清单.md)、[0050 记录](../../updates/A/20261107-0050-M1探针与架构冲突检测.md)。**未合并任何分支、未 push**
 - [ ] **T-A08 前端生产构建探针** ⛔ **环境受阻（C-10）**：`next build` 5 次均失败（3 次 `EPERM: distDir/trace`、1 次 `SAFE_DELETE_BULK_CONFIRM_REQUIRED` 删除数达 50 阈值、1 次全新 `distDir` + 预建 trace 仍 EPERM）；手动等效写入成功排除路径权限，Next 14.2.35 `to-json.js:77` 硬编码 trace reporter 无开关。判为运行环境拦截、非代码错误；**记为未验证**，客户侧干净环境复跑。`next dev`（T-A71）已实测可用。证据 [0100 订正](../../updates/A/20261107-0100-架构补充核查与订正.md) §3.4
@@ -87,20 +88,20 @@
 
 | 编号 | 阻塞 | 影响任务 | 当前处理 |
 |---|---|---|---|
-| R-A01 | `frontend/src/app/(person)/**` 未登记归属，`owner_of()` = None | T-A14 | 等用户明确授权后**单独**更新 `ownership.json` 与规则；不擅自改 |
-| R-A02 | Agnes 协议/结构化输出、独立 Embedding、Milvus 未验证 | T-A05、T-A22、T-A31 | 与 D 在 M1 共同验证；未过按需求 §7 记阻塞，不伪造成功 |
-| R-A03 | B 的 `talent_profile_id → person_id` 映射与档案版本契约未回 | T-A11、T-A32 | 请求已发 `docs/requests/A/20261106-B-...md`；A 先做不依赖映射的部分 |
-| R-A04 | 13 表冻结、迁移链未实跑 | T-A11、T-A44 | M1 先确认本机 DB 状态；M5 单独验升级路径 |
-| R-A05 | 本机 `python` 无 pytest；`backend/.env`、`.venv`、`frontend/node_modules` 均缺失 | T-A01 及全部测试 | M1 建 venv 后按 `pytest.ini` / `npm test` 实跑；未跑不写通过。⚠️ 8000/3306/19530 端口虽在监听但属旧 main 实例与既有基础设施（H-A11），不能当验收证据 |
+| R-A01 | ~~`frontend/src/app/(person)/**` 未登记归属~~ | T-A14 | ✅ **已解除**（2026-11-07 U-03：用户授权 A 单独更新 `ownership.json`，本轮单独提交） |
+| R-A02 | Agnes 协议/结构化输出、独立 Embedding、Milvus 未验证 | T-A05、T-A22、T-A31 | 🔄 **进行中**（U-04：用户裁决复用旧 main Key，已写入本机 `.env` 不进 Git；本轮隔离环境真实验证） |
+| R-A03 | B 的 `talent_profile_id → person_id` 映射与档案版本契约未回 | T-A11、T-A32 | 请求已发 `docs/requests/A/20261106-B-...md`；U-05 已裁决催办，A 先做不依赖映射的部分 |
+| R-A04 | 13 表冻结、迁移链未实跑 | T-A11、T-A44 | C-04 裁决覆盖：一期 34 表口径确认，M6 统一注册；迁移链 `A_*.py` + `C_*.py` 双前缀（U-05） |
+| R-A05 | 本机 `python` 无 pytest；`backend/.env`、`.venv`、`frontend/node_modules` 均缺失 | T-A01 及全部测试 | 🔄 **进行中**：本轮 bootstrap 隔离环境（3308/`aitalent_main`/19532/8101/3101，不碰 3306/`ai_talent`、19530 旧实例、3307 e2e）解决；⚠️ 8000/3306/19530 属旧 main 实例与既有基础设施（H-A11），不能当验收证据 |
 
 ## 跨包请求状态
 
 | 请求 | 目标 | 状态 | 等待什么 |
 |---|---|---|---|
-| [B 档案版本与证据契约](../../requests/A/20261106-B-档案版本与证据契约.md) | B | 待响应 | person_id 映射、不可变输入快照、证据读取接口 |
-| [D 模型任务与评分版本契约](../../requests/A/20261106-D-模型任务与评分版本契约.md) | D | 待响应 | Agnes 验证结论、模型/Prompt 版本标识、任务状态约定 |
-| [C 人工面试引用契约](../../requests/A/20261106-C-人工面试引用契约.md) | C | 待响应 | 招聘记录所需的引用 ID / 状态 / 可见范围 |
-| [D→A 工作流/RBAC/站内通知契约](../../requests/D/REQ-A-20261106-workflow-rbac-notification-contract.md) | D → **A**（本方待响应） | 待响应 | A 定义完整 Agent 工作流、服务端组织范围授权接口、通知事件/幂等/权限契约；**「先只做这些站内事件」精确清单需用户确认**，确认前不删既有事件、不自行扩大集合 |
+| [B 档案版本与证据契约](../../requests/A/20261106-B-档案版本与证据契约.md) | B | 待响应（**U-05 已催办**，2026-11-07） | person_id 映射、不可变输入快照、证据读取接口 |
+| [D 模型任务与评分版本契约](../../requests/A/20261106-D-模型任务与评分版本契约.md) | D | 待响应（**U-05 已催办**，2026-11-07） | Agnes 验证结论、模型/Prompt 版本标识、任务状态约定 |
+| [C 人工面试引用契约](../../requests/A/20261106-C-人工面试引用契约.md) | C | 已回（C 分支 58baaf7「明确人工面试引用契约并支持创建幂等键」，M6 联调核对） | — |
+| [D→A 工作流/RBAC/站内通知契约](../../requests/D/REQ-A-20261106-workflow-rbac-notification-contract.md) | D → **A**（本方待响应） | A 待响应（站内事件清单 **U-02 已确认：以 D 请求清单为准**，含招聘阶段变化与面试安排、课程指派与报名审批、候补递补、必修提醒/逾期、Agent 审批待办与运行失败；面试邀约/改期留二期） | A 按已确认清单响应契约，不删既有事件、不扩大集合 |
 
 > 维护人在自己的 `docs/updates/<角色>/` 新增响应并链接回请求；请求方不得替对方改代码，也不得把「待响应」写成「已实现」。
 
@@ -118,3 +119,4 @@
 
 - v0.1.9（2026-11-07 00:46）：用户「先把架构都跑出来，人工测试放最后，问题放一起睡醒一起回」。M1 自动探针与架构冲突检测已实跑（588 后端用例 / 14 前端测试文件 / 健康与鉴权反例 / 归属与合并预演），发现 8 类技术冲突 + 8 组需求裁决，全部汇总到 [架构待确认问题清单](架构待确认问题清单.md)。T-A01 因 4 项稳定失败未勾选；新增并勾选 T-A07。**第一优先级改为「等用户一次性回复」**，人工浏览器测试排最后，业务开发未启动、未 push。
 - v0.1.10（2026-11-07 01:00）：用户「请继续完成未完成的任务」。同步远端发现 `master` 已被 C 推进到 `2ca3980` 并 rebase 零冲突；补跑 T-A04 契约核对（勾选）、前端 2 例失败定位、后端 4 项失败精确断言、`next build` 诊断；订正 C-04/C-05/C-08，新增 C-09～C-11 / U-09 与受阻的 T-A08，全部汇总到 [清单 §5](架构待确认问题清单.md)。**第一优先级仍是「等用户一次性回复」**，人工浏览器测试排最后，业务开发未启动、未 push。
+- v0.1.11（2026-11-07 09:29）：用户「问题一个一个问我」逐条裁决 C-01～C-11 / U-01～U-09（结论登记 [清单 §6](架构待确认问题清单.md)），并追加「推送前记得测试，测试通过才能推送合并」。落地：C-01 断言修复、C-07 默认前缀 `aitalent-app`、C-02/C-03 README 澄清、U-03 ownership 变更（单独提交）、U-04 旧 Key 本机 `.env`。R-A01 解除。**M2 暂缓（U-07）**。同轮测试完成（09:52）：隔离环境 bootstrap 自检 7/7（真实 LLM/Embedding 调用成功）、health 200 worker alive、全量 pytest **0 失败**、vitest **66/66**；T-A01/T-A05 勾选；新坑 H-A26（`.env` 隔离名覆盖 `test_config` 默认值断言，改回默认）。**U-09 前提「测试通过」已满足**，进入授权推送流程；人工浏览器测试关键节点再叫（U-08）。

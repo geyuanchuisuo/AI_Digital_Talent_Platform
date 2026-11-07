@@ -1,9 +1,10 @@
 # AI数字化人才平台 - Milvus Standalone（独立部署）
-# 容器名/卷均带 aitalent-milvus-* 前缀，严禁触碰其他项目的 Milvus 数据
+# 容器名默认带 aitalent-app 前缀（裁决 C-07，2026-11-07 由 aitalent 改名，避免与本机旧实例 aitalent-milvus-* 撞名）；
+# 数据卷名带 COMPOSE_PROJECT_NAME 前缀隔离。严禁触碰其他项目的 Milvus 数据。
 # 启动（一键交付会自动调用，一般无需手工执行）：docker compose up -d
 # 停止：docker compose down          # 保留数据卷
 # 彻底清理：docker compose down -v   # 同时删除数据卷
-# 端口与容器名可通过环境变量覆盖（默认值与旧版完全一致，客户无需改动）：
+# 端口/容器名前缀可通过环境变量覆盖：
 #   MYSQL_PORT / MILVUS_PORT / MILVUS_METRICS_PORT / COMPOSE_PROJECT_NAME / CONTAINER_PREFIX
 #   MYSQL_ROOT_PASSWORD / MYSQL_DB
 # 例：本机 3306/19530 被占用时，bootstrap 会按根 .env 自动注入隔离值。
@@ -13,7 +14,7 @@ version: "3.5"
 services:
   # 交付用 MySQL 8：密码/库名由 scripts/A/bootstrap.py 通过环境变量注入
   mysql:
-    container_name: ${CONTAINER_PREFIX:-aitalent}-mysql
+    container_name: ${CONTAINER_PREFIX:-aitalent-app}-mysql
     image: mysql:8.0
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-aitalent_2026}
@@ -31,7 +32,7 @@ services:
       retries: 12
 
   etcd:
-    container_name: ${CONTAINER_PREFIX:-aitalent}-milvus-etcd
+    container_name: ${CONTAINER_PREFIX:-aitalent-app}-milvus-etcd
     image: quay.io/coreos/etcd:v3.5.25
     environment:
       - ETCD_AUTO_COMPACTION_MODE=revision
@@ -43,7 +44,7 @@ services:
     command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
 
   minio:
-    container_name: ${CONTAINER_PREFIX:-aitalent}-milvus-minio
+    container_name: ${CONTAINER_PREFIX:-aitalent-app}-milvus-minio
     image: milvusdb/minio:RELEASE.2024-12-18T13-15-44Z
     environment:
       MINIO_ACCESS_KEY: minioadmin
@@ -58,7 +59,7 @@ services:
       retries: 3
 
   standalone:
-    container_name: ${CONTAINER_PREFIX:-aitalent}-milvus-standalone
+    container_name: ${CONTAINER_PREFIX:-aitalent-app}-milvus-standalone
     image: milvusdb/milvus:v2.6.24
     command: ["milvus", "run", "standalone"]
     security_opt:

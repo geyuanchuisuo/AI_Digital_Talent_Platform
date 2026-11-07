@@ -43,6 +43,8 @@ Git 不会自动安装 hooks：每人在自己的 clone 确认角色后运行 `p
 
 若本机 3306 / 19530 已被别的项目占用（或要同时跑多套环境），在根 `.env` 指定 `MYSQL_PORT`、`MILVUS_PORT`、`MILVUS_METRICS_PORT`、`COMPOSE_PROJECT_NAME`，并配独立的 `MYSQL_DB`、`MILVUS_COLLECTION`、`APP_PORT`、`FRONTEND_PORT`，脚本会自动起一套端口、容器名、卷、库和向量集合都隔离的环境，不会连进别人的实例。模板 `.env.example` 末尾有可直接取消注释的示例。
 
+> 容器名默认前缀自 2026-11-07 起为 `aitalent-app`（裁决 C-07：原 `aitalent` 与常见旧实例 `aitalent-milvus-*` 撞名）。已有隔离需要时仍可用 `CONTAINER_PREFIX` 覆盖。
+
 脚本自动完成，**幂等**（重跑不会覆盖客户已填的配置或已有数据）：
 
 1. 生成 `backend/.env`（随机 `JWT_SECRET`、MySQL 密码、真实供应商默认地址）与 `frontend/.env.local`（API 基址）
@@ -55,6 +57,8 @@ Git 不会自动安装 hooks：每人在自己的 clone 确认角色后运行 `p
 **唯一需要客户手填的**：仓库根 `.env` 的 `LLM_API_KEY` / `EMBEDDING_API_KEY`（首次运行自动从 `.env.example` 生成）。外部模型凭据不能写进 Git；不填也能把环境完整建好，只是简历解析、AI 评分、向量检索不可用，脚本会明确提示。默认供应商沿用历史实配：讯飞 Spark `spark-x2.6` + 阿里百炼 `text-embedding-v3`（1024 维），均为 OpenAI 兼容协议；Agnes 目标待 D 验证后，只需在根 `.env` 覆盖三行即可切换。
 
 访问：前端 http://localhost:3000，健康检查 http://localhost:8000/api/health，登录 `hr/hr123456`（**生产环境必须立即修改**）。`docker compose -f deploy/milvus/docker-compose.yml down` 保留数据卷，`down -v` 才会清数据。
+
+> 注意（裁决 C-02）：health 返回的 `llm_configured` / `embedding_configured` 只表示对应配置项**已填写**，不代表凭据有效或服务可用；真实可用性以 `embedding_alive` 与实际模型调用结果为准。未配有效 Key 时简历解析、AI 评分、向量检索不可用，属预期状态，不是故障。
 
 > 实现细节、边界与验证记录见 [交付环境封装](docs/modules/A/交付环境封装.md)。下面「独立环境准备」是手工步骤，供了解细节或排障用，交付场景不需要逐步执行。
 ## 独立环境准备与运行入口
@@ -86,6 +90,7 @@ npm run dev
 
 ## 测试与来源证据
 
+- **约定（裁决 C-03）：跑全量后端 `pytest` 前必须先停掉连接同一数据库/任务队列的后端服务**——TaskRunner 与测试共用库时会认领测试任务导致假失败（`StaleDataError` 等，对照证据见 A 的 M1 探针记录）。
 - 本次协作检查：`python -B -m unittest discover -s tests/collaboration -v`，实际结果见 [接入记录](docs/源码接入与需求决策.md)。
 - 业务后端：在独立环境的 `backend/` 运行 `python -m pytest`；会涉及 MySQL/Milvus 和测试数据，当前未执行。
 - 业务前端：在 `frontend/` 运行 `npm test`、`npm run typecheck`、`npm run build`；当前未安装依赖或执行。

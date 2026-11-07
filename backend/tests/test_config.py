@@ -26,7 +26,8 @@ def test_defaults_match_runtime_config_v13():
     assert settings.llm_concurrency == 2
     assert settings.embedding_model == "text-embedding-v3"
     assert settings.embedding_timeout == 10.0
-    assert settings.vector_sync_timeout == 1.5
+    # H-14 / 裁决 C-01（2026-11-07）：冷连接 ~1.7s 会被 1.5 误判超时，运行时已改 5.0
+    assert settings.vector_sync_timeout == 5.0
     assert settings.prompt_version == "v1.0"
     assert settings.mysql_db == "ai_talent"
     assert settings.milvus_collection == "talent_vectors"
