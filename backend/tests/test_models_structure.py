@@ -320,6 +320,11 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "recipient_user_id", "payload_json", "idempotency_key", "status",
         "failure_reason", "created_at", "sent_at", "read_at",
     },
+    # ---- D 工作流引擎（T-D04）----
+    "workflow_engine_runs": {
+        "id", "graph_name", "thread_id", "status", "error",
+        "finished_at", "created_at", "updated_at",
+    },
 }
 
 EXPECTED_UNIQUE: dict[str, set[str]] = {
@@ -350,6 +355,7 @@ EXPECTED_UNIQUE: dict[str, set[str]] = {
     "training_learning_records": {"uk_learning_item_employee"},
     "inventory_development_plans": {"uk_idp_review"},
     "notifications": {"uk_notifications_idempotency"},
+    "workflow_engine_runs": {"uk_workflow_engine_runs_thread"},
 }
 
 EXPECTED_INDEXES: dict[str, set[str]] = {
@@ -367,6 +373,7 @@ EXPECTED_INDEXES: dict[str, set[str]] = {
     "match_batches": {"idx_match_job"},
     "match_results": {"idx_match_talent"},
     "notifications": {"idx_notifications_recipient", "idx_notifications_ref"},
+    "workflow_engine_runs": {"idx_workflow_engine_runs_status"},
 }
 
 
@@ -374,10 +381,10 @@ def ddl(model) -> str:
     return str(CreateTable(model.__table__).compile(dialect=DIALECT))
 
 
-def test_exactly_52_tables_and_no_phase2_table():
-    assert len(TABLE_NAMES) == 52
-    assert len(MODEL_CLASSES) == 52
-    assert len(Base.metadata.tables) == 52
+def test_exactly_53_tables_and_no_phase2_table():
+    assert len(TABLE_NAMES) == 53
+    assert len(MODEL_CLASSES) == 53
+    assert len(Base.metadata.tables) == 53
     assert set(TABLE_NAMES) == set(EXPECTED_COLUMNS)
     # D-7 缓办：一期不建 llm_score_cache
     assert "llm_score_cache" not in Base.metadata.tables
