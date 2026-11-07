@@ -147,3 +147,8 @@ from app.modules.assessments.registry import ALL_ROUTERS as _C_ROUTERS  # noqa: 
 
 for _c_router in _C_ROUTERS:
     app.include_router(_c_router)
+
+# M3 招聘域（人才需求/项目、JD 投放、申请五阶段状态机）：A 的 modules/recruitment（V2.6 冻结口径）
+from app.modules.recruitment.router import router as recruitment_router  # noqa: E402
+
+app.include_router(recruitment_router)

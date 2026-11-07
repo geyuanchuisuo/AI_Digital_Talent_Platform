@@ -121,3 +121,14 @@
 - v0.1.10（2026-11-07 01:00）：用户「请继续完成未完成的任务」。同步远端发现 `master` 已被 C 推进到 `2ca3980` 并 rebase 零冲突；补跑 T-A04 契约核对（勾选）、前端 2 例失败定位、后端 4 项失败精确断言、`next build` 诊断；订正 C-04/C-05/C-08，新增 C-09～C-11 / U-09 与受阻的 T-A08，全部汇总到 [清单 §5](架构待确认问题清单.md)。**第一优先级仍是「等用户一次性回复」**，人工浏览器测试排最后，业务开发未启动、未 push。
 - v0.1.11（2026-11-07 09:29）：用户「问题一个一个问我」逐条裁决 C-01～C-11 / U-01～U-09（结论登记 [清单 §6](架构待确认问题清单.md)），并追加「推送前记得测试，测试通过才能推送合并」。落地：C-01 断言修复、C-07 默认前缀 `aitalent-app`、C-02/C-03 README 澄清、U-03 ownership 变更（单独提交）、U-04 旧 Key 本机 `.env`。R-A01 解除。**M2 暂缓（U-07）**。同轮测试完成（09:52）：隔离环境 bootstrap 自检 7/7（真实 LLM/Embedding 调用成功）、health 200 worker alive、全量 pytest **0 失败**、vitest **66/66**；T-A01/T-A05 勾选；新坑 H-A26（`.env` 隔离名覆盖 `test_config` 默认值断言，改回默认）。**U-09 前提「测试通过」已满足**，进入授权推送流程；人工浏览器测试关键节点再叫（U-08）。
 - v0.1.12（2026-11-07 14:50）：**需求冻结（V2.6）**——用户指令按 design 四件与 PRD 核对需求文档，冲突 4 处按原需求改回（系统管理域 RBAC 表体系、JD 生成投放、岗前培养计划、候选人管理实体），状态改为已冻结；AGENTS/README 基线对齐。M3+ 重排解锁：F01 增 JD 投放、F05 增岗前培养、系统管理域表体系（sys_*）纳入——A 下一批任务按 V2.6 重排（人才需求实体含 headcount、JD 投放接口、招聘状态机）。同轮功能 6/7 已集成（T-A41/T-A53）。
+
+## M3-V2.6 · 招聘域重排（需求冻结后按 V2.6 口径，2026-11-07）
+
+> 原 M3（T-A21～T-A24）基于 V2.2 编写；冻结版 V2.6 增补 JD 生成投放（F01）、岗前培养（F05，归 C）、系统管理域表体系（F09）。以下为 A 侧重排清单，编号 T-A60x 供沟通引用。
+
+- [ ] **T-A60a 招聘域数据层** — `modules/recruitment/models.py` 五表（project_groups/projects/project_demands 含 headcount/jd_publications/applications 含五阶段映射）+ 迁移 A_0005 + 注册（35→40）。验收点：迁移可重放、对照测试全过。
+- [ ] **T-A60b 人才需求与项目 CRUD** — project-demands/projects/project-groups 接口（创建/列表/详情/状态流转/重复提交 409）。验收点：headcount 与缺口口径（§12.3）可核对。
+- [ ] **T-A60c 申请与五阶段状态机** — applications 创建（同人在途 409）+ 内部阶段流转（外部阶段按映射自动更新）+ 终态 result_category（HR 确认）。验收点：五阶段映射逐条验证、越权 403、刷新保留。
+- [ ] **T-A60d JD 生成投放** — jd-publications 创建（草稿确认后投放）/列表/撤回；渠道/时间/状态留痕。验收点：投放可撤回、版本留痕。
+- [ ] **T-A60e 系统管理域表体系** — sys_departments/sys_roles/sys_user_roles/sys_role_permissions/sys_menus/sys_operation_logs（F09/design §8.3）；users 兼容映射策略留公共契约。验收点：data_scope 三值模型可查询。
+- [ ] **T-A60f 个人端申请视图** — (person) 组候选人申请列表与对外阶段（仅本人，AccountScope 过滤）。验收点：跨申请隔离、内部评分不外露。
