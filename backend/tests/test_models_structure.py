@@ -1,4 +1,4 @@
-"""L1 单元测试 · 34 张表结构逐字段对照（T-03 验收点 + 裁决 C-04）。
+"""L1 单元测试 · 45 张表结构逐字段对照（T-03 验收点 + 裁决 C-04）。
 
 不触真实 MySQL：用 MySQL dialect 编译 DDL + 检查 metadata，纯内存执行。
 期望列名/约束名在下方硬编码，不反向从模型推导：
@@ -35,7 +35,7 @@ from app.models.enums import DEGREE_VALUES, PARSE_TASK_STATUSES, VECTOR_STATUSES
 
 DIALECT = mysql.dialect()
 
-# C 域表名前缀（测评 / 人工面试 / 培训）：updated_at 为应用层维护（CTimestampMixin），
+# C 域表名前缀（测评 / 人工面试 / AI 面试间 / 培训 / 盘点）：updated_at 为应用层维护（CTimestampMixin），
 # 与公共 UpdatedAtMixin 的差异已发 docs/requests/A/ 请求 C 对齐。
 C_DOMAIN_TABLES = frozenset(
     t for t in (
@@ -43,10 +43,14 @@ C_DOMAIN_TABLES = frozenset(
         "assessment_assignments", "assessment_answers", "assessment_results",
         "assessment_reviews", "assessment_review_items", "assessment_selections",
         "interview_rounds", "interview_feedback", "interview_round_events",
+        "ai_interview_sessions", "ai_interview_questions", "ai_interview_events",
         "training_courses", "training_sessions", "training_attendances",
         "training_feedbacks", "training_feedback_themes", "training_plans",
         "training_plan_items", "training_plan_versions",
-        "training_learning_records", "training_growth_events",
+        "training_learning_records", "training_learning_evidence",
+        "training_enrollments", "training_growth_events",
+        "inventory_reviews", "inventory_talent_pools", "inventory_disputes",
+        "inventory_development_plans", "inventory_events",
     )
 )
 
@@ -121,12 +125,12 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "profile_input_snapshot_json", "manual_verdict", "manual_verdict_by",
         "manual_verdict_at", "created_at",
     },
-    # ---- C 模块 21 表（测评 8 / 人工面试 3 / 培训 10，裁决 C-04）----
+    # ---- C 模块 32 表（测评 9 / 人工面试 3 / AI 面试间 3 / 培训 12 / 盘点 5，裁决 C-04）----
     "assessment_questions": {
         "id", "job_id", "job_version", "job_title", "dimension_name",
-        "dimension_type", "difficulty", "question_type", "stem", "options_json",
-        "correct_answer", "reference_points", "scoring_guideline", "status",
-        "created_by", "updated_by", "created_at", "updated_at",
+        "dimension_type", "difficulty", "question_type", "knowledge_point", "stem",
+        "options_json", "correct_answer", "reference_points", "scoring_guideline",
+        "status", "created_by", "updated_by", "created_at", "updated_at",
     },
     "assessment_plans": {
         "id", "purpose", "job_id", "job_title", "job_version", "dimensions_json",
@@ -174,9 +178,9 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "completed_at", "question_snapshot_json", "created_at", "updated_at",
     },
     "interview_rounds": {
-        "id", "candidate_user_id", "talent_profile_id", "job_id", "job_title",
-        "round_no", "round_name", "scheduled_at", "mode", "location_or_link",
-        "interviewer_user_ids_json", "status", "internal_note",
+        "id", "candidate_user_id", "talent_profile_id", "job_id", "application_id",
+        "job_title", "round_no", "round_name", "scheduled_at", "mode",
+        "location_or_link", "interviewer_user_ids_json", "status", "internal_note",
         "client_request_id", "version", "created_by", "updated_by",
         "created_at", "updated_at",
     },
@@ -188,6 +192,20 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     "interview_round_events": {
         "id", "round_id", "event_type", "before_json", "after_json",
         "operator_id", "note", "created_at", "updated_at",
+    },
+    "ai_interview_sessions": {
+        "id", "candidate_user_id", "talent_profile_id", "job_id",
+        "application_id", "status", "started_at", "finished_at", "overall_score",
+        "overall_feedback", "note", "created_at", "updated_at",
+    },
+    "ai_interview_questions": {
+        "id", "session_id", "sequence_no", "question_text", "question_type",
+        "answer_text", "ai_score", "ai_feedback_json", "status",
+        "created_at", "updated_at",
+    },
+    "ai_interview_events": {
+        "id", "session_id", "event_type", "operator_id", "note",
+        "payload_json", "created_at", "updated_at",
     },
     "training_courses": {
         "id", "title", "description", "material_url", "dimension_names_json",
@@ -227,11 +245,43 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     },
     "training_learning_records": {
         "id", "plan_item_id", "employee_user_id", "status", "note",
-        "reported_at", "is_self_reported", "created_at", "updated_at",
+        "reported_at", "is_self_reported", "formal_completed", "evidence_score",
+        "created_at", "updated_at",
+    },
+    "training_learning_evidence": {
+        "id", "learning_record_id", "employee_user_id", "evidence_type",
+        "payload_json", "score", "verified_by", "created_at", "updated_at",
+    },
+    "training_enrollments": {
+        "id", "course_id", "employee_user_id", "priority", "status",
+        "expires_at", "decided_by", "decided_at", "note", "created_at", "updated_at",
     },
     "training_growth_events": {
-        "id", "employee_user_id", "talent_profile_id", "event_type", "ref_type",
-        "ref_id", "summary", "payload_json", "created_at", "updated_at",
+        "id", "employee_user_id", "talent_profile_id", "source_type", "event_type",
+        "ref_type", "ref_id", "summary", "payload_json", "created_at", "updated_at",
+    },
+    "inventory_reviews": {
+        "id", "employee_user_id", "talent_profile_id", "cycle_name", "review_type",
+        "status", "performance_score", "performance_source",
+        "potential_manager_score", "potential_hr_score", "grid_cell",
+        "reviewer_manager_id", "reviewer_hr_id", "confirmed_at", "summary",
+        "payload_json", "created_at", "updated_at",
+    },
+    "inventory_talent_pools": {
+        "id", "employee_user_id", "pool_type", "status", "nominated_by",
+        "decided_by", "decided_at", "note", "created_at", "updated_at",
+    },
+    "inventory_disputes": {
+        "id", "review_id", "employee_user_id", "status", "content", "response",
+        "responded_by", "created_at", "updated_at",
+    },
+    "inventory_development_plans": {
+        "id", "review_id", "employee_user_id", "content_json", "status",
+        "created_at", "updated_at",
+    },
+    "inventory_events": {
+        "id", "review_id", "event_type", "operator_id", "note",
+        "payload_json", "created_at", "updated_at",
     },
 }
 
@@ -253,12 +303,15 @@ EXPECTED_UNIQUE: dict[str, set[str]] = {
     "assessment_selections": {"uk_selection_question", "uk_selection_sequence"},
     "assessment_review_items": {"uk_review_assignment_question_user"},
     "interview_feedback": {"uk_feedback_round"},
+    "ai_interview_questions": {"uk_ai_q_session_seq"},
     "training_attendances": {"uk_attendance_session_employee"},
     "training_feedbacks": {"uk_feedback_course_employee"},
     "training_feedback_themes": {"uk_feedback_theme_course"},
+    "training_enrollments": {"uk_enrollment_course_employee"},
     "training_plan_items": {"uk_plan_version_course"},
     "training_plan_versions": {"uk_plan_version"},
     "training_learning_records": {"uk_learning_item_employee"},
+    "inventory_development_plans": {"uk_idp_review"},
 }
 
 EXPECTED_INDEXES: dict[str, set[str]] = {
@@ -282,10 +335,10 @@ def ddl(model) -> str:
     return str(CreateTable(model.__table__).compile(dialect=DIALECT))
 
 
-def test_exactly_35_tables_and_no_phase2_table():
-    assert len(TABLE_NAMES) == 35
-    assert len(MODEL_CLASSES) == 35
-    assert len(Base.metadata.tables) == 35
+def test_exactly_45_tables_and_no_phase2_table():
+    assert len(TABLE_NAMES) == 45
+    assert len(MODEL_CLASSES) == 45
+    assert len(Base.metadata.tables) == 45
     assert set(TABLE_NAMES) == set(EXPECTED_COLUMNS)
     # D-7 缓办：一期不建 llm_score_cache
     assert "llm_score_cache" not in Base.metadata.tables
@@ -382,6 +435,13 @@ def test_unique_constraints_by_name():
     assert unique_cols("training_learning_records", "uk_learning_item_employee") == (
         "plan_item_id", "employee_user_id",
     )
+    assert unique_cols("ai_interview_questions", "uk_ai_q_session_seq") == (
+        "session_id", "sequence_no",
+    )
+    assert unique_cols("training_enrollments", "uk_enrollment_course_employee") == (
+        "course_id", "employee_user_id",
+    )
+    assert unique_cols("inventory_development_plans", "uk_idp_review") == ("review_id",)
 
 
 def test_indexes_by_name():
