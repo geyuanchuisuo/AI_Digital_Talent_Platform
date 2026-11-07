@@ -50,4 +50,4 @@ def test_terminal_semantics_result_categories():
 def test_five_recruitment_tables_registered():
     for t in ("project_groups", "projects", "project_demands", "jd_publications", "applications"):
         assert t in TABLE_NAMES and t in Base.metadata.tables
-    assert len(TABLE_NAMES) == 60  # 51 + notifications(T-D03) + engine_runs(T-D04) + aqs(T-D01b)
+    assert len(TABLE_NAMES) == 61  # …60 + metric_registry(T-D08)
