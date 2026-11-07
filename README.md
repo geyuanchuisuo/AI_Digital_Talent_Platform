@@ -2,6 +2,8 @@
 
 项目当前处于**需求阶段**。以 [统一需求 V2.4（需求阶段稿）](docs/需求文档.md) 和根 [AGENTS.md](AGENTS.md) 的最新业务口径为准：先确认完整产品目标、公共能力与验收，再冻结需求和审批项目 Todo，最后才安排编码。现有四人分工和源码是实施输入，不裁剪已确认的招聘、盘点、培训、知识、工作流与问数范围；V2.4 §16 是项目级需求待办，不是已开工或已验收声明。
 
+协作执行规则见 [AGENTS.md](AGENTS.md)，发布基线、确认依据和同步状态见 [决策账本](.collaboration/DECISIONS.md)。个人分支落后时先核对对应版本，不能用旧副本启动新业务编码。
+
 ## 当前真实状态
 
 2026-11-06 按用户授权导入 `hhy_gycs_master` ZIP：201 个代码/配置文件原样落入 `backend/`、`frontend/`、`deploy/`；18 份历史说明与 27 份合成评测资产单独存入 [来源参考区](docs/imports/hhy_gycs_master/README.md)。逐文件去向、哈希和维护人见 [导入清单](.collaboration/imports/hhy_gycs_master.json)。未覆盖现有根文档及七份旧需求来源。
@@ -20,7 +22,9 @@
 
 ## Git 拉取后先做这些
 
-先读 [AGENTS.md](AGENTS.md)、[更新记录](更新记录.md)、[协作操作指南](docs/协作操作指南.md) 和 [模块归属](docs/模块归属.md)。确认本人 A/B/C/D 角色，再读对应 [A](tasks/A.md) / [B](tasks/B.md) / [C](tasks/C.md) / [D](tasks/D.md) 任务卡及最新交接。
+先读 [AGENTS.md](AGENTS.md)、[决策账本](.collaboration/DECISIONS.md)、[更新记录](更新记录.md)、[协作操作指南](docs/协作操作指南.md) 和 [模块归属](docs/模块归属.md)。正式开发确认本人 A/B/C/D 角色后，再读对应任务卡及四个工作包最新交接。只读全量审核无需认领开发角色，应核对全项目和相关分支；用户专项授权的规则维护单独记录，不修改 actor 或冒写角色日志。
+
+决策冲突登记依据与取代关系，不能按提交先后自行裁决。跨模块请求使用 [请求模板](.collaboration/REQUEST_TEMPLATE.md)，由提供方交付、消费方验证后关闭。交接使用 [更新模板](.collaboration/UPDATE_TEMPLATE.md)，分开记录设计、实现、隔离测试、公共接入、联调、验收及发布位置；合入 master 不代表业务验收。
 
 需求与协作基线已于 2026-11-06 发布到 `origin/master`（`5c3df08`）。任何成员与 Agent 都不得在 `master` 开发或创建开发提交；它仅用于经明确授权的集成与发布。每个人在自己的个人分支开发；`master_YB` 只是本次用户的个人分支，其他成员继续使用各自的分支。
 
