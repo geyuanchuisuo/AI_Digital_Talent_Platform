@@ -72,12 +72,16 @@ def _drop_restore_db():
 
 
 def test_real_schema_matches_expected_columns():
-    """真实库 information_schema 逐表对照，不只看 ORM metadata。"""
+    """真实库 information_schema 逐表对照，不只看 ORM metadata。
+
+    `alembic_version` 是迁移状态表（非业务表），从对照中排除；
+    业务表清单仍必须与 EXPECTED_COLUMNS 完全一致。
+    """
     conn = backup_db.connect(settings.mysql_db)
     try:
         with conn.cursor() as cur:
             cur.execute("SHOW TABLES")
-            tables = {row[0] for row in cur.fetchall()}
+            tables = {row[0] for row in cur.fetchall()} - {"alembic_version"}
             assert tables == set(EXPECTED_COLUMNS)
 
             cur.execute(

@@ -1,8 +1,10 @@
 """通用依赖（架构 §4：`api/deps.py` = JWT 鉴权、分页依赖）。
 
-- `pagination`：T-02 落地，`page` 默认 1、`page_size` 默认 20 上限 200（接口 §1.3）。
+- `pagination`：T-02 落地，`page` 默认 1、`page_size` 默认 20、上限 200（接口 §1.3）。
 - `get_current_user`：T-07 落地，口径见 `docs/统一错误码与鉴权.md` v1.2 §四。
   除 `POST /auth/login`、`GET /health` 外所有业务路由都挂它；一期不做 RBAC。
+- `get_account_scope`：2026-11-07 落地（REQ-B-20261106-02 阶段 1）——B/C/D 的
+  数据范围授权统一入口，契约见 `app/core/auth/scope.py` 与 A→B/A→D 响应。
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from fastapi import Depends, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
+from app.core.auth.scope import AccountScope, get_account_scope
 from app.core.errors import BizError
 from app.database import get_db
 from app.models import User
@@ -69,3 +72,18 @@ def get_current_user(
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+def _account_scope_from_user(user: User) -> AccountScope:
+    """把登录用户映射为数据范围（阶段 1 三值角色；纯函数见 core/auth/scope.py）。"""
+    return get_account_scope(user)
+
+
+def get_account_scope_dep(
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> AccountScope:
+    """FastAPI 依赖：登录用户 → AccountScope；B/C/D 的路由直接注入使用。"""
+    return _account_scope_from_user(current_user)
+
+
+AccountScopeDep = Annotated[AccountScope, Depends(get_account_scope_dep)]

@@ -27,15 +27,17 @@ import bcrypt  # noqa: E402
 import pymysql  # noqa: E402
 from sqlalchemy import func, inspect, select  # noqa: E402
 
-import app.models  # noqa: E402,F401 - 触发 13 张表注册到 Base.metadata
+import app.models  # noqa: E402,F401 - 触发 34 张表注册到 Base.metadata
 from app.config import settings  # noqa: E402
 from app.database import Base, SessionLocal, engine  # noqa: E402
-from app.models import JobProfile, SysSetting, User  # noqa: E402
+from app.models import JobProfile, SysSetting, TalentProfile, User  # noqa: E402
 from app.models.enums import SETTING_TASK_CONCURRENCY  # noqa: E402
 
 SEED_USERNAME = "hr"
 SEED_PASSWORD = "hr123456"
 SEED_JOB_TITLE = "高级后端工程师"
+SEED_PERSONAL_USERNAME = "personal"
+SEED_PERSONAL_PASSWORD = "personal123456"
 
 
 def create_database() -> bool:
@@ -115,6 +117,39 @@ def seed(session) -> list[str]:
             )
         )
         created.append(f"user:{SEED_USERNAME}")
+
+    # ---- 个人端演示账号（REQ-B-20261106-02 第 5 项：绑定样例，虚构数据）----
+    personal_count = session.scalar(
+        select(func.count()).select_from(User).where(User.username == SEED_PERSONAL_USERNAME)
+    )
+    if not personal_count:
+        demo_profile = TalentProfile(
+            name="演示个人用户",
+            phone="13800001234",
+            email="demo-personal@example.com",
+            degree="本科",
+            current_title="后端工程师",
+            work_years=Decimal("3.0"),
+            skills_json=["python", "mysql"],
+            source="manual",
+        )
+        session.add(demo_profile)
+        session.flush()  # 取自增 id 作为 person_id
+        session.add(
+            User(
+                username=SEED_PERSONAL_USERNAME,
+                password_hash=bcrypt.hashpw(
+                    SEED_PERSONAL_PASSWORD.encode("utf-8"), bcrypt.gensalt()
+                ).decode("ascii"),
+                display_name="演示个人账号",
+                role="personal",
+                person_id=demo_profile.id,
+                is_active=1,
+            )
+        )
+        created.append(
+            f"user:{SEED_PERSONAL_USERNAME}(role=personal, person_id={demo_profile.id}) + talent_profile:演示个人用户"
+        )
 
     job_count = session.scalar(
         select(func.count())

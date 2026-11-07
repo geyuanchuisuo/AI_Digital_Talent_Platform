@@ -174,8 +174,10 @@ def test_unhandled_exception_is_500_without_leaking(client):
 
 
 def test_validation_error_unified_and_log_masked(client, caplog):
-    with caplog.at_level(logging.INFO, logger="app.error"):
-        resp = client.post("/validate", json={"phone": "13800000000"})
+    # set_level（而非 at_level）：同时设置捕获 handler 级别，避免全量运行中
+    # 其他测试改动 logger 状态后本用例间歇性捕获不到（2026-11-07 修复 flaky）
+    caplog.set_level(logging.INFO, logger="app.error")
+    resp = client.post("/validate", json={"phone": "13800000000"})
     assert resp.status_code == 422
     _assert_error(resp.json(), 422, "请求参数结构不合法")
     assert "138****0000" in caplog.text
