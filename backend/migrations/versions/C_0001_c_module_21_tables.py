@@ -1,11 +1,12 @@
-"""c_module_21_tables：C 域 21 表（测评 8 / 人工面试 3 / 培训 10，裁决 C-04）
+"""c_module_21_tables: 21 C-domain tables (assessments 8 / interviews 3 / training 10; ruling C-04).
 
 Revision ID: C_0001_c_module
 Revises: A_0001_baseline
 Create Date: 2026-11-07
 
-把 C 已合入 master 的 21 个模型落成表（此前 13 表断言未注册、一张不建）。
-表结构以 backend/app/modules/*/models.py 为准；C 后续改表用 `C_*.py` 增量迁移。
+Creates the 21 models C already merged into master (previously blocked by the
+13-table assertion so none existed). Schema source of truth:
+backend/app/modules/*/models.py; C submits future `C_*.py` migrations on top.
 """
 from __future__ import annotations
 
@@ -17,7 +18,7 @@ branch_labels = None
 depends_on = None
 
 C_TABLES = (
-    # 测评（8）
+    # assessments (8)
     "assessment_questions",
     "assessment_plans",
     "assessment_papers",
@@ -26,11 +27,11 @@ C_TABLES = (
     "assessment_results",
     "assessment_reviews",
     "assessment_review_items",
-    # 人工面试（3）
+    # interviews (3)
     "interview_rounds",
     "interview_feedback",
     "interview_round_events",
-    # 培训（10）
+    # training (10)
     "training_courses",
     "training_sessions",
     "training_attendances",
@@ -45,7 +46,7 @@ C_TABLES = (
 
 
 def upgrade() -> None:
-    from app.models import Base  # 导入即注册全部 34 表（公共 13 + C 21）
+    from app.models import Base  # importing registers all 34 tables (13 public + 21 C)
 
     bind = op.get_bind()
     Base.metadata.create_all(

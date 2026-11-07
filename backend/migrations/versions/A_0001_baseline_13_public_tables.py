@@ -1,11 +1,12 @@
-"""baseline：公共 13 表（数据库设计 v1.2；13 表冻结口径的迁移基线）
+"""baseline: 13 public tables (DB design v1.2; migration baseline of the frozen 13-table scope).
 
 Revision ID: A_0001_baseline
 Revises:
 Create Date: 2026-11-07
 
-基线迁移：已有 13 表库执行 `alembic stamp A_0001_baseline` 跳过建表；
-全新库可从零 `alembic upgrade head`。 downgrade 会 DROP 全部公共表，慎用。
+Baseline migration: existing 13-table databases should run
+`alembic stamp A_0001_baseline` to skip table creation; fresh databases can
+`alembic upgrade head` from zero. downgrade DROPs all public tables - be careful.
 """
 from __future__ import annotations
 
@@ -16,7 +17,7 @@ down_revision = None
 branch_labels = None
 depends_on = None
 
-# 公共 13 表（与 app/models/__init__.py 的公共段一致）
+# 13 public tables (matches the public section of app/models/__init__.py)
 PUBLIC_TABLES = (
     "users",
     "sys_settings",

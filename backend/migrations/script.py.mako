@@ -4,8 +4,10 @@ Revision ID: ${up_revision}
 Revises: ${down_revision | comma,n}
 Create Date: ${create_date}
 
-命名约定（U-05 裁决）：公共/招聘表变更用 `A_*`，C 的测评/面试/培训用 `C_*`，
-B/D 落地时分别用 `B_*` / `D_*`。每个迁移只做一件事，downgrade 必须可回滚。
+Naming convention (ruling U-05): use `A_*` for public/recruitment table changes,
+`C_*` for C's assessments/interviews/training; B and D use `B_*` / `D_*`.
+One change per migration; downgrade must be reversible.
+NOTE: keep generated files ASCII-only (Windows GBK locale read by alembic 1.20).
 """
 from __future__ import annotations
 

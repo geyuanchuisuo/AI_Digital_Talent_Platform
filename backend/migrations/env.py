@@ -1,7 +1,12 @@
-"""Alembic 环境：连接串取自 app.config settings（backend/.env），不落硬编码。
+"""Alembic env: DB URL comes from app.config settings (backend/.env), never hardcoded.
 
-online 模式直接用 settings.database_url；offline（--sql）用同一 URL 生成 SQL。
-本文件不 import app.models（迁移脚本各自 import 所需模型），避免引入加载侧效应。
+Online mode uses settings.database_url directly; offline (--sql) generates SQL from
+the same URL. This file does NOT import app.models (each migration imports what it
+needs) to avoid import side effects.
+
+NOTE: keep migration scripts ASCII-only. Alembic 1.20 reads ini/scripts with the
+system locale encoding on Windows (GBK); Chinese text here breaks startup on
+Windows hosts. Chinese docs live in the migration-chain doc under docs/modules/A/.
 """
 
 from __future__ import annotations
@@ -17,7 +22,7 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# 用运行配置覆盖 alembic.ini 的占位 URL
+# Override the placeholder URL in alembic.ini with the runtime settings
 config.set_main_option("sqlalchemy.url", settings.database_url)
 
 
