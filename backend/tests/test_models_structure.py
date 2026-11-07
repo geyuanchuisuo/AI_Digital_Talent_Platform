@@ -53,8 +53,8 @@ C_DOMAIN_TABLES = frozenset(
 # 逐表期望列名（含 id / created_at / updated_at），来源：数据库设计 v1.2 §3~§6
 EXPECTED_COLUMNS: dict[str, set[str]] = {
     "users": {
-        "id", "username", "password_hash", "display_name", "role", "is_active",
-        "last_login_at", "created_at", "updated_at",
+        "id", "username", "password_hash", "display_name", "role", "person_id",
+        "is_active", "last_login_at", "created_at", "updated_at",
     },
     "sys_settings": {
         "id", "setting_key", "setting_value", "value_type", "description",
@@ -226,7 +226,7 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
 }
 
 EXPECTED_UNIQUE: dict[str, set[str]] = {
-    "users": {"uk_username"},
+    "users": {"uk_username", "uk_user_person_id"},
     "sys_settings": {"uk_setting_key"},
     "resume_files": {"uk_file_hash"},
     "parse_tasks": {"uk_resume_file"},
@@ -333,6 +333,7 @@ def test_unique_constraints_by_name():
         return None
 
     assert unique_cols("users", "uk_username") == ("username",)
+    assert unique_cols("users", "uk_user_person_id") == ("person_id",)
     assert unique_cols("sys_settings", "uk_setting_key") == ("setting_key",)
     assert unique_cols("resume_files", "uk_file_hash") == ("file_hash",)
     assert unique_cols("parse_tasks", "uk_resume_file") == ("resume_file_id",)
