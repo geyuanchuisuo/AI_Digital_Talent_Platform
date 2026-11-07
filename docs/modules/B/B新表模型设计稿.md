@@ -1,6 +1,6 @@
 # B 模块新表模型设计稿（9 表 + 1 列）
 
-> 状态：**设计稿**，待 B 确认 + V2.5 冻结后编码。  
+> 状态：**设计已定稿**（4 项设计决策已确认，见§七），待 V2.5 需求冻结后编码。  
 > 依据：tasks/B.md（T-B06/T-B07/T-B08/T-B12/T-B18、B-01~B-03）、A 开工指引、`backend/app/models/base.py` 公共 mixin。  
 > 迁移挂载点：`down_revision = "A_0004_merge_heads"`，命名 `B_0001_*`，**纯 ASCII**。
 
@@ -25,7 +25,7 @@
 | talent_profile_id | BIGINT UNSIGNED | NOT NULL, idx | 关联 talent_profiles.id（= person_id） |
 | version | INT UNSIGNED | NOT NULL | 单调递增版本号 |
 | change_type | VARCHAR(20) | NOT NULL, default 'reparse' | reparse / manual_edit / merge / restore |
-| profile_snapshot_json | JSON | NOT NULL | 该版本完整画像快照（结构化 JSON） |
+| profile_snapshot_json | JSON | NOT NULL | **全量画像快照**（结构化 JSON）。决策：存全量不存 diff，回滚直接取出即可，避免逐层合并 diff 的复杂性与数据损坏风险 |
 | changed_by | BIGINT UNSIGNED | NULL | 操作人 user_id（系统触发为 NULL） |
 | created_at | DATETIME | NOT NULL, default CURRENT_TIMESTAMP | |
 
@@ -124,7 +124,7 @@
 
 | 字段 | 类型 | 约束 | 说明 |
 |------|------|------|------|
-| job_profile_id | BIGINT UNSIGNED | NULL, idx | 上传时关联的岗位画像（A 的 job_profiles.id），用于定向解析 |
+| job_profile_id | BIGINT UNSIGNED | NULL, idx | 上传时关联的岗位画像（A 的 job_profiles.id），用于定向解析。决策：**不加唯一约束**，同一份简历可用于多个岗位匹配；仅加普通索引 `idx_rf_job_profile` |
 
 ---
 
@@ -160,7 +160,7 @@
 | knowledge_document_id | BIGINT UNSIGNED | NOT NULL, idx | |
 | chunk_no | INT UNSIGNED | NOT NULL | 文档内片段序号 |
 | content | TEXT | NOT NULL | 片段文本 |
-| vector_id | VARCHAR(100) | NULL | Milvus 中的向量 ID |
+| vector_id | VARCHAR(26) | NULL | **ULID**（业务生成，非 Milvus 自增 ID）。决策：ULID 幂等，重试不会产生重复向量，且带时间戳便于排查；写 DB 与写 Milvus 用同一 ID |
 | vector_status | VARCHAR(20) | NOT NULL, default 'pending' | pending / synced / failed |
 | token_count | INT UNSIGNED | NULL | |
 | created_at | DATETIME | NOT NULL, default CURRENT_TIMESTAMP | |
@@ -177,7 +177,7 @@
 |------|------|------|------|
 | id | BIGINT UNSIGNED | PK, AI | |
 | question | TEXT | NOT NULL | 用户问题 |
-| answer | MEDIUMTEXT | NULL | 回答内容（流式完成后回填） |
+| answer | MEDIUMTEXT | NULL | 回答内容（流式完成后回填）。决策：一期**仅存最终结果**，不做分段存储；流式输出直接经 SSE 推前端，中断时 status=failed 并留空，前端提示重新生成。后续如需断点续传再加 qa_answer_chunks 表 |
 | cited_chunks_json | JSON | NULL | 引用的 knowledge_chunks.id 列表 |
 | model_version | VARCHAR(50) | NULL | 对齐 A 的快照口径 |
 | prompt_version | VARCHAR(20) | NULL | |
@@ -310,9 +310,11 @@ knowledge_documents
 qa_records → cited_chunks_json → knowledge_chunks.id (逻辑引用)
 ```
 
-## 七、待确认项
+## 七、已确认决策（2026-11-07）
 
-1. `talent_profile_versions.profile_snapshot_json` 存全量画像还是仅差异？（建议全量，便于回滚）
-2. `knowledge_chunks.vector_id` 用 Milvus 自增 ID 还是业务生成 ULID？
-3. `qa_records.answer` 是否需要流式分段存储（vs 仅存最终结果）？
-4. `resume_files.job_profile_id` 是否需要唯一约束（一个文件只能对应一个岗位）？
+| # | 决策项 | 结论 | 理由 |
+|---|--------|------|------|
+| 1 | `profile_snapshot_json` 存全量还是差异 | **全量快照** | 回滚直接取出即可，避免逐层合并 diff 的复杂性与数据损坏风险；单条画像 < 50KB，存储可忽略 |
+| 2 | `vector_id` 用 Milvus 自增 ID 还是 ULID | **ULID**（VARCHAR(26)） | 幂等，重试不产生重复向量；带时间戳便于排查；写 DB 与写 Milvus 用同一 ID，无需两阶段 |
+| 3 | `qa_records.answer` 是否流式分段存储 | **仅存最终结果**（一期） | 流式直接经 SSE 推前端，DB 仅存结果用于历史回看；中断时 status=failed 提示重生成；后续如需断点续传再加 qa_answer_chunks 表 |
+| 4 | `resume_files.job_profile_id` 是否加唯一约束 | **不加**，仅普通索引 | 同一份简历可用于多个岗位匹配，加唯一约束会误伤合法多岗位场景 |
