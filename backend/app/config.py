@@ -83,6 +83,10 @@ class Settings(BaseSettings):
     rate_limit_window_seconds: int = 60
     rate_limit_blacklist_ttl: int = 3600
 
+    # ---- PostgreSQL 只读分析副本（T-D02，D 维护 scripts/D/etl_pgsql.py；契约 docs/modules/D/ETL说明.md）----
+    # 空 ANALYTICS_DB_URL = 副本未启用：自由问数/报表降级主库 MySQL 直查（V2.6 确认的回退口径）。
+    analytics_db_url: str = ""
+
     # ---- 应用与网络 ----
     cors_origins: str = "*"
     app_env: str = "development"
