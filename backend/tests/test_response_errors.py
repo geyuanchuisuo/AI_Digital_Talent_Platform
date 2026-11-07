@@ -200,7 +200,8 @@ def test_half_write_never_returns_503(client):
 # ---- 白名单与契约 ----
 
 def test_error_code_whitelist():
-    assert ALLOWED_ERROR_CODES == {400, 401, 403, 404, 409, 422, 500, 503}
+    # 429 为 T-D01 限流响应（2026-11-07 用户指令纳入，九值）
+    assert ALLOWED_ERROR_CODES == {400, 401, 403, 404, 409, 422, 429, 500, 503}
     for code in ALLOWED_ERROR_CODES:
         assert BizError(code, "x").status_code == code
     with pytest.raises(ValueError):

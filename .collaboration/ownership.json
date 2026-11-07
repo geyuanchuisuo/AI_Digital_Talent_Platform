@@ -350,7 +350,11 @@
       "frontend/src/app/(main)/reports/**",
       "frontend/src/app/(main)/workflows/**",
       "frontend/src/app/(main)/dashboard/**",
-      "frontend/src/app/(main)/tasks/**"
+      "frontend/src/app/(main)/tasks/**",
+      "backend/app/core/cache/**",
+      "backend/app/core/workflows/**",
+      "backend/app/modules/notifications/**",
+      "deploy/postgres/**"
     ]
   }
 }
