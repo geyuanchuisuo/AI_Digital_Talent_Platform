@@ -13,7 +13,7 @@
 | 批次 | 内容 | 任务 | 前置依赖 | 状态 |
 |---|---|---|---|---|
 | P0 | 前置核对、契约登记、依赖请求、测试基建（无业务代码） | 6 | 无 | ⬜ 最高优先级 |
-| P1 | 基建：Redis/PgSQL/通知中心/LangGraph/Dify/SSE + 垂直切片 | 7 | P0（依赖请求 T-D00e 闭环） | ⬜ |
+| P1 | 基建：Redis/PgSQL/通知中心/LangGraph/Dify/SSE + 垂直切片 | 7 | P0 完成；依赖六组件已由 A 合入（T-D00e 部分闭环，sse-starlette 缺项不阻 T-D01~05） | ⬜ 可开工 |
 | P2 | F07 自由问数、多维分析与报告 | 5 | P1（T-D01b 切片、T-D02 副本）、B/C 指标口径 | ⬜ |
 | P3 | F08 工作流、AI 中台、Skills、数字员工 | 8 | P1（T-D04 引擎、T-D05 Dify）、C 测评事件 | ⬜ |
 | P4 | F09 工作台与通知前端 | 3 | P1（T-D03）、各域授权结果服务 | ⬜ |
@@ -28,24 +28,24 @@
 | 依赖 | 提供方 | 当前状态 | 阻塞的 D 任务 |
 |---|---|---|---|
 | AccountScope 阶段 1（admin/hr/personal 三角色 + person_id） | A | ✅ 已交付（`core/auth/scope.py`，迁移 A_0002） | T-D10 联调（阶段 1 范围） |
-| AccountScope 组织范围扩展（六类角色 + `user_scope_grants` 表） | A | ⏳ 等 V2.6 六类角色冻结 | T-D10 组织范围验收、T-D26 组织越权负例 |
+| AccountScope 组织范围扩展（六类角色 + `user_scope_grants` 表） | A | ✅ 已交付（A_0007，51 表；`department_ids`/`granted_scope` 聚合，[A 交付记录](../../updates/A/20261107-1700-组织范围授权扩展.md)；授予/撤销写接口属后续） | T-D10 组织范围验收、T-D26 组织越权负例（可开工） |
 | 指标口径——岗位/筛选/匹配三域（字段+去重+时间+维度） | A | ✅ 已交付（T-A53，[指标口径交付](../A/指标口径交付.md)） | T-D08/T-D09 |
 | 指标口径——解析/档案/问答域 | B | ⏳ 待交付 | T-D08/T-D09（B 域指标） |
 | 指标口径——测评/培训/盘点域 | C | ⏳ 待交付（盘点域二期追加） | T-D08/T-D09（C 域指标） |
 | M3 人才需求实体（headcount 字段） | A | ⏳ 冻结后建表（缺口指标数据源） | 缺口/人工推进类指标 |
-| 迁移链挂载点（A_0001→…→A_0004 merge head，35 表） | A | ✅ 已交付 | 全部 `D_*.py` |
+| 迁移链挂载点（A_0001→…→A_0007，51 表） | A | ✅ 已交付 | 全部 `D_*.py` |
 | **notifications/workflows router 注册进 `main.py`** | A | ✅ 已承诺（契约响应第 4 项：直接 import router 模式） | T-D03/T-D04 联调 |
 | **Redis 限流/缓存中间件挂载进 `main.py`** | A | ⏳ 随 T-D01 交付协调挂载 | T-D01 联调 |
 | 知识/档案入库事件 + 图谱抽取输入 | B | ⏳ 知识模块待建 | T-D18 第三条事件、T-D27 图谱 |
 | 测评提交事件 | C | ⏳ 测评模块实现中 | T-D18 第二条事件 |
 | Agnes `agnes-3.0-flash` API 验证 | D 自查 | ⏳ 当前实配 spark-x2.6 可用，Agnes 协议未验证 | P2/P3 全部真实模型调用 |
-| requirements.txt 新增依赖（langgraph/vanna/redis/psycopg/dify-sdk/neo4j/python-docx/图表库） | A 修改，D 提请求 | ⏳ 请求已提前至 P0 首发（T-D00e） | P1 全部；P2/P3 真实模型调用 |
+| requirements.txt 新增依赖（langgraph/vanna/redis/psycopg/dify-sdk/neo4j/python-docx/图表库） | A 修改，D 提请求 | ✅ 六组件已合入并实装验证（langgraph 1.2.20/vanna 2.0.2/redis 8.1.0/psycopg 3.3.8/dify-client 0.1.10/neo4j 6.4.1，宽松约束，573842c + [A 响应](../../updates/A/20261107-1710-依赖冻结.md)）；**sse-starlette/reportlab 未入**（T-D06/T-D11 开工前补请） | P1 主体解锁；P2/P3 真实模型调用仍卡 Agnes（DEC-20261107-AGNES-VERIFY） |
 
 ---
 
 ## P0 · 前置核对、契约登记、依赖请求与测试基建（无业务代码）
 
-- [x] **T-D00e 依赖清单请求闭环**｜规模：S — **P0 首发项**：✅ 2026-11-07 请求已落 [docs/requests/D/20261107-D-新增依赖清单请求.md](../../requests/D/20261107-D-新增依赖清单请求.md)；待 A 合入（阻塞 P1 开工）。原文：向 A 发 `docs/requests/D/` 请求列全部新增依赖（langgraph/vanna/redis/psycopg/dify-sdk/neo4j/python-docx/图表库），由 A 修改 requirements.txt/锁文件。影响结构：`docs/requests/D/**`、`backend/requirements.txt`（A 改）。验收标准：依赖入清单且 `pip install` 全仓可装；P1 开工前到位。完成定义：A 合入并回复。**为什么放 P0 首位**：P1 全部基建与 P2/P3 真实模型调用都卡这份清单。
+- [x] **T-D00e 依赖清单请求闭环**｜规模：S — **P0 首发项**：✅ 2026-11-07 请求已落 [docs/requests/D/20261107-D-新增依赖清单请求.md](../../requests/D/20261107-D-新增依赖清单请求.md)；**A 已于 573842c 合入 6/8 项并实装验证**（[UPD-A-1710](../../updates/A/20261107-1710-依赖冻结.md)），D 侧 `uv pip install`+六包 import 复验通过，**P1 主体解锁**；sse-starlette/reportlab 未合入（T-D06/T-D11 开工前补请），请求保持部分关闭状态。原文：向 A 发 `docs/requests/D/` 请求列全部新增依赖（langgraph/vanna/redis/psycopg/dify-sdk/neo4j/python-docx/图表库），由 A 修改 requirements.txt/锁文件。影响结构：`docs/requests/D/**`、`backend/requirements.txt`（A 改）。验收标准：依赖入清单且 `pip install` 全仓可装；P1 开工前到位。完成定义：A 合入并回复。**为什么放 P0 首位**：P1 全部基建与 P2/P3 真实模型调用都卡这份清单。
 - [x] **T-D00f 测试基建（tests/D harness）**｜规模：M — ✅ 2026-11-07 完成：`tests/D/`（fake_llm 三态/events_factory 14 枚举/sse_client/conftest SQLite 编译规则）+ 冒烟 7/7 通过（`backend/.venv -m pytest tests/D -v`）。用法见 [tests/D/README.md](../../tests/D/README.md)。原文：`tests/D/` 脚手架：DB fixture（迁移链建表+种子数据）、假 LLM server（可注入成功/超时/畸形输出三态）、SSE 测试客户端、notifications 事件工厂。影响结构：`tests/D/**`（新）。验收标准：①harness 可被 P1 各任务直接复用；②假 LLM 三态切换验证；③迁移链在测试库跑通。完成定义：样例测试跑通 + harness 用法写入模块文档。
 - [x] **T-D00a 环境与契约核对**｜规模：S — ✅ 2026-11-07 完成：alembic heads=`A_0006_merge_m3_c0003`（单头，D_0001 可挂）；AccountScope 三角色/auth 单测全绿（.env 缺失系本 clone 未建，已从 .env.example 生成后 34/34 通过）；**Agnes 探针 401**（端点可达、响应 AgnesAI JSON 错误体；现配 spark key 在 Agnes 无效——无 Agnes 凭据，协议完整验证阻塞，需用户提供 Agnes key 或确认先用 spark）。**Agnes 阻塞已登记决策账本（DEC-20261107-AGNES-VERIFY）**。原文：实测 `get_account_scope` 三角色返回、迁移链 `alembic current/head` 挂载点、Agnes 协议探针（对照 spark 现状双轨记录）。影响结构：只读核对，无改动。验收：三项实测结果（含 Agnes 真实调用或明确失败原因）写入 `docs/updates/D/`。完成定义：三份证据齐 + 阻塞（如有）登记决策账本。
 - [x] **T-D00b 白名单指标目录 v1 起草**｜规模：M — ✅ 2026-11-07 完成：[docs/modules/D/指标目录.md](指标目录.md)（A 域 3 卡片按 T-A53 登记；**M3 五表已由 A 于 fbcfb7f 落地**，缺口/人工推进类指标数据源解锁；B/C 域标待口径）；**B/C 催办请求已发**（[对 B：解析域口径确认](../../requests/D/20261107-D-指标口径确认催办-B.md)——B 契约 §6 已有草稿待确认字段终值；[对 C：测评/培训域口径交付](../../requests/D/20261107-D-指标口径交付催办-C.md)——C 尚无口径交付）。原文：消费 A 的 T-A53 三域口径起草 metric 卡片（metric_id/来源表/公式/时间字段/去重键/允许参数分组/权限/返回 schema），B/C 域标「待口径」。影响结构：`docs/modules/D/指标目录.md`（新）。验收：A 域 3 张卡片每张含 A 交付文档引用；B/C 域缺口清单+催办请求发出。完成定义：A 已核对口经 A 复核确认，B/C 催办有据。

@@ -7,7 +7,7 @@
 
 | 文件 | 用途 |
 |---|---|
-| `conftest.py` | sys.path 前置 backend/；SQLite 编译规则（TINYINT/MEDIUMTEXT/BIGINT 映射、ON UPDATE CURRENT_TIMESTAMP 剥离），使 35 表可免 MySQL 建表 |
+| `conftest.py` | sys.path 前置 backend/；SQLite 编译规则（TINYINT/MEDIUMTEXT/BIGINT 映射、ON UPDATE CURRENT_TIMESTAMP 剥离），使 51 表（A_0007 基线）可免 MySQL 建表 |
 | `fake_llm.py` | `FakeLLMServer`：OpenAI 兼容假服务器，三态注入 success/timeout/malformed |
 | `events_factory.py` | 通知事件工厂：14 个 event_type 的 payload+幂等键构造（对应 [通知契约](../../docs/modules/D/通知契约.md)） |
 | `sse_client.py` | `parse_sse(text)` / `parse_sse_data(events)`：text/event-stream 最小解析 |
@@ -26,7 +26,7 @@ server.set_mode("timeout")   # 切换注入态
 from events_factory import build_event, build_all_events
 event = build_event("recruitment.stage_changed", ref_id=42, version=2)
 
-# SQLite 逻辑库（全 35 表免 MySQL 建表）
+# SQLite 逻辑库（全 51 表免 MySQL 建表）
 from sqlalchemy import create_engine
 from app.database import Base
 engine = create_engine("sqlite:///test.db")
