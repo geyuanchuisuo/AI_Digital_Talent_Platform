@@ -354,6 +354,12 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "id", "metric_id", "params_json", "data_time", "result_json",
         "source", "cache_hit", "created_by", "created_at",
     },
+    # ---- D 问数服务（T-D08）----
+    "metric_registry": {
+        "id", "metric_id", "name", "domain", "status", "definition_ref",
+        "allowed_roles", "params_json", "cache_ttl", "note",
+        "created_at", "updated_at",
+    },
 }
 
 EXPECTED_UNIQUE: dict[str, set[str]] = {
@@ -414,10 +420,10 @@ def ddl(model) -> str:
     return str(CreateTable(model.__table__).compile(dialect=DIALECT))
 
 
-def test_exactly_60_tables_and_no_phase2_table():
-    assert len(TABLE_NAMES) == 60
-    assert len(MODEL_CLASSES) == 60
-    assert len(Base.metadata.tables) == 60
+def test_exactly_61_tables_and_no_phase2_table():
+    assert len(TABLE_NAMES) == 61
+    assert len(MODEL_CLASSES) == 61
+    assert len(Base.metadata.tables) == 61
     assert set(TABLE_NAMES) == set(EXPECTED_COLUMNS)
     # D-7 缓办：一期不建 llm_score_cache
     assert "llm_score_cache" not in Base.metadata.tables

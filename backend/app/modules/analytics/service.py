@@ -1,21 +1,22 @@
-"""问数域服务（T-D01b 切片）：registry + 受控统计 + 副本选择 + 缓存 + 快照落库。
+"""问数域服务（T-D01b 切片 + T-D08 registry 化）。
 
-口径（docs/modules/A/指标口径交付.md §1，T-A53）：
-- **活跃岗位数** = `is_active=1` 且该行是其 title 的最新 version（按 title 去重）。
-  实现：`version = (SELECT MAX(version) FROM job_profiles j2 WHERE j2.title = jp.title)`；
-  同 title 同最高 version 并存的极端情况按行计数（当前无此数据形态）。
+准入链（顺序即验收④「先过滤后聚合」的实现口径）：
+1. **AccountScope 角色门**：metric.allowed_roles 之外的角色 403，先于一切查询；
+2. **registry 准入**：`metric_registry` 表——未登记 422（白名单外）；
+   `status=awaiting_caliber` 422（B/C 口径待交付，拒绝不猜测）；
+3. **参数白名单**：params_json 之外的键 422、类型不合法 422；
+4. 缓存（data 类键，TTL 取 registry 行）→ 受控统计（先 WHERE 过滤再聚合）→ 快照落库。
 
-数据源选择（T-D02 契约）：`analytics_db_url` 非空 → 查 PgSQL 只读副本；
-空 → 降级主库 MySQL 直查。**不静默**：结果里始终带 `source` 字段。
-
-缓存（T-D01 契约）：data 类键 `jobs.active:v1`，TTL 300s；未配置 Redis 时
-`get_cache()` 为降级实例（get 恒 None），行为等价于无缓存直查。
+指标公式唯一依据：`docs/modules/A/指标口径交付.md`（T-A53 / v0.2 §7）与
+`docs/modules/D/指标目录.md`。数据源选择沿用 T-D02 契约：副本优先、不可用降级
+主库，结果带 `source` 不静默。
 """
 
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -27,23 +28,20 @@ from app.core.auth.scope import DENY_MESSAGE, get_account_scope
 from app.core.cache import get_cache
 from app.core.errors import BizError
 from app.database import SessionLocal
-from app.modules.analytics.models import AnalyticsQuerySnapshot
+from app.modules.analytics.models import (
+    METRIC_STATUS_ACTIVE,
+    AnalyticsQuerySnapshot,
+    MetricRegistry,
+)
 
 METRIC_ACTIVE_JOBS = "jobs.active"
-ACTIVE_JOBS_CACHE_KEY = "jobs.active:v1"
-ACTIVE_JOBS_CACHE_TTL = 300  # 秒；切片默认 5 分钟，T-D08 registry 化后按指标配置
-
-METRIC_REGISTRY: dict[str, dict[str, Any]] = {
-    METRIC_ACTIVE_JOBS: {
-        "name": "活跃岗位数",
-        "definition_ref": "docs/modules/A/指标口径交付.md §1（T-A53）",
-        "allowed_roles": ("admin", "hr"),  # 个人无此指标（指标目录卡片口径）
-        "params": {},
-        "source_table": "job_profiles",
-    },
-}
+METRIC_DEMAND_GAP = "job.demand_progress_gap"
+METRIC_THRESHOLD_REF = "match.threshold_reference"
 
 _UNKNOWN_METRIC = "未登记的指标（白名单外不支持）"
+_AWAITING_CALIBER = "指标口径待交付（B/C 域），暂不可查询"
+_PARAM_NOT_ALLOWED = "参数不在指标允许范围"
+_PARAM_INVALID = "参数类型非法"
 
 _replica_engine: Engine | None = None
 
@@ -52,11 +50,13 @@ _replica_engine: Engine | None = None
 class MetricResult:
     metric_id: str
     name: str
-    value: int
+    value: Any
     source: str  # replica | primary
     cache_hit: bool
     data_time: datetime
     snapshot_id: int | None = None
+    table: dict | None = field(default=None)
+    note: str | None = field(default=None)
 
 
 def _replica_engine_lazy() -> Engine | None:
@@ -68,7 +68,7 @@ def _replica_engine_lazy() -> Engine | None:
 
 
 def compute_active_jobs(engine: Engine) -> int:
-    """受控统计：活跃岗位数（纯函数式，engine 注入便于测试）。"""
+    """受控统计：活跃岗位数（A 口径 §1：is_active=1 且 title 最新 version）。"""
     sql = text(
         """
         SELECT COUNT(*) FROM job_profiles jp
@@ -85,7 +85,6 @@ def compute_active_jobs(engine: Engine) -> int:
 def _resolve_engine() -> tuple[Engine, str]:
     replica = _replica_engine_lazy()
     if replica is not None:
-        # 副本连通性自检失败时降级主库（连接池 pre_ping 会在取连接时报错）
         try:
             with replica.connect():
                 return replica, "replica"
@@ -96,63 +95,253 @@ def _resolve_engine() -> tuple[Engine, str]:
     return primary_engine, "primary"
 
 
-async def get_jobs_active(user, *, bypass_cache: bool = False) -> MetricResult:
-    """活跃岗位数：鉴权 → 缓存 → 统计 → 快照落库。
+# --------------------------------------------------------------------------- #
+# 受控统计函数（engine 注入；先过滤后聚合；结果含 value/table/note）
+# --------------------------------------------------------------------------- #
 
-    个人角色无此指标（403）；统计与落库走 to_thread 不阻塞事件循环。
+_GAP_SQL = """
+SELECT pd.id AS demand_id, pd.position_name, pd.headcount, pd.project_group_id,
+       CASE WHEN pd.headcount - COALESCE((SELECT COUNT(DISTINCT a.talent_profile_id)
+               FROM applications a
+               WHERE a.job_profile_id = pd.job_profile_id
+                 AND a.internal_stage = 'offer_accepted'
+                 AND a.result_confirmed_by IS NOT NULL), 0) > 0
+            THEN pd.headcount - COALESCE((SELECT COUNT(DISTINCT a.talent_profile_id)
+               FROM applications a
+               WHERE a.job_profile_id = pd.job_profile_id
+                 AND a.internal_stage = 'offer_accepted'
+                 AND a.result_confirmed_by IS NOT NULL), 0)
+            ELSE 0 END AS gap
+FROM project_demands pd
+WHERE pd.status IN ('open', 'in_progress')
+"""
+
+
+def _stat_demand_gap(engine: Engine, params: dict) -> dict:
+    """人才需求缺口（A v0.2 §7）：缺口 = headcount − HR 确认已录用（逐需求非负，求和）。"""
+    sql = _GAP_SQL
+    bind: dict = {}
+    if params.get("project_group_id") is not None:
+        sql += " AND pd.project_group_id = :pgid"
+        bind["pgid"] = params["project_group_id"]
+    with engine.connect() as conn:
+        rows = [dict(r) for r in conn.execute(text(sql), bind).mappings()]
+    value = int(sum(r["gap"] for r in rows))
+    table = {
+        "columns": ["demand_id", "position_name", "headcount", "gap"],
+        "rows": [
+            {
+                "demand_id": r["demand_id"],
+                "position_name": r["position_name"],
+                "headcount": int(r["headcount"]),
+                "gap": int(r["gap"]),
+            }
+            for r in rows
+        ],
+    }
+    return {"value": value, "table": table}
+
+
+def _stat_threshold_ref(engine: Engine, params: dict) -> dict:
+    """匹配参考达线（指标目录 卡3）：score≥threshold 行数 / 有效评分行数。
+
+    硬淘汰 score=0 排除；仅参考标签。零分母 → 暂无数据（验收③）。
     """
+    sql = """
+    SELECT jp.id AS job_id, jp.title, jp.pass_threshold AS threshold,
+           COUNT(*) AS total,
+           SUM(CASE WHEN mr.score >= jp.pass_threshold THEN 1 ELSE 0 END) AS reached
+    FROM match_results mr
+    JOIN match_batches mb ON mb.id = mr.match_batch_id
+    JOIN job_profiles jp ON jp.id = mb.job_profile_id AND jp.version = mb.job_profile_version
+    WHERE mr.score IS NOT NULL AND mr.score > 0
+    """
+    bind: dict = {}
+    if params.get("job_profile_id") is not None:
+        sql += " AND mb.job_profile_id = :jpid"
+        bind["jpid"] = params["job_profile_id"]
+    sql += " GROUP BY jp.id, jp.title, jp.pass_threshold ORDER BY jp.id"
+    with engine.connect() as conn:
+        rows = [dict(r) for r in conn.execute(text(sql), bind).mappings()]
+    total = int(sum(r["total"] for r in rows))
+    reached = int(sum(r["reached"] for r in rows))
+    if total == 0:
+        return {"value": None, "note": "暂无数据", "table": {"columns": [], "rows": []}}
+    table = {
+        "columns": ["job_id", "title", "threshold", "total", "reached", "ratio"],
+        "rows": [
+            {
+                "job_id": r["job_id"],
+                "title": r["title"],
+                "threshold": float(r["threshold"]),
+                "total": int(r["total"]),
+                "reached": int(r["reached"]),
+                "ratio": round(int(r["reached"]) / int(r["total"]), 4),
+            }
+            for r in rows
+        ],
+    }
+    return {"value": round(reached / total, 4), "table": table}
+
+
+def _stat_active_jobs(engine: Engine, params: dict) -> dict:
+    return {"value": compute_active_jobs(engine)}
+
+
+#: metric_id → 受控统计函数（registry.status=active 之外不在表内，注册即准入）。
+#: 命名函数经模块属性调用，测试可 monkeypatch。
+STAT_FUNCS: dict[str, Any] = {
+    METRIC_ACTIVE_JOBS: _stat_active_jobs,
+    METRIC_DEMAND_GAP: _stat_demand_gap,
+    METRIC_THRESHOLD_REF: _stat_threshold_ref,
+}
+
+
+# --------------------------------------------------------------------------- #
+# registry 准入 + 通用查询
+# --------------------------------------------------------------------------- #
+
+def _get_registry_def(metric_id: str) -> dict | None:
+    """读 registry 行（每次查询直查，表极小）；返回扁平 dict 或 None。"""
+    with SessionLocal() as db:
+        row = (
+            db.query(MetricRegistry)
+            .filter(MetricRegistry.metric_id == metric_id)
+            .first()
+        )
+        if row is None:
+            return None
+        return {
+            "metric_id": row.metric_id,
+            "name": row.name,
+            "domain": row.domain,
+            "status": row.status,
+            "allowed_roles": tuple(r.strip() for r in (row.allowed_roles or "").split(",") if r.strip()),
+            "params": dict(row.params_json or {}),
+            "cache_ttl": int(row.cache_ttl or 300),
+        }
+
+
+def list_registry() -> list[dict]:
+    """指标目录全量（管理侧列表端点用）。"""
+    with SessionLocal() as db:
+        rows = db.query(MetricRegistry).order_by(MetricRegistry.domain, MetricRegistry.metric_id).all()
+        return [
+            {
+                "metric_id": r.metric_id,
+                "name": r.name,
+                "domain": r.domain,
+                "status": r.status,
+                "definition_ref": r.definition_ref,
+                "allowed_roles": r.allowed_roles,
+                "cache_ttl": r.cache_ttl,
+                "note": r.note,
+            }
+            for r in rows
+        ]
+
+
+def _validate_params(defn: dict, params: dict) -> dict:
+    """参数白名单与类型校验（registry.params_json：键→'int'）。"""
+    allowed = defn["params"]
+    clean: dict = {}
+    for k, v in params.items():
+        if k not in allowed:
+            raise BizError(422, _PARAM_NOT_ALLOWED)
+        if v is None:
+            continue
+        if allowed[k] == "int":
+            try:
+                clean[k] = int(v)
+            except (TypeError, ValueError):
+                raise BizError(422, _PARAM_INVALID) from None
+        else:  # 未知类型声明按原样透传
+            clean[k] = v
+    return clean
+
+
+def _cache_key(metric_id: str, params: dict) -> str:
+    return f"{metric_id}:v1" if not params else f"{metric_id}:v1:{json.dumps(params, sort_keys=True)}"
+
+
+async def query_metric(
+    user,
+    metric_id: str,
+    *,
+    params: dict | None = None,
+    bypass_cache: bool = False,
+) -> MetricResult:
+    """registry 准入的通用指标查询（403/422 先于任何统计）。"""
+    params = dict(params or {})
     scope = get_account_scope(user)
-    metric = METRIC_REGISTRY[METRIC_ACTIVE_JOBS]
-    if scope.role not in metric["allowed_roles"]:
+
+    defn = _get_registry_def(metric_id)
+    if defn is None:
+        raise BizError(422, _UNKNOWN_METRIC)
+    if scope.role not in defn["allowed_roles"]:
         raise BizError(403, DENY_MESSAGE)
+    if defn["status"] != METRIC_STATUS_ACTIVE:
+        raise BizError(422, _AWAITING_CALIBER)
+    clean_params = _validate_params(defn, params)
+
+    stat_fn = STAT_FUNCS.get(metric_id)
+    if stat_fn is None:
+        raise BizError(422, _UNKNOWN_METRIC)
 
     cache = get_cache()
     cache_hit = False
-    value: int | None = None
+    result: dict | None = None
     source = "primary"
     data_time = datetime.now()
+    key = _cache_key(metric_id, clean_params)
 
     if not bypass_cache:
-        cached = await cache.get("data", ACTIVE_JOBS_CACHE_KEY)
-        if isinstance(cached, dict) and isinstance(cached.get("value"), int):
+        cached = await cache.get("data", key)
+        if isinstance(cached, dict) and "result" in cached:
             cache_hit = True
-            value = cached["value"]
+            result = cached["result"]
             source = cached.get("source", "primary")
-            data_time = datetime.fromisoformat(cached["data_time"]) if cached.get("data_time") else data_time
+            data_time = (
+                datetime.fromisoformat(cached["data_time"]) if cached.get("data_time") else data_time
+            )
 
     if not cache_hit:
         engine, source = await asyncio.to_thread(_resolve_engine)
-        value = await asyncio.to_thread(compute_active_jobs, engine)
+        result = await asyncio.to_thread(stat_fn, engine, clean_params)
         data_time = datetime.now()
         await cache.set(
             "data",
-            ACTIVE_JOBS_CACHE_KEY,
-            {"value": value, "source": source, "data_time": data_time.isoformat()},
-            ttl=ACTIVE_JOBS_CACHE_TTL,
+            key,
+            {"result": result, "source": source, "data_time": data_time.isoformat()},
+            ttl=defn["cache_ttl"],
         )
 
     snapshot_id = await asyncio.to_thread(
-        _write_snapshot, user, value or 0, source, cache_hit, data_time
+        _write_snapshot, user, metric_id, clean_params, result or {}, source, cache_hit, data_time
     )
     return MetricResult(
-        metric_id=METRIC_ACTIVE_JOBS,
-        name=metric["name"],
-        value=value or 0,
+        metric_id=metric_id,
+        name=defn["name"],
+        value=(result or {}).get("value"),
         source=source,
         cache_hit=cache_hit,
         data_time=data_time,
         snapshot_id=snapshot_id,
+        table=(result or {}).get("table"),
+        note=(result or {}).get("note"),
     )
 
 
-def _write_snapshot(user, value: int, source: str, cache_hit: bool, data_time: datetime) -> int:
+def _write_snapshot(
+    user, metric_id: str, params: dict, result: dict, source: str, cache_hit: bool, data_time: datetime
+) -> int:
     """快照落库（始终写主库 MySQL；副本只读）。"""
     with SessionLocal() as db:
         row = AnalyticsQuerySnapshot(
-            metric_id=METRIC_ACTIVE_JOBS,
-            params_json={},
+            metric_id=metric_id,
+            params_json=params or None,
             data_time=data_time,
-            result_json={"value": value, "name": "活跃岗位数"},
+            result_json=result,
             source=source,
             cache_hit=1 if cache_hit else 0,
             created_by=getattr(user, "id", None),
@@ -160,3 +349,11 @@ def _write_snapshot(user, value: int, source: str, cache_hit: bool, data_time: d
         db.add(row)
         db.commit()
         return int(row.id)
+
+
+# --------------------------------------------------------------------------- #
+# 切片兼容入口（T-D01b 语义不变，内部已 registry 化）
+# --------------------------------------------------------------------------- #
+
+async def get_jobs_active(user, *, bypass_cache: bool = False) -> MetricResult:
+    return await query_metric(user, METRIC_ACTIVE_JOBS, bypass_cache=bypass_cache)

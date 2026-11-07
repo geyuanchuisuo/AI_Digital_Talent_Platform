@@ -1,15 +1,17 @@
-"""问数域 ORM（T-D01b 切片起步）：analytics_query_snapshots 查询快照。
+"""问数域 ORM（T-D01b 切片起步，T-D08 registry 化）。
 
-快照口径（todo T-D08 全量落库前的最小版）：每次指标计算落一行——指标 id、
-参数、数据时间、结果 JSON、数据来源（副本/主库）、是否缓存命中、操作人。
-同快照导出（T-D11）与反馈审计（T-D12）都引用本表 id。
+- `MetricRegistry`：白名单指标目录落库（首批六类 + 切片指标）——metric_id 唯一、
+  domain/status（active=口径已冻结可查；awaiting_caliber=待 B/C 交付口径，查询拒绝）、
+  允许角色、允许参数键、缓存 TTL。registry 是查询准入的唯一依据。
+- `AnalyticsQuerySnapshot`：查询快照（问题/指标/参数/数据时间/结果/来源/命中/操作人），
+  同快照导出（T-D11）与反馈审计（T-D12）引用本表 id。
 """
 
 from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Index, String
+from sqlalchemy import DateTime, Index, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -20,7 +22,134 @@ from app.models.base import (
     PK_TYPE,
     BOOL_TYPE,
     CreatedAtMixin,
+    UpdatedAtMixin,
 )
+
+METRIC_STATUS_ACTIVE = "active"
+METRIC_STATUS_AWAITING = "awaiting_caliber"
+METRIC_STATUSES = (METRIC_STATUS_ACTIVE, METRIC_STATUS_AWAITING)
+
+#: 指标目录 v1（T-D00b/T-D08）：首批六类 + 切片指标。种子唯一来源（D_0004 迁移调用）。
+#: status=awaiting_caliber 的卡（B/C 域）在口径交付前查询一律拒绝。
+METRIC_CARDS: tuple[dict, ...] = (
+    {
+        "metric_id": "jobs.active",
+        "name": "活跃岗位数",
+        "domain": "A",
+        "status": METRIC_STATUS_ACTIVE,
+        "definition_ref": "docs/modules/A/指标口径交付.md §1（T-A53）",
+        "allowed_roles": "admin,hr",
+        "params_json": None,
+        "cache_ttl": 300,
+        "note": "T-D01b 切片指标",
+    },
+    {
+        "metric_id": "job.demand_progress_gap",
+        "name": "人才需求缺口",
+        "domain": "A",
+        "status": METRIC_STATUS_ACTIVE,
+        "definition_ref": "docs/modules/A/指标口径交付.md v0.2 §7 + 指标目录 卡1",
+        "allowed_roles": "admin,hr",
+        "params_json": {"project_group_id": "int"},
+        "cache_ttl": 300,
+        "note": "公式按 A v0.2 复核：缺口=headcount−HR确认已录用，人工推进不混入（§12.3）",
+    },
+    {
+        "metric_id": "match.threshold_reference",
+        "name": "匹配参考达线",
+        "domain": "A",
+        "status": METRIC_STATUS_ACTIVE,
+        "definition_ref": "指标目录 卡3（A 口径：score≥threshold，硬淘汰 score=0 排除；仅参考标签）",
+        "allowed_roles": "admin,hr",
+        "params_json": {"job_profile_id": "int"},
+        "cache_ttl": 300,
+        "note": None,
+    },
+    {
+        "metric_id": "parse.success_failure",
+        "name": "解析成功失败",
+        "domain": "B",
+        "status": METRIC_STATUS_AWAITING,
+        "definition_ref": "指标目录 卡2（待 B 交付口径）",
+        "allowed_roles": "admin,hr",
+        "params_json": None,
+        "cache_ttl": 300,
+        "note": "B 契约 §6 已有草稿，字段终值确认后转 active",
+    },
+    {
+        "metric_id": "exam.pass_rate",
+        "name": "已完成测评通过率",
+        "domain": "C",
+        "status": METRIC_STATUS_AWAITING,
+        "definition_ref": "指标目录 卡4（待 C 交付口径）",
+        "allowed_roles": "admin,hr",
+        "params_json": None,
+        "cache_ttl": 300,
+        "note": None,
+    },
+    {
+        "metric_id": "training.formal_completion_rate",
+        "name": "课程正式完成率",
+        "domain": "C",
+        "status": METRIC_STATUS_AWAITING,
+        "definition_ref": "指标目录 卡5（待 C 交付口径）",
+        "allowed_roles": "admin,hr",
+        "params_json": None,
+        "cache_ttl": 300,
+        "note": "与学习自报进度分离，不混算",
+    },
+    {
+        "metric_id": "learning.self_reported_progress",
+        "name": "学习自报进度",
+        "domain": "C",
+        "status": METRIC_STATUS_AWAITING,
+        "definition_ref": "指标目录 卡6（待 C 交付口径）",
+        "allowed_roles": "admin,hr",
+        "params_json": None,
+        "cache_ttl": 300,
+        "note": "单列口径，不与正式完成率混算",
+    },
+)
+
+
+def seed_metric_registry(bind) -> int:
+    """幂等种子：按 metric_id 判存在，缺则插（D_0004 迁移与测试共用）。返回新增数。"""
+    from sqlalchemy import select
+    from sqlalchemy.orm import sessionmaker
+
+    inserted = 0
+    with sessionmaker(bind=bind)() as db:
+        for card in METRIC_CARDS:
+            exists = db.execute(
+                select(MetricRegistry.id).where(MetricRegistry.metric_id == card["metric_id"])
+            ).first()
+            if exists is None:
+                db.add(MetricRegistry(**card))
+                inserted += 1
+        db.commit()
+    return inserted
+
+
+class MetricRegistry(PKMixin, UpdatedAtMixin, Base):
+    """白名单指标目录（`metric_registry`）。"""
+
+    __tablename__ = "metric_registry"
+    __table_args__ = (
+        UniqueConstraint("metric_id", name="uk_metric_registry_metric_id"),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    metric_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    domain: Mapped[str] = mapped_column(String(8), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default=METRIC_STATUS_ACTIVE
+    )
+    definition_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    allowed_roles: Mapped[str] = mapped_column(String(64), nullable=False, default="admin,hr")
+    params_json: Mapped[dict | None] = mapped_column(JSONDict, nullable=True)
+    cache_ttl: Mapped[int] = mapped_column(nullable=False, default=300)
+    note: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
 class AnalyticsQuerySnapshot(PKMixin, CreatedAtMixin, Base):

@@ -19,8 +19,9 @@ from sqlalchemy.pool import StaticPool
 from app.core.cache import CacheClient, reset_cache
 from app.core.errors import BizError, register_exception_handlers
 from app.database import Base, get_db
-from app.models import AnalyticsQuerySnapshot, JobProfile
+from app.models import AnalyticsQuerySnapshot, JobProfile, MetricRegistry
 from app.modules.analytics import service
+from app.modules.analytics.models import seed_metric_registry
 from app.modules.analytics.router import router
 
 U_HR = SimpleNamespace(id=2, role="hr", person_id=None)
@@ -44,8 +45,9 @@ def env(tmp_path, monkeypatch):
     )
     Base.metadata.create_all(
         engine,
-        tables=[JobProfile.__table__, AnalyticsQuerySnapshot.__table__],
+        tables=[JobProfile.__table__, AnalyticsQuerySnapshot.__table__, MetricRegistry.__table__],
     )
+    seed_metric_registry(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     with factory() as db:
         for title, version, active in SEED_JOBS:
@@ -142,7 +144,7 @@ def test_cache_hit_and_snapshot_written(env):
         snaps = list(db.execute(select(AnalyticsQuerySnapshot)).scalars())
     assert len(snaps) == 2  # 两次调用各落一行快照（含命中行）
     assert snaps[0].metric_id == "jobs.active" and snaps[0].created_by == 2
-    assert snaps[0].result_json == {"value": EXPECTED_ACTIVE, "name": "活跃岗位数"}
+    assert snaps[0].result_json == {"value": EXPECTED_ACTIVE}  # name 在 registry 层，快照只存结果
 
 
 def test_sse_stream_events(env):
