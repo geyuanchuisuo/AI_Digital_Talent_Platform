@@ -143,3 +143,17 @@ class MatchResultDetail(BaseModel):
     hits: list[str] = Field(default_factory=list)
     misses: list[str] = Field(default_factory=list)
     reason: str | None = None
+    # 人工推进标记（T-A43/T-A41：对齐 screen_results.manual_verdict*；null=未改判）
+    manual_verdict: Literal["passed", "pending", "rejected"] | None = None
+    manual_verdict_by: int | None = None
+    manual_verdict_at: str | None = None
+
+
+class ManualVerdictRequest(BaseModel):
+    """人工改判请求（F1-10 对齐 screen；null = 撤销改判）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    manual_verdict: Literal["passed", "pending", "rejected"] | None = Field(
+        description="null = 撤销改判"
+    )
