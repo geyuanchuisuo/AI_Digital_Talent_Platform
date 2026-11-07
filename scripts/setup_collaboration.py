@@ -5,6 +5,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+ACTORS = ('A', 'B', 'C', 'D', 'MASTER')
+
 
 def run(*args, check=True):
     return subprocess.run(['git', *args], capture_output=True, text=True, check=check)
@@ -12,7 +14,7 @@ def run(*args, check=True):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--actor', required=True, choices=list('ABCD'))
+    parser.add_argument('--actor', required=True, choices=ACTORS)
     parser.add_argument('--branch', help='Your existing personal branch; registered in this clone only')
     args = parser.parse_args()
     root = Path(run('rev-parse', '--show-toplevel').stdout.strip())

@@ -1,11 +1,30 @@
 {
-  "version": 2,
+  "version": 3,
   "roles": [
     "A",
     "B",
     "C",
-    "D"
+    "D",
+    "MASTER"
   ],
+  "governance": {
+    "reviewer_role": "MASTER",
+    "shared_paths": [
+      ".collaboration/**",
+      ".githooks/**",
+      "README.md",
+      "更新记录.md",
+      "docs/需求文档.md",
+      "docs/四人分工与试行方案.md",
+      "docs/技术框架.md",
+      "docs/模块归属.md",
+      "docs/协作操作指南.md",
+      "docs/源码接入与需求决策.md",
+      "scripts/check_scope.py",
+      "scripts/setup_collaboration.py",
+      "tests/collaboration/**"
+    ]
+  },
   "blocked_segments": [
     ".git",
     ".idea",
@@ -31,6 +50,12 @@
     "docs/imports/**"
   ],
   "owners": {
+    "MASTER": [
+      "docs/modules/MASTER/**",
+      "docs/updates/MASTER/**",
+      "docs/requests/MASTER/**",
+      "tasks/MASTER.md"
+    ],
     "A": [
       "frontend/src/features/identity/**",
       "backend/app/modules/identity/**",

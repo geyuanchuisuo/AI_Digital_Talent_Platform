@@ -17,6 +17,31 @@ POLICY = json.loads((ROOT / '.collaboration/ownership.json').read_text(encoding=
 
 
 class PolicyTests(unittest.TestCase):
+    def test_master_governance_access_preserves_business_owners(self):
+        self.assertIn('MASTER', POLICY['roles'])
+        for path in ['AGENTS.md', 'README.md', '.collaboration/DECISIONS.md',
+                     'scripts/check_scope.py', 'tests/collaboration/test_scope.py',
+                     'backend/app/modules/training/AGENTS.md']:
+            self.assertEqual(scope.owner_of(path, POLICY), 'A', path)
+            self.assertEqual(scope.check_paths([path], 'MASTER', POLICY), [], path)
+        for path in ['docs/updates/MASTER/new.md', 'docs/requests/MASTER/new.md',
+                     'docs/modules/MASTER/role.md', 'tasks/MASTER.md']:
+            self.assertEqual(scope.owner_of(path, POLICY), 'MASTER', path)
+
+    def test_master_cannot_edit_business_or_another_roles_records(self):
+        for path in ['backend/app/main.py', 'frontend/src/components/AppShell.tsx',
+                     'backend/app/modules/talents/service.py',
+                     'backend/app/modules/training/service.py',
+                     'backend/app/tasks/runner.py', 'docs/updates/A/old.md',
+                     'tasks/C.md', 'docs/modules/C/一期需求细化.md']:
+            self.assertTrue(scope.check_paths([path], 'MASTER', POLICY), path)
+
+    def test_master_still_rejects_private_readonly_and_unknown_paths(self):
+        for path in ['.env', '.collaboration/.env', '.git/config',
+                     'docs/imports/AGENTS.md', 'docs/requirements/sources/AGENTS.md',
+                     'docs/AGENTS.override.md', 'unassigned.md']:
+            self.assertTrue(scope.check_paths([path], 'MASTER', POLICY), path)
+
     def test_imported_next_routes_have_one_business_owner(self):
         examples = {
             'frontend/src/app/(main)/talents/page.tsx': 'B',
@@ -178,11 +203,39 @@ class GitIntegrationTests(unittest.TestCase):
     def test_master_blocked_for_every_role(self):
         self.git('switch', '-c', 'master')
         self.git('config', '--local', 'collab.branch', 'master')
-        for actor in 'ABCD':
+        for actor in [*'ABCD', 'MASTER']:
             self.git('config', '--local', 'collab.actor', actor)
             result = self.run_checker('--actor', actor, '--staged')
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('Development on master is forbidden', result.stderr)
+
+    def test_master_setup_governance_commit_and_business_rejection(self):
+        self.git('switch', '-c', 'reviewer-personal')
+        setup = subprocess.run([sys.executable, str(self.repo / 'scripts/setup_collaboration.py'),
+                                '--actor', 'MASTER', '--branch', 'reviewer-personal'],
+                               cwd=self.repo, capture_output=True)
+        self.assertEqual(setup.returncode, 0, setup.stderr)
+        self.assertEqual(self.git('config', '--local', '--get', 'collab.actor').stdout.strip(), b'MASTER')
+        self.put('scripts/check_scope.py', (ROOT / 'scripts/check_scope.py').read_text(encoding='utf-8') + '\n# reviewed rule\n')
+        self.put('docs/updates/MASTER/new.md', '# Actual verification\n')
+        self.stage()
+        result = self.run_checker('--actor', 'MASTER', '--staged')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.git('commit', '-m', 'reviewed governance')
+        self.assertEqual(self.run_checker('--actor', 'MASTER', '--base', 'main').returncode, 0)
+        self.put('backend/app/modules/training/forbidden.py')
+        self.stage()
+        rejected = subprocess.run(['git', '-C', str(self.repo), 'commit', '-m', 'reject business edit'], capture_output=True)
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn(b'owner=C, actor=MASTER', rejected.stderr)
+
+    def test_master_tool_changes_require_own_new_record(self):
+        self.git('switch', '-c', 'docs/MASTER/review')
+        self.put('scripts/check_scope.py', (ROOT / 'scripts/check_scope.py').read_text(encoding='utf-8') + '\n# rule change\n')
+        self.stage()
+        result = self.run_checker('--actor', 'MASTER', '--staged')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('NEW docs/updates/MASTER/', result.stderr)
 
     def test_registered_personal_branch_own_change_and_update_pass(self):
         self.personal_branch()

@@ -5,6 +5,8 @@ from pathlib import Path, PurePosixPath
 import subprocess
 import sys
 
+ACTORS = ('A', 'B', 'C', 'D', 'MASTER')
+
 
 class ScopeError(Exception):
     pass
@@ -78,14 +80,21 @@ def check_paths(paths, actor, policy):
     errors = []
     for path in sorted(set(paths)):
         owner = owner_of(path, policy)
-        if owner != actor:
+        governance = policy.get('governance', {})
+        shared_governance = (
+            owner is not None
+            and actor == governance.get('reviewer_role')
+            and (PurePosixPath(path).name.casefold() in ('agents.md', 'claude.md')
+                 or any(matches(path, rule) for rule in governance.get('shared_paths', [])))
+        )
+        if owner != actor and not shared_governance:
             errors.append(f'{path}: owner={owner or "READONLY/UNASSIGNED"}, actor={actor}')
     return errors
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--actor', choices=list('ABCD'))
+    parser.add_argument('--actor', choices=ACTORS)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--staged', action='store_true')
     mode.add_argument('--base', help='Compare base...HEAD (committed branch changes)')
@@ -96,8 +105,8 @@ def main():
         if not actor:
             value = subprocess.run(['git', '-C', str(root), 'config', '--get', 'collab.actor'], capture_output=True)
             actor = value.stdout.decode().strip()
-        if actor not in 'ABCD' or len(actor) != 1:
-            raise ScopeError('Set collab.actor to A/B/C/D or pass --actor; never guess your role.')
+        if actor not in ACTORS:
+            raise ScopeError('Set collab.actor to A/B/C/D/MASTER or pass --actor; never guess your role.')
         policy = json.loads((root / '.collaboration/ownership.json').read_text(encoding='utf-8'))
         branch = git(root, 'branch', '--show-current').decode().strip()
         if branch == 'master':
