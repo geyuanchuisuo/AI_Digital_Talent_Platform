@@ -165,6 +165,8 @@
       "backend/tests/test_account_scope.py",
       "backend/tests/test_recruitment_m3.py",
       "backend/tests/test_recruitment_api.py",
+      "backend/app/modules/system/**",
+      "backend/tests/test_sys_admin.py",
       "backend/tests/test_app_integration_t02.py",
       "backend/tests/test_auth_integration_t07.py",
       "backend/tests/test_auth_unit.py",

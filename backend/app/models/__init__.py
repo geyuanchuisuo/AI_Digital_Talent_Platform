@@ -66,6 +66,14 @@ from app.modules.notifications.models import Notification  # noqa: F401 (D T-D03
 from app.core.workflows.engine.models import WorkflowEngineRun  # noqa: F401 (D T-D04)
 from app.modules.analytics.models import AnalyticsQuerySnapshot  # noqa: F401 (D T-D01b)
 from app.modules.recruitment.scope_models import UserScopeGrant
+from app.modules.system.models import (
+    SysDepartment,
+    SysMenu,
+    SysOperationLog,
+    SysRole,
+    SysRolePermission,
+    SysUserRole,
+)
 from app.modules.inventory.models import (
     InventoryDevelopmentPlan,
     InventoryDispute,
@@ -140,6 +148,12 @@ MODEL_CLASSES: tuple[type[Base], ...] = (
     JdPublication,
     Application,
     UserScopeGrant,
+    SysDepartment,
+    SysRole,
+    SysUserRole,
+    SysRolePermission,
+    SysMenu,
+    SysOperationLog,
     Notification,
     WorkflowEngineRun,
     AnalyticsQuerySnapshot,
@@ -147,8 +161,8 @@ MODEL_CLASSES: tuple[type[Base], ...] = (
 
 TABLE_NAMES: tuple[str, ...] = tuple(model.__tablename__ for model in MODEL_CLASSES)  # type: ignore[attr-defined]
 
-assert len(TABLE_NAMES) == 54, f"一期 54 张表（…53 + 1 analytics_query_snapshots/T-D01b），实际 {len(TABLE_NAMES)}"
-assert len(set(TABLE_NAMES)) == 54, "表名重复"
+assert len(TABLE_NAMES) == 60, f"一期 54 张表（…53 + 1 analytics_query_snapshots/T-D01b），实际 {len(TABLE_NAMES)}"
+assert len(set(TABLE_NAMES)) == 60, "表名重复"
 assert "llm_score_cache" not in TABLE_NAMES, "llm_score_cache 是 D-7 缓办项，一期不建"
 assert "upload_batches" not in TABLE_NAMES, (
     "批次不是实体表（决策 D-M）：靠 resume_files.upload_batch_id 聚合，"
