@@ -23,12 +23,19 @@ DENY_MESSAGE = "无权访问该资源"
 
 @dataclass(frozen=True)
 class AccountScope:
-    """账号可访问的数据范围；B/C/D 按此先过滤再查询/召回。"""
+    """账号可访问的数据范围；B/C/D 按此先过滤再查询/召回。
+
+    组织范围扩展（V2.6 冻结解锁，2026-11-07）：`department_ids` 为账号可看的
+    部门集合（含跨部门授权聚合）；`granted_scope` 为授权记录摘要（供审计与
+    D 的组织范围问数）。阶段 1 三值 role 不变；六类角色矩阵随 sys_* 体系细化。
+    """
 
     role: ScopeRole
     person_id: int | None
     can_view_all_persons: bool
     knowledge_scope: KnowledgeScope
+    department_ids: tuple[int, ...] = ()
+    granted_scope: tuple[dict, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -56,12 +63,15 @@ def get_account_scope(user) -> AccountScope:
             knowledge_scope="public",
         )
     if role == "hr":
-        # 阶段 1 管理侧：现有 hr 即全量；六类角色冻结后按职责收窄
+        # 阶段 1 管理侧：现有 hr 即全量；六类角色冻结后按职责收窄。
+        # 组织范围扩展：管理侧也聚合其名下的授权记录（审计可见）。
         return AccountScope(
             role="hr",
             person_id=None,
             can_view_all_persons=True,
             knowledge_scope="admin",
+            department_ids=_active_department_ids(user_id=getattr(user, "id", None)),
+            granted_scope=_active_grant_summaries(getattr(user, "id", None)),
         )
     # 未知角色 deny-by-default：映射为未绑定 personal
     return AccountScope(
@@ -95,3 +105,59 @@ def authorize_file_access(
     """
     del action  # 阶段 1 两种 action 权限一致；保留参数为后续细分留位
     return authorize_profile_access(scope, talent_profile_id)
+
+
+def _active_department_ids(user_id: int | None) -> tuple[int, ...]:
+    """聚合账号当前有效的部门范围授权（未撤销且在有效期内）；不连库时返回空。"""
+    if user_id is None:
+        return ()
+    try:
+        from sqlalchemy import select
+
+        from app.database import SessionLocal
+        from app.modules.recruitment.scope_models import UserScopeGrant
+
+        now = datetime.now()
+        with SessionLocal() as db:
+            rows = db.execute(
+                select(UserScopeGrant.scope_ref_id).where(
+                    UserScopeGrant.grantee_user_id == user_id,
+                    UserScopeGrant.scope_type == "department",
+                    UserScopeGrant.revoked_at.is_(None),
+                    UserScopeGrant.valid_from <= now,
+                )
+            ).scalars().all()
+        return tuple(sorted({int(r) for r in rows if r is not None}))
+    except Exception:
+        return ()
+
+
+def _active_grant_summaries(user_id: int | None) -> tuple[dict, ...]:
+    """账号当前有效授权记录摘要（scope_type/ref/valid_until），供审计展示。"""
+    if user_id is None:
+        return ()
+    try:
+        from sqlalchemy import select
+
+        from app.database import SessionLocal
+        from app.modules.recruitment.scope_models import UserScopeGrant
+
+        now = datetime.now()
+        with SessionLocal() as db:
+            rows = db.execute(
+                select(UserScopeGrant).where(
+                    UserScopeGrant.grantee_user_id == user_id,
+                    UserScopeGrant.revoked_at.is_(None),
+                    UserScopeGrant.valid_from <= now,
+                )
+            ).scalars().all()
+        return tuple(
+            {
+                "scope_type": r.scope_type,
+                "scope_ref_id": r.scope_ref_id,
+                "valid_until": r.valid_until.isoformat(timespec="seconds") if r.valid_until else None,
+            }
+            for r in rows
+        )
+    except Exception:
+        return ()

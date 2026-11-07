@@ -62,6 +62,7 @@ from app.modules.recruitment.models import (
     ProjectDemand,
     ProjectGroup,
 )
+from app.modules.recruitment.scope_models import UserScopeGrant
 from app.modules.inventory.models import (
     InventoryDevelopmentPlan,
     InventoryDispute,
@@ -135,12 +136,13 @@ MODEL_CLASSES: tuple[type[Base], ...] = (
     ProjectDemand,
     JdPublication,
     Application,
+    UserScopeGrant,
 )
 
 TABLE_NAMES: tuple[str, ...] = tuple(model.__tablename__ for model in MODEL_CLASSES)  # type: ignore[attr-defined]
 
-assert len(TABLE_NAMES) == 50, f"一期固定 45 张表（13 公共 + 32 C），实际 {len(TABLE_NAMES)}"
-assert len(set(TABLE_NAMES)) == 50, "表名重复"
+assert len(TABLE_NAMES) == 51, f"一期固定 45 张表（13 公共 + 32 C），实际 {len(TABLE_NAMES)}"
+assert len(set(TABLE_NAMES)) == 51, "表名重复"
 assert "llm_score_cache" not in TABLE_NAMES, "llm_score_cache 是 D-7 缓办项，一期不建"
 assert "upload_batches" not in TABLE_NAMES, (
     "批次不是实体表（决策 D-M）：靠 resume_files.upload_batch_id 聚合，"
