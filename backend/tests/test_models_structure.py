@@ -3,7 +3,7 @@
 不触真实 MySQL：用 MySQL dialect 编译 DDL + 检查 metadata，纯内存执行。
 期望列名/约束名在下方硬编码，不反向从模型推导：
 - 公共 13 表来源：`docs/数据库设计.md` v1.2 各表小节；
-- C 的 21 表来源：C 模块契约 `docs/modules/C/C模块接口与数据契约.md` 与
+- C 的 22 表来源：C 模块契约与 `backend/app/modules/*/models.py`（C_0002 自适应加 assessment_selections）:
   `backend/app/modules/*/models.py`（裁决 C-04 纳入一期，A 于 2026-11-07 注册）。
 """
 
@@ -41,7 +41,7 @@ C_DOMAIN_TABLES = frozenset(
     t for t in (
         "assessment_questions", "assessment_plans", "assessment_papers",
         "assessment_assignments", "assessment_answers", "assessment_results",
-        "assessment_reviews", "assessment_review_items",
+        "assessment_reviews", "assessment_review_items", "assessment_selections",
         "interview_rounds", "interview_feedback", "interview_round_events",
         "training_courses", "training_sessions", "training_attendances",
         "training_feedbacks", "training_feedback_themes", "training_plans",
@@ -105,7 +105,8 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "id", "screen_batch_id", "job_profile_id", "talent_profile_id", "hard_fail",
         "hard_fail_reason", "score", "verdict", "manual_verdict",
         "manual_verdict_by", "manual_verdict_at", "reason_summary", "hits_json",
-        "misses_json", "created_at",
+        "misses_json", "model_version", "prompt_version", "attempt",
+        "profile_input_snapshot_json", "created_at",
     },
     "match_batches": {
         "id", "job_profile_id", "job_profile_version", "config_snapshot_json",
@@ -116,7 +117,9 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     "match_results": {
         "id", "match_batch_id", "talent_profile_id", "score", "hard_fail",
         "hard_fail_reason", "dimension_scores_json", "hits_json", "misses_json",
-        "reason", "created_at",
+        "reason", "model_version", "prompt_version", "attempt",
+        "profile_input_snapshot_json", "manual_verdict", "manual_verdict_by",
+        "manual_verdict_at", "created_at",
     },
     # ---- C 模块 21 表（测评 8 / 人工面试 3 / 培训 10，裁决 C-04）----
     "assessment_questions": {
@@ -129,6 +132,7 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "id", "purpose", "job_id", "job_title", "job_version", "dimensions_json",
         "total_question_count", "pass_score", "difficulty_structure_json",
         "status", "version", "published_at", "created_by", "updated_by",
+        "mode", "strategy_json", "bank_snapshot_json",
         "created_at", "updated_at",
     },
     "assessment_papers": {
@@ -142,7 +146,8 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "talent_profile_id", "job_id", "job_title", "status",
         "published_result_version", "answers_open", "attempt_no",
         "idempotency_key", "started_at", "submitted_at", "completed_at",
-        "cancelled_reason", "created_by", "created_at", "updated_at",
+        "cancelled_reason", "mode", "strategy_snapshot_json",
+        "target_question_count", "created_by", "created_at", "updated_at",
     },
     "assessment_answers": {
         "id", "assignment_id", "question_id", "question_snapshot_json",
@@ -152,8 +157,13 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     },
     "assessment_results": {
         "id", "assignment_id", "version", "dimension_scores_json", "total_score",
-        "pass_score", "passed", "grading_snapshot_json", "created_by",
-        "created_at", "updated_at",
+        "pass_score", "passed", "grading_snapshot_json", "ability_json",
+        "created_by", "created_at", "updated_at",
+    },
+    "assessment_selections": {
+        "id", "assignment_id", "sequence_no", "question_id", "dimension_name",
+        "difficulty", "question_snapshot_json", "selection_reason_json",
+        "strategy_snapshot_json", "created_at", "updated_at",
     },
     "assessment_reviews": {
         "id", "assignment_id", "result_id", "reviewer_id", "reason",
@@ -240,6 +250,7 @@ EXPECTED_UNIQUE: dict[str, set[str]] = {
     "assessment_assignments": {"uk_assignment_idempotency"},
     "assessment_answers": {"uk_answer_assignment_question"},
     "assessment_results": {"uk_result_assignment_version"},
+    "assessment_selections": {"uk_selection_question", "uk_selection_sequence"},
     "assessment_review_items": {"uk_review_assignment_question_user"},
     "interview_feedback": {"uk_feedback_round"},
     "training_attendances": {"uk_attendance_session_employee"},
@@ -271,10 +282,10 @@ def ddl(model) -> str:
     return str(CreateTable(model.__table__).compile(dialect=DIALECT))
 
 
-def test_exactly_34_tables_and_no_phase2_table():
-    assert len(TABLE_NAMES) == 34
-    assert len(MODEL_CLASSES) == 34
-    assert len(Base.metadata.tables) == 34
+def test_exactly_35_tables_and_no_phase2_table():
+    assert len(TABLE_NAMES) == 35
+    assert len(MODEL_CLASSES) == 35
+    assert len(Base.metadata.tables) == 35
     assert set(TABLE_NAMES) == set(EXPECTED_COLUMNS)
     # D-7 缓办：一期不建 llm_score_cache
     assert "llm_score_cache" not in Base.metadata.tables
@@ -351,6 +362,8 @@ def test_unique_constraints_by_name():
     assert unique_cols("assessment_assignments", "uk_assignment_idempotency") == ("idempotency_key",)
     assert unique_cols("assessment_answers", "uk_answer_assignment_question") == ("assignment_id", "question_id")
     assert unique_cols("assessment_results", "uk_result_assignment_version") == ("assignment_id", "version")
+    assert unique_cols("assessment_selections", "uk_selection_question") == ("assignment_id", "question_id")
+    assert unique_cols("assessment_selections", "uk_selection_sequence") == ("assignment_id", "sequence_no")
     assert unique_cols("assessment_review_items", "uk_review_assignment_question_user") == (
         "assignment_id", "question_id", "user_id",
     )

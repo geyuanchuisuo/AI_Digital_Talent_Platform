@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.dao import match as match_dao
 from app.models import MatchBatch, ParsedResume
+from app.config import settings
 from app.service import match_engine
 
 logger = logging.getLogger(__name__)
@@ -129,6 +130,10 @@ def _run_batch(db: Session, batch: MatchBatch) -> None:
         dimension_scores = {**result.dimension_scores, "vector_similarity": result.vector_similarity}
         match_dao.create_result(
             db,
+            model_version=settings.llm_model,
+            prompt_version=settings.prompt_version,
+            attempt=1,
+            profile_input_snapshot_json=profile_input,
             match_batch_id=batch.id,
             talent_profile_id=talent_id,
             score=round(float(result.score if result.score is not None else 0), 2),
