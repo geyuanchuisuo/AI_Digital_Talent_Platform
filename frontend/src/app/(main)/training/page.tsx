@@ -237,10 +237,18 @@ function MyTraining() {
     {
       title: '学习状态',
       key: 'learning',
-      width: 160,
+      width: 200,
       render: (_, row) => (
         <Space direction="vertical" size={4}>
-          {learningStatusTag(row.learning.status)}
+          <Space size={4} wrap>
+            {learningStatusTag(row.learning.status)}
+            {row.learning.formal_completed ? <Tag color="gold">已认定</Tag> : null}
+          </Space>
+          {row.learning.record_id ? (
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              记录 #{row.learning.record_id}
+            </Typography.Text>
+          ) : null}
           <Select
             size="small"
             value={row.learning.status}
