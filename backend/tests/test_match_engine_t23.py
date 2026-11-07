@@ -301,3 +301,55 @@ def test_llm_failure_propagates(fakes, monkeypatch):
     monkeypatch.setattr(engine, "chat_json", broken)
     with pytest.raises(RuntimeError):
         engine.evaluate(JOB, PROFILE, use_vector=False)
+
+
+# ---- H-A07 修复（2026-11-07）：经历证据输入补全 ----
+
+
+def test_candidate_summary_uses_explicit_experience_summary():
+    """显式 experience_summary 优先，结构化证据不覆盖它。"""
+    summary = engine.build_candidate_summary(PROFILE)
+    assert "做过订单系统" in summary
+    assert "教育经历" not in summary  # 未提供结构化数据时不生成
+
+
+def test_candidate_summary_generates_evidence_from_structured_input():
+    """worker 新输入（educations/employments/projects）生成经历证据。"""
+    profile = {
+        "name": "李四",
+        "degree": "本科",
+        "work_years": 3.0,
+        "skills_json": ["java"],
+        "current_title": "后端工程师",
+        "educations": [
+            {"school": "某大学", "major": "计算机", "degree": "本科", "start": "2016", "end": "2020"}
+        ],
+        "employments": [
+            {"company": "某科技", "title": "后端工程师", "start": "2021-03", "end": "至今", "description": "负责订单服务"}
+        ],
+        "projects": [
+            {"name": "订单中台", "role": "核心开发", "start": "2023", "end": "2024", "description": "QPS 提升"}
+        ],
+    }
+    summary = engine.build_candidate_summary(summaryless := dict(profile))
+    assert "教育经历" in summary and "某大学" in summary
+    assert "工作经历" in summary and "负责订单服务" in summary
+    assert "项目经历" in summary and "订单中台" in summary
+    assert "当前职位：后端工程师" in summary
+    assert summaryless["name"] == "李四"  # 不修改入参
+
+
+def test_candidate_summary_marks_missing_evidence():
+    """原文未解析（missing_fields）时标注缺失，提示按缺失处理。"""
+    profile = {"name": "王五", "degree": "大专", "work_years": 1.0, "skills_json": [], "missing_fields": ["resume_parsed"]}
+    summary = engine.build_candidate_summary(profile)
+    assert "证据缺失" in summary and "resume_parsed" in summary
+    assert "不得推断" in summary
+
+
+def test_candidate_summary_without_any_evidence_has_no_empty_blocks():
+    """三类证据全缺且无 experience_summary：不生成空的证据段。"""
+    profile = {"name": "赵六", "degree": "本科", "work_years": 2.0, "skills_json": ["python"]}
+    summary = engine.build_candidate_summary(profile)
+    assert "经历证据" not in summary
+    assert "证据缺失" not in summary
