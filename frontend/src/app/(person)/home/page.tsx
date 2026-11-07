@@ -8,6 +8,7 @@
  */
 
 import { Card, Col, Descriptions, Row, Typography } from 'antd';
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
 import { getUser, type AuthUser } from '@/lib/auth';
@@ -40,6 +41,13 @@ export default function PersonHomePage() {
         </Descriptions>
       </Card>
       <Row gutter={[16, 16]}>
+        <Col xs={24} md={8}>
+          <Link href="/applications">
+            <Card title="我的岗位申请" hoverable>
+              <Typography.Text>查看本人各申请的对外进度（已提交/筛选中/待面试/待决定/已结束）</Typography.Text>
+            </Card>
+          </Link>
+        </Col>
         {PLACEHOLDERS.map((item) => (
           <Col xs={24} md={8} key={item.key}>
             <Card title={item.title}>
