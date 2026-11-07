@@ -28,6 +28,13 @@ bcrypt>=4.0,<5
 pypdf>=5.0,<7
 python-docx>=1.1,<2
 
+# --- OCR / PDF 页渲染（REQ-B-20261106-01，A 于 2026-11-07 批准接入；默认关闭，B 消费）---
+# rapidocr-onnxruntime：本地 ONNX OCR，Windows 离线可用、无系统级二进制依赖
+rapidocr-onnxruntime>=1.2.3,<2
+# pymupdf：扫描版 PDF 页渲染（AGPL 许可，商用注意合规，见 docs/modules/B/ 契约）
+pymupdf>=1.24,<2
+pillow>=10.0,<12
+
 # --- LLM / Embedding / 向量库 ---
 openai>=1.40,<2
 pymilvus==3.0.2

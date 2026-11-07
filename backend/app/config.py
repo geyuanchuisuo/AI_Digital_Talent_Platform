@@ -61,6 +61,14 @@ class Settings(BaseSettings):
     upload_max_mb: int = 20
     upload_allowed_ext: str = "pdf,docx"
 
+    # ---- OCR / PDF 页渲染（REQ-B-20261106-01，默认关闭；B 在 extract_service 适配层消费）----
+    # 开启后 upload_allowed_ext 建议扩展为 "pdf,docx,png,jpg,jpeg"（由部署方自行决定）
+    ocr_enabled: bool = False
+    ocr_model_dir: str = "./data/models/ocr"
+    ocr_max_page_pixels: int = 2_000_000  # 单页渲染像素上限（宽*高），超限缩放
+    ocr_max_pages: int = 50  # 单文件最大处理页数，超出按页截断并标记 truncated
+    ocr_timeout_seconds: float = 120.0  # 单文件 OCR 总超时
+
     # ---- TaskRunner ----
     task_concurrency: int = 2
     runner_scan_interval: float = 2.0
