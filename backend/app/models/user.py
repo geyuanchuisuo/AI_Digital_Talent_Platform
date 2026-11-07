@@ -20,11 +20,19 @@ from app.models.base import (
 
 
 class User(PKMixin, UpdatedAtMixin, Base):
-    """§3.1 users：登录名唯一；role 为二期 RBAC 扩展点。"""
+    """§3.1 users：登录名唯一；role 为二期 RBAC 扩展点。
+
+    `person_id` 绑定 B 的人才主档（B 契约 2026-11-07：直接复用
+    `talent_profiles.id`，同 `PK_TYPE` 整数；可空＝未绑定档案的管理员账号，
+    个人账号唯一绑定）。A 只绑定与消费，不建第二套主档、不按姓名联表。
+    2026-11-07 落地：迁移 `A_0002_users_person_id`；C 的 c_harness 手写
+    SQLite DDL 已同步该列（配合变更，见 A 交接记录）。
+    """
 
     __tablename__ = "users"
     __table_args__ = (
         UniqueConstraint("username", name="uk_username"),
+        UniqueConstraint("person_id", name="uk_user_person_id"),
         MYSQL_TABLE_OPTIONS,
     )
 
@@ -34,6 +42,7 @@ class User(PKMixin, UpdatedAtMixin, Base):
     role: Mapped[str] = mapped_column(
         String(20), nullable=False, default="hr", server_default=str_default("hr")
     )
+    person_id: Mapped[int | None] = mapped_column(PK_TYPE, nullable=True)
     is_active: Mapped[int] = mapped_column(
         BOOL_TYPE, nullable=False, default=1, server_default=num_default(1)
     )

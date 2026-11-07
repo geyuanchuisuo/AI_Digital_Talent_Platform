@@ -68,6 +68,33 @@ def create_tables() -> list[str]:
     return sorted(inspect(engine).get_table_names())
 
 
+def stamp_alembic_head() -> bool | None:
+    """空库/重建库场景：create_all 建好全部表后把 alembic 状态标到 head。
+
+    仅针对「表由 create_all 建齐」的场景；已有旧库（13 表缺 C 表）不要跑本脚本
+    兜升级，按 docs/modules/A/迁移链说明.md 用 stamp 基线 + upgrade head。alembic 不可用
+    （未安装或目录缺失）时返回 None 静默跳过，不阻塞建库。
+    """
+    try:
+        from alembic import command
+        from alembic.config import Config
+    except ImportError:
+        return None
+
+    alembic_ini = Path(__file__).resolve().parents[1] / "alembic.ini"
+    if not alembic_ini.exists():
+        return None
+    try:
+        cfg = Config(str(alembic_ini))
+        cfg.set_main_option("script_location", str(alembic_ini.parent / "migrations"))
+        cfg.set_main_option("sqlalchemy.url", settings.database_url)
+        command.stamp(cfg, "head")
+        return True
+    except Exception as exc:  # 迁移链异常不掩盖建表结果，但要有痕迹
+        print(f"alembic stamp 跳过：{exc}")
+        return False
+
+
 def seed(session) -> list[str]:
     """种子数据；返回本次新建项，重复执行返回空列表。"""
     created: list[str] = []
@@ -153,9 +180,13 @@ def main(argv: list[str] | None = None) -> int:
         with SessionLocal() as session:
             created = seed(session)
 
+    stamped = stamp_alembic_head()
+
     print(f"数据库 {settings.mysql_db}：{'本次新建' if db_created else '已存在'}")
     print(f"表数量：{len(tables)} → {', '.join(tables)}")
     print(f"本次种子新增：{created or '无（已存在，保留现值）'}")
+    if stamped is not None:
+        print(f"alembic stamp head：{'成功' if stamped else '跳过（alembic/迁移目录不可用，升级场景请按 docs/modules/A/迁移链说明.md 手工 stamp）'}")
     return 0
 
 

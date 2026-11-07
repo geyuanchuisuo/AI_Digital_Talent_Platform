@@ -72,6 +72,7 @@
       "docs/requests/A/**",
       "tasks/A.md",
       "backend/migrations/versions/A_*.py",
+      "backend/migrations/versions/C_0001_c_module_21_tables.py",
       "frontend/src/shared/**",
       "frontend/src/main.tsx",
       "frontend/src/index.css",
@@ -203,7 +204,8 @@
       "frontend/src/app/(main)/job-profiles/**",
       "frontend/src/app/(main)/match/**",
       "frontend/src/app/(person)/**",
-      "frontend/src/app/login/**"
+      "frontend/src/app/login/**",
+      "tests/C/c_harness.py"
     ],
     "B": [
       "frontend/src/features/files/**",
