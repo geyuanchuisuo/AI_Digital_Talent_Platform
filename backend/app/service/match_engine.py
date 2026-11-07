@@ -147,8 +147,60 @@ def hard_gate(job: Mapping[str, Any], profile: Mapping[str, Any]) -> tuple[list[
 # --------------------------------------------------------------------------- #
 # Prompt C 输入拼装
 # --------------------------------------------------------------------------- #
+def _evidence_summary(profile: Mapping[str, Any]) -> str | None:
+    """从结构化解析数据生成经历证据摘要（H-A07 修复，2026-11-07）。
+
+    输入结构对齐 B 契约（REQ-B 档案契约 §5）：`educations` / `employments` /
+    `projects` 数组来自 `parsed_resumes.structured_json`。任何一段都截断防
+    prompt 超长；三类全缺返回 None（由调用方标注证据缺失）。
+    """
+    blocks: list[str] = []
+    educations = profile.get("educations") or []
+    edu_lines = [
+        f"- {e.get('school', '')} {e.get('major', '')} {e.get('degree', '')}（{e.get('start', '')}-{e.get('end', '')}）".strip()
+        for e in educations
+        if isinstance(e, Mapping)
+    ]
+    if edu_lines:
+        blocks.append("教育经历：\n" + "\n".join(edu_lines[:5]))
+
+    employments = profile.get("employments") or []
+    emp_lines = []
+    for e in employments[:5]:
+        if not isinstance(e, Mapping):
+            continue
+        desc = str(e.get("description") or "").strip()
+        line = f"- {e.get('company', '')} {e.get('title', '')}（{e.get('start', '')}-{e.get('end', '')}）"
+        if desc:
+            line += f"：{desc[:120]}"
+        emp_lines.append(line)
+    if emp_lines:
+        blocks.append("工作经历：\n" + "\n".join(emp_lines))
+
+    projects = profile.get("projects") or []
+    proj_lines = []
+    for p in projects[:5]:
+        if not isinstance(p, Mapping):
+            continue
+        desc = str(p.get("description") or "").strip()
+        line = f"- {p.get('name', '')}（{p.get('role', '')}，{p.get('start', '')}-{p.get('end', '')}）"
+        if desc:
+            line += f"：{desc[:120]}"
+        proj_lines.append(line)
+    if proj_lines:
+        blocks.append("项目经历：\n" + "\n".join(proj_lines))
+
+    return "\n\n".join(blocks) if blocks else None
+
+
 def build_candidate_summary(profile: Mapping[str, Any]) -> str:
-    """候选人画像摘要：`姓名｜学历｜工作年限｜技能｜标签｜五维能力｜经历摘要`（Prompt C 输入）。"""
+    """候选人画像摘要（Prompt C 输入）。
+
+    经历证据优先级：显式 `experience_summary` > `educations/employments/projects`
+    结构化生成（H-A07 修复：此前 worker 只传 5 字段，经历证据永远缺失）。
+    `missing_fields` 非空时标注证据缺失，提示模型按缺失处理、不得推断「没有」
+    （T-A34 边界：缺失证据标待核实）。
+    """
     parts = [
         str(profile.get("name") or "未知"),
         str(profile.get("degree") or "学历未知"),
@@ -164,8 +216,15 @@ def build_candidate_summary(profile: Mapping[str, Any]) -> str:
         if ability_text:
             parts.append("五维能力：" + ability_text)
     summary = profile.get("experience_summary")
+    if not summary:
+        summary = _evidence_summary(profile)
     if summary:
-        parts.append("经历摘要：" + str(summary)[:2000])
+        parts.append("经历证据：\n" + str(summary)[:2000])
+    missing = profile.get("missing_fields") or []
+    if missing:
+        parts.append("证据缺失（按缺失处理，不得推断为「没有」）：" + "、".join(str(m) for m in missing))
+    if profile.get("current_title"):
+        parts.append(f"当前职位：{profile['current_title']}")
     return "\n".join(parts)
 
 

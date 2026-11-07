@@ -14,13 +14,41 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.dao import match as match_dao
-from app.models import MatchBatch
+from app.models import MatchBatch, ParsedResume
 from app.service import match_engine
 
 logger = logging.getLogger(__name__)
+
+
+def _evidence_input(db: Session, talent_profile_id: int) -> dict:
+    """取该主档最新解析结果的结构化证据（educations/employments/projects）。
+
+    H-A07 修复（2026-11-07）：此前 worker 只传 5 字段，评分摘要拿不到经历/项目
+    证据。阶段 1 直接从 `parsed_resumes.structured_json` 取（B 契约 §5 的
+    profile_input 兼容口径）；B 的快照服务落地后由 A 切换到该入口。
+    查询建议后续收编进 B 的 parsed_resumes dao（此处内联避免跨模块写）。
+    """
+    parsed = db.execute(
+        select(ParsedResume)
+        .where(ParsedResume.talent_profile_id == talent_profile_id)
+        .order_by(ParsedResume.created_at.desc(), ParsedResume.id.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if parsed is None or not parsed.structured_json:
+        return {"missing_fields": ["resume_parsed"]}  # 原文未解析：证据缺失，按缺失处理
+    structured = parsed.structured_json if isinstance(parsed.structured_json, dict) else {}
+    evidence = {
+        "educations": list(structured.get("educations") or []),
+        "employments": list(structured.get("employments") or []),
+        "projects": list(structured.get("projects") or []),
+    }
+    if structured.get("skills"):
+        evidence["parsed_skills"] = list(structured["skills"])
+    return evidence
 
 
 def handle_match_batch(batch_id: int) -> None:
@@ -74,11 +102,23 @@ def _run_batch(db: Session, batch: MatchBatch) -> None:
             continue
         profile_input = {
             "talent_profile_id": profile.id,
+            "name": profile.name,
             "degree": profile.degree,
             "work_years": float(profile.work_years) if profile.work_years is not None else None,
             "skills_json": list(profile.skills_json or []),
             "vector_status": profile.vector_status,
+            # H-A07 修复（2026-11-07）：补全画像与经历证据输入（阶段 1 用 parsed+profile）
+            "current_title": profile.current_title,
+            "expected_title": profile.expected_title,
+            "tags_json": list(profile.tags_json or []),
+            "ability_scores_json": profile.ability_scores_json,
+            "manual_edited_fields": list(profile.manual_edited_fields or []),
         }
+        profile_input.update(_evidence_input(db, profile.id))
+        if profile_input.get("parsed_skills") and not profile_input["skills_json"]:
+            profile_input["skills_json"] = list(profile_input.pop("parsed_skills"))
+        else:
+            profile_input.pop("parsed_skills", None)
         result = match_engine.evaluate(
             snapshot, profile_input, use_vector=True, job_vector=job_vector
         )
