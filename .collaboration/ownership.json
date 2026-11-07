@@ -259,6 +259,8 @@
       "backend/app/modules/interviews/**",
       "frontend/src/features/training/**",
       "backend/app/modules/training/**",
+      "frontend/src/features/inventory/**",
+      "backend/app/modules/inventory/**",
       "tests/C/**",
       "scripts/C/**",
       "docs/modules/C/**",
@@ -268,7 +270,8 @@
       "backend/migrations/versions/C_*.py",
       "frontend/src/app/(main)/assessments/**",
       "frontend/src/app/(main)/interviews/**",
-      "frontend/src/app/(main)/training/**"
+      "frontend/src/app/(main)/training/**",
+      "frontend/src/app/(main)/inventory/**"
     ],
     "D": [
       "frontend/src/features/analytics/**",
