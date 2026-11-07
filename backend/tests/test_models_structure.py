@@ -207,6 +207,31 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "id", "session_id", "event_type", "operator_id", "note",
         "payload_json", "created_at", "updated_at",
     },
+    # ---- 招聘域 5 表（M3-V2.6 功能 8a-1，冻结口径）----
+    "project_groups": {
+        "id", "name", "description", "status", "created_by",
+        "created_at", "updated_at",
+    },
+    "projects": {
+        "id", "project_group_id", "name", "description", "status", "created_by",
+        "created_at", "updated_at",
+    },
+    "project_demands": {
+        "id", "project_id", "project_group_id", "job_profile_id", "position_name",
+        "headcount", "expected_start_date", "priority", "remark", "status",
+        "created_by", "created_at", "updated_at",
+    },
+    "jd_publications": {
+        "id", "job_profile_id", "job_profile_version", "title",
+        "content_snapshot_json", "channel", "status", "published_by",
+        "published_at", "withdrawn_by", "withdrawn_at", "created_at", "updated_at",
+    },
+    "applications": {
+        "id", "talent_profile_id", "job_profile_id", "job_profile_version",
+        "resume_file_id", "internal_stage", "external_stage", "result_category",
+        "result_confirmed_by", "stage_reason", "stage_updated_by",
+        "stage_updated_at", "closed_at", "created_by", "created_at", "updated_at",
+    },
     "training_courses": {
         "id", "title", "description", "material_url", "dimension_names_json",
         "status", "version", "feedback_note", "feedback_note_at",
@@ -335,10 +360,10 @@ def ddl(model) -> str:
     return str(CreateTable(model.__table__).compile(dialect=DIALECT))
 
 
-def test_exactly_45_tables_and_no_phase2_table():
-    assert len(TABLE_NAMES) == 45
-    assert len(MODEL_CLASSES) == 45
-    assert len(Base.metadata.tables) == 45
+def test_exactly_50_tables_and_no_phase2_table():
+    assert len(TABLE_NAMES) == 50
+    assert len(MODEL_CLASSES) == 50
+    assert len(Base.metadata.tables) == 50
     assert set(TABLE_NAMES) == set(EXPECTED_COLUMNS)
     # D-7 缓办：一期不建 llm_score_cache
     assert "llm_score_cache" not in Base.metadata.tables
