@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -14,6 +14,7 @@ DimensionType = Literal["professional", "general"]
 Difficulty = Literal["easy", "medium", "hard"]
 QuestionType = Literal["single_choice", "short_answer"]
 PlanPurpose = Literal["recruitment", "employee"]
+PlanMode = Literal["adaptive", "fixed"]
 
 
 class _StrictModel(BaseModel):
@@ -65,6 +66,9 @@ class PlanCreateRequest(_StrictModel):
     total_question_count: int = Field(ge=1, le=200)
     pass_score: float = Field(ge=0, le=100)
     difficulty_structure: dict[str, float] | None = None
+    # 自适应为默认；固定试卷仅作兼容模式
+    mode: PlanMode = "adaptive"
+    strategy: dict[str, Any] | None = None
 
 
 class PlanUpdateRequest(_StrictModel):
@@ -74,6 +78,8 @@ class PlanUpdateRequest(_StrictModel):
     total_question_count: int | None = Field(default=None, ge=1, le=200)
     pass_score: float | None = Field(default=None, ge=0, le=100)
     difficulty_structure: dict[str, float] | None = None
+    mode: PlanMode | None = None
+    strategy: dict[str, Any] | None = None
 
 
 class AssignmentCreateRequest(_StrictModel):
@@ -94,3 +100,14 @@ class AnswerSaveRequest(_StrictModel):
 class ManualScoreRequest(_StrictModel):
     score: float = Field(ge=0, le=100)
     reason: str = Field(min_length=1, max_length=500)
+
+
+class QuestionGenerateRequest(_StrictModel):
+    job_id: int | None = None
+    job_version: int | None = None
+    job_title: str | None = Field(default=None, max_length=100)
+    dimension_name: str = Field(min_length=1, max_length=100)
+    dimension_type: DimensionType = "professional"
+    difficulty: Difficulty = "medium"
+    question_type: QuestionType = "single_choice"
+    count: int = Field(default=1, ge=1, le=5)

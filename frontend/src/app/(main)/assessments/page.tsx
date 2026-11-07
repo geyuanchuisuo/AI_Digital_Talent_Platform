@@ -1,8 +1,8 @@
 /**
- * C 固定测评页：员工/候选人答题 + 管理员题库、方案、任务与修分。
+ * C 测评页：自适应逐题答题（默认）+ 固定试卷兼容 + 管理员题库、方案、任务与修分。
  *
- * 一期口径：招聘与员工测评均为固定岗位试卷，不做自适应；招聘成绩需管理员公布，
- * 员工评分完成即可见；标准答案与复习入口由管理员独立开放。
+ * 自适应口径（用户 2026-11-07 裁决）：方案发布时冻结策略与题库快照，逐题按表现调整难度，
+ * 结果给出能力雷达与评级；固定试卷仅保留兼容模式。招聘成绩需管理员公布，员工评分完成即可见。
  */
 
 'use client';
@@ -47,6 +47,7 @@ import {
   getAssignment,
   getResult,
   manualScore,
+  nextQuestion,
   openAnswers,
   publishPlan,
   publishResult,
@@ -62,8 +63,10 @@ import type {
   AssessmentPlan,
   AssessmentQuestion,
   AssessmentResultOut,
+  NextQuestionOut,
   QuestionPayload,
 } from './types';
+import RadarChart from './RadarChart';
 
 const PAGE_SIZE = 10;
 
@@ -85,6 +88,7 @@ function statusTag(status: string) {
 }
 
 function ResultBlock({ result }: { result: AssessmentResultOut }) {
+  const levelMap = new Map((result.ability?.dimension_levels ?? []).map((item) => [item.name, item.level]));
   return (
     <Card size="small" title={`测评结果 v${result.version}`} style={{ marginTop: 12 }}>
       <Descriptions column={3} size="small">
@@ -94,6 +98,23 @@ function ResultBlock({ result }: { result: AssessmentResultOut }) {
           {result.passed ? <Tag color="success">通过</Tag> : <Tag color="error">未通过</Tag>}
         </Descriptions.Item>
       </Descriptions>
+      {result.ability && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'center', marginTop: 12 }}>
+          <RadarChart
+            dimensions={result.ability.radar.dimensions}
+            scores={result.ability.radar.scores}
+            maxScore={result.ability.radar.max_score}
+          />
+          <div style={{ minWidth: 220 }}>
+            <Typography.Text strong>综合评级：{result.ability.rating.level}</Typography.Text>
+            <div style={{ marginTop: 6 }}>强项：{result.ability.strengths.join('、') || '—'}</div>
+            <div>待提升：{result.ability.gaps.join('、') || '—'}</div>
+            <Typography.Paragraph type="secondary" style={{ marginTop: 6, marginBottom: 0 }}>
+              {result.ability.summary}
+            </Typography.Paragraph>
+          </div>
+        </div>
+      )}
       <Table
         rowKey="name"
         size="small"
@@ -105,6 +126,7 @@ function ResultBlock({ result }: { result: AssessmentResultOut }) {
           { title: '权重', dataIndex: 'weight', render: (v) => `${v}%` },
           { title: '题量', dataIndex: 'question_count' },
           { title: '维度得分', dataIndex: 'score' },
+          { title: '档位', render: (_, row) => levelMap.get(row.name) ?? '—' },
         ]}
       />
     </Card>
@@ -123,15 +145,29 @@ function AnswerDrawer({
   onChanged: () => void;
 }) {
   const [detail, setDetail] = useState<AssessmentDetail | null>(null);
+  const [next, setNext] = useState<NextQuestionOut | null>(null);
+  const [answerDraft, setAnswerDraft] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<(AssessmentResultOut & {
     review_items?: { question_id: number; is_completed: boolean; question_snapshot: { stem: string; correct_answer?: string; reference_points?: string } }[];
   }) | null>(null);
 
   const load = useCallback(async () => {
+    if (!assignmentId) return null;
+    try {
+      const data = await getAssignment(assignmentId);
+      setDetail(data);
+      return data;
+    } catch (error) {
+      message.error(getErrorMessage(error));
+      return null;
+    }
+  }, [assignmentId]);
+
+  const ensureNext = useCallback(async () => {
     if (!assignmentId) return;
     try {
-      setDetail(await getAssignment(assignmentId));
+      setNext(await nextQuestion(assignmentId));
     } catch (error) {
       message.error(getErrorMessage(error));
     }
@@ -140,14 +176,46 @@ function AnswerDrawer({
   useEffect(() => {
     if (open && assignmentId) {
       setResult(null);
-      void load();
+      setNext(null);
+      setAnswerDraft('');
+      void (async () => {
+        const data = await load();
+        if (data?.assignment.mode === 'adaptive' && ['assigned', 'in_progress'].includes(data.assignment.status)) {
+          await ensureNext();
+        }
+      })();
     }
-  }, [open, assignmentId, load]);
+  }, [open, assignmentId, load, ensureNext]);
 
-  const handleSave = async (questionId: number, payload: { selected_option?: string; answer_text?: string }) => {
+  useEffect(() => {
+    setAnswerDraft('');
+  }, [next?.question?.question_id]);
+
+  const handleSave = async (
+    questionId: number,
+    payload: { selected_option?: string; answer_text?: string },
+    advance = false,
+  ) => {
     if (!assignmentId) return;
     try {
       await saveAnswer(assignmentId, questionId, payload);
+      if (detail?.assignment.mode === 'adaptive') {
+        await load();
+        if (advance && payload.selected_option) {
+          await ensureNext();
+        }
+      }
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    }
+  };
+
+  const advanceAdaptive = async (questionId: number, payload: { answer_text?: string }) => {
+    if (!assignmentId) return;
+    try {
+      await saveAnswer(assignmentId, questionId, payload);
+      await load();
+      await ensureNext();
     } catch (error) {
       message.error(getErrorMessage(error));
     }
@@ -163,6 +231,7 @@ function AnswerDrawer({
       } else {
         message.success('已交卷');
       }
+      setNext(null);
       await load();
       onChanged();
     } catch (error) {
@@ -254,44 +323,115 @@ function AnswerDrawer({
               )}
             </Card>
           )}
-          {detail.questions.map((question, index) => {
-            const saved = question.answer;
-            return (
-              <Card key={question.question_id} size="small" title={`${index + 1}. ${question.dimension_name}`}>
-                <Typography.Paragraph>{question.stem}</Typography.Paragraph>
-                {question.question_type === 'single_choice' ? (
-                  <Radio.Group
-                    disabled={!editable}
-                    value={saved?.selected_option ?? undefined}
-                    onChange={(event) =>
-                      void handleSave(question.question_id, { selected_option: event.target.value })
-                    }
-                  >
-                    <Space direction="vertical">
-                      {question.options.map((option) => (
-                        <Radio key={option} value={option}>
-                          {option}
-                        </Radio>
-                      ))}
+          {detail.assignment.mode === 'adaptive' && editable && (
+            <Card size="small" title="自适应答题">
+              <Typography.Text type="secondary">
+                进度：已答 {next?.answered_count ?? 0} / 目标 {next?.target_question_count ?? assignment?.target_question_count ?? 0} 题；
+                系统按已答表现动态调整后续难度。
+              </Typography.Text>
+              {next?.done ? (
+                <Alert
+                  style={{ marginTop: 8 }}
+                  type="info"
+                  showIcon
+                  message={
+                    next.reason === 'bank_exhausted'
+                      ? '题库中可出题目已用尽，请交卷。'
+                      : '已达到结束条件，请交卷。'
+                  }
+                />
+              ) : next?.question ? (
+                <div style={{ marginTop: 12 }}>
+                  <Space>
+                    <Tag>{next.question.dimension_name}</Tag>
+                    <Tag color="processing">难度 {next.question.difficulty}</Tag>
+                    <Tag>第 {next.sequence_no} 题</Tag>
+                  </Space>
+                  <Typography.Paragraph style={{ marginTop: 8 }}>{next.question.stem}</Typography.Paragraph>
+                  {next.question.question_type === 'single_choice' ? (
+                    <Radio.Group
+                      value={undefined}
+                      onChange={(event) =>
+                        void handleSave(next.question!.question_id, { selected_option: event.target.value }, true)
+                      }
+                    >
+                      <Space direction="vertical">
+                        {next.question.options.map((option) => (
+                          <Radio key={option} value={option}>
+                            {option}
+                          </Radio>
+                        ))}
+                      </Space>
+                    </Radio.Group>
+                  ) : (
+                    <Space direction="vertical" style={{ width: '100%' }}>
+                      <Input.TextArea
+                        rows={4}
+                        value={answerDraft}
+                        onChange={(event) => setAnswerDraft(event.target.value)}
+                        onBlur={() =>
+                          void handleSave(next.question!.question_id, { answer_text: answerDraft })
+                        }
+                      />
+                      <Button
+                        type="primary"
+                        onClick={() => void advanceAdaptive(next.question!.question_id, { answer_text: answerDraft })}
+                      >
+                        保存并下一题
+                      </Button>
                     </Space>
-                  </Radio.Group>
-                ) : (
-                  <Input.TextArea
-                    rows={4}
-                    disabled={!editable}
-                    defaultValue={saved?.answer_text ?? ''}
-                    onBlur={(event) => void handleSave(question.question_id, { answer_text: event.target.value })}
+                  )}
+                  <Alert
+                    style={{ marginTop: 8 }}
+                    type="warning"
+                    showIcon
+                    message="交卷时当前题目若未作答，按 0 分计入。"
                   />
-                )}
-                {detail.answers_visible && question.correct_answer && (
-                  <Typography.Text type="success">正确答案：{question.correct_answer}</Typography.Text>
-                )}
-                {saved?.score !== null && saved?.score !== undefined && (
-                  <Typography.Text type="secondary"> 得分：{saved.score}</Typography.Text>
-                )}
-              </Card>
-            );
-          })}
+                </div>
+              ) : (
+                <Typography.Text type="secondary">正在获取题目…</Typography.Text>
+              )}
+            </Card>
+          )}
+          {(detail.assignment.mode === 'fixed' || detail.answers_visible) &&
+            detail.questions.map((question, index) => {
+              const saved = question.answer;
+              return (
+                <Card key={question.question_id} size="small" title={`${index + 1}. ${question.dimension_name}`}>
+                  <Typography.Paragraph>{question.stem}</Typography.Paragraph>
+                  {question.question_type === 'single_choice' ? (
+                    <Radio.Group
+                      disabled={!editable}
+                      value={saved?.selected_option ?? undefined}
+                      onChange={(event) =>
+                        void handleSave(question.question_id, { selected_option: event.target.value })
+                      }
+                    >
+                      <Space direction="vertical">
+                        {question.options.map((option) => (
+                          <Radio key={option} value={option}>
+                            {option}
+                          </Radio>
+                        ))}
+                      </Space>
+                    </Radio.Group>
+                  ) : (
+                    <Input.TextArea
+                      rows={4}
+                      disabled={!editable}
+                      defaultValue={saved?.answer_text ?? ''}
+                      onBlur={(event) => void handleSave(question.question_id, { answer_text: event.target.value })}
+                    />
+                  )}
+                  {detail.answers_visible && question.correct_answer && (
+                    <Typography.Text type="success">正确答案：{question.correct_answer}</Typography.Text>
+                  )}
+                  {saved?.score !== null && saved?.score !== undefined && (
+                    <Typography.Text type="secondary"> 得分：{saved.score}</Typography.Text>
+                  )}
+                </Card>
+              );
+            })}
         </Space>
       )}
     </Drawer>
@@ -541,6 +681,15 @@ function PlanAdmin() {
         total_question_count: values.total_question_count,
         pass_score: values.pass_score,
         dimensions,
+        mode: values.mode,
+        strategy:
+          values.mode === 'adaptive'
+            ? {
+                min_question_count: values.min_question_count,
+                max_question_count: values.max_question_count,
+                start_difficulty: values.start_difficulty,
+              }
+            : undefined,
       });
       message.success('方案已创建（草稿）');
       setModalOpen(false);
@@ -553,8 +702,10 @@ function PlanAdmin() {
 
   const publish = async (id: number) => {
     try {
-      await publishPlan(id);
-      message.success('已发布并冻结试卷');
+      const published = await publishPlan(id);
+      message.success(
+        published.mode === 'adaptive' ? '已发布：策略与题库快照已冻结' : '已发布并冻结试卷',
+      );
       void load();
     } catch (error) {
       message.error(getErrorMessage(error));
@@ -569,6 +720,12 @@ function PlanAdmin() {
       width: 100,
       render: (v) => (v === 'recruitment' ? '招聘测评' : '员工测评'),
     },
+    {
+      title: '模式',
+      dataIndex: 'mode',
+      width: 90,
+      render: (v) => (v === 'adaptive' ? <Tag color="processing">自适应</Tag> : <Tag>固定试卷</Tag>),
+    },
     { title: '维度', render: (_, row) => row.dimensions.map((d) => `${d.name}${d.weight}%`).join(' / ') },
     { title: '题量', dataIndex: 'total_question_count', width: 70 },
     { title: '总分线', dataIndex: 'pass_score', width: 80 },
@@ -576,10 +733,12 @@ function PlanAdmin() {
     {
       title: '操作',
       key: 'action',
-      width: 90,
+      width: 110,
       render: (_, row) =>
         row.status === 'draft' ? (
           <a onClick={() => void publish(row.id)}>发布</a>
+        ) : row.mode === 'adaptive' ? (
+          <Typography.Text type="secondary">题库 {row.bank_snapshot?.question_count ?? '—'}</Typography.Text>
         ) : (
           row.paper && <Typography.Text type="secondary">试卷 #{row.paper.id}</Typography.Text>
         ),
@@ -606,7 +765,16 @@ function PlanAdmin() {
         <Form
           form={form}
           layout="vertical"
-          initialValues={{ purpose: 'recruitment', job_id: 1, total_question_count: 4, pass_score: 60 }}
+          initialValues={{
+            purpose: 'recruitment',
+            job_id: 1,
+            total_question_count: 4,
+            pass_score: 60,
+            mode: 'adaptive',
+            min_question_count: 4,
+            max_question_count: 4,
+            start_difficulty: 'medium',
+          }}
         >
           <Space size={8} style={{ display: 'flex' }}>
             <Form.Item name="purpose" label="用途" style={{ flex: 1 }}>
@@ -628,15 +796,41 @@ function PlanAdmin() {
             <Input.TextArea rows={4} placeholder={'数据库基础,professional,50\n沟通协作,general,50'} />
           </Form.Item>
           <Space size={8} style={{ display: 'flex' }}>
-            <Form.Item name="total_question_count" label="总题量" style={{ flex: 1 }} rules={[{ required: true }]}>
+            <Form.Item name="mode" label="测评模式" style={{ flex: 1 }}>
+              <Select
+                options={[
+                  { value: 'adaptive', label: '自适应（千人千卷）' },
+                  { value: 'fixed', label: '固定试卷（兼容）' },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item name="total_question_count" label="目标题量" style={{ flex: 1 }} rules={[{ required: true }]}>
               <InputNumber min={1} max={200} style={{ width: '100%' }} />
             </Form.Item>
             <Form.Item name="pass_score" label="总分线" style={{ flex: 1 }} rules={[{ required: true }]}>
               <InputNumber min={0} max={100} style={{ width: '100%' }} />
             </Form.Item>
           </Space>
+          <Form.Item shouldUpdate noStyle>
+            {({ getFieldValue }) =>
+              getFieldValue('mode') === 'adaptive' ? (
+                <Space size={8} style={{ display: 'flex' }}>
+                  <Form.Item name="min_question_count" label="最少题量" style={{ flex: 1 }} rules={[{ required: true }]}>
+                    <InputNumber min={1} max={200} style={{ width: '100%' }} />
+                  </Form.Item>
+                  <Form.Item name="max_question_count" label="最多题量" style={{ flex: 1 }} rules={[{ required: true }]}>
+                    <InputNumber min={1} max={200} style={{ width: '100%' }} />
+                  </Form.Item>
+                  <Form.Item name="start_difficulty" label="起始难度" style={{ flex: 1 }}>
+                    <Select options={['easy', 'medium', 'hard'].map((v) => ({ value: v, label: v }))} />
+                  </Form.Item>
+                </Space>
+              ) : null
+            }
+          </Form.Item>
           <Typography.Text type="secondary">
-            系统按权重自动分配各维度题量，默认全部 medium 难度；题库不足时发布会被拒绝并列出缺口。
+            自适应：发布时冻结策略与题库快照，按已答表现升降难度并留痕，题量边界需满足
+            「最少 ≤ 目标 ≤ 最多」且不少于维度数。固定试卷为兼容模式，按权重分配题量并冻结整卷。
           </Typography.Text>
         </Form>
       </Modal>

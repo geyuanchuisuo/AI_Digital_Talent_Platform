@@ -13,6 +13,7 @@ import type {
   AssessmentQuestion,
   AssessmentResultOut,
   AnswerScoreRow,
+  NextQuestionOut,
   PaginatedItems,
   QuestionPayload,
 } from './types';
@@ -44,6 +45,12 @@ export interface PlanPayload {
   total_question_count: number;
   pass_score: number;
   dimensions: { name: string; type: string; weight: number }[];
+  mode?: 'adaptive' | 'fixed';
+  strategy?: {
+    min_question_count?: number;
+    max_question_count?: number;
+    start_difficulty?: string;
+  };
 }
 
 export function fetchPlans(params: {
@@ -90,6 +97,10 @@ export function getAssignment(id: number): Promise<AssessmentDetail> {
 
 export function startAssignment(id: number): Promise<AssessmentAssignmentItem> {
   return post<AssessmentAssignmentItem>(`/assessments/assignments/${id}/start`);
+}
+
+export function nextQuestion(id: number): Promise<NextQuestionOut> {
+  return post<NextQuestionOut>(`/assessments/assignments/${id}/next-question`);
 }
 
 export function saveAnswer(
