@@ -15,7 +15,11 @@ class LoginRequest(BaseModel):
 
 
 class UserOut(BaseModel):
-    """登录响应与 /auth/me 共用的用户视图；**不返回 password_hash**。"""
+    """登录响应与 /auth/me 共用的用户视图；**不返回 password_hash**。
+
+    `person_id`：绑定的主档 id（个人账号唯一；管理侧为 null）。2026-11-07
+    贯通（REQ-B-20261106-02），B/C/D 据此做个人数据过滤的前端联动。
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -23,6 +27,7 @@ class UserOut(BaseModel):
     username: str
     display_name: str | None = None
     role: str
+    person_id: int | None = None
 
 
 class LoginData(BaseModel):

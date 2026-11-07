@@ -14,6 +14,8 @@ export interface AuthUser {
   username: string;
   display_name?: string | null;
   role: string;
+  /** 绑定的主档 id（个人账号唯一；管理侧为 null）——2026-11-07 贯通 */
+  person_id?: number | null;
 }
 
 const TOKEN_KEY = 'ai_talent_token';
