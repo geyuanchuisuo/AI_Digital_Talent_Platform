@@ -1,10 +1,11 @@
 """C 一期扩表：知识点、面试申请关联、成长来源、培训报名/学习证据、F10 盘点、AI 面试间。
 
 Revision ID: C_0003_phase1_expansion
-Revises: C_0002_adaptive_assessment
+Revises: A_0004_merge_heads
 Create Date: 2026-11-07
 
-依赖 A 维护的迁移链；本地无 MySQL 环境，迁移链未实跑（见 docs/updates/C）。
+依赖 A 维护的迁移链：A_0004 汇合 A_0003 与 C_0002 后本迁移接在其后，保持单头。
+本地无 MySQL 环境，迁移链未实跑（见 docs/updates/C）。
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "C_0003_phase1_expansion"
-down_revision: Union[str, None] = "C_0002_adaptive_assessment"
+down_revision: Union[str, None] = "A_0004_merge_heads"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
