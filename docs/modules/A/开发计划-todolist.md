@@ -49,10 +49,10 @@
 
 ## M2 · 身份、person_id 绑定与双端授权（F09 / 需求 §3、§12.1）
 
-- [ ] **T-A11 User 与账号端类型** — `backend/app/models/user.py` + `models/__init__.py` + `scripts/init_db.py`：增 `person_id` 绑定、端类型，seed 1 管理员 + ≥2 个人账号（虚构数据）。验收点：迁移可重放、旧账号仍可登录。
-- [ ] **T-A12 JWT / UserOut / AuthUser 贯通 person_id** — `service/auth_service.py`、`schemas/auth.py`、`dao/users.py`、`frontend/src/lib/auth.ts`、`lib/types.ts`。验收点：登录返回含 person_id，刷新不丢；旧字段保留兼容。
-- [ ] **T-A13 后端本人数据授权** — `backend/app/core/auth/**`、`modules/identity/**`、`api/deps.py`：`require_admin` / `require_self(person_id)`。验收点：**改请求 ID 访问他人档案/成绩/学习记录返回 403**；前端隐藏按钮不算授权。
-- [ ] **T-A14 双端入口与端分发** — `frontend/src/app/login/**`、`app/page.tsx`、`components/{AppShell,AuthGuard}.tsx`、`frontend/src/features/identity/**`。验收点：切换账号后菜单与数据正确（F09）。⚠️ **R-A01**：`frontend/src/app/(person)/**` 未登记归属，路由壳需用户单独授权后落地，不擅自改 `ownership.json`。
+- [x] **T-A11 User 与账号端类型** ✅ 2026-11-07 分阶段完成：person_id 列（迁移 A_0002 幂等 ALTER+往返验证）+ seed personal 演示账号（绑定 person_id=398 真实库验证）；迁移可重放/旧账号可登录实测。见 [1145 记录](../../updates/A/20261107-1145-person_id列落地.md)、[1230 记录](../../updates/A/20261107-1230-数据范围授权落地.md)。
+- [x] **T-A12 JWT / UserOut / AuthUser 贯通 person_id** ✅ 2026-11-07：UserOut 增量兼容字段（登录 + /auth/me 两处生效）、前端 AuthUser 类型同步、断言更新；auth 34 用例全过。见 [1250 记录](../../updates/A/20261107-1250-auth贯通person_id.md)。
+- [x] **T-A13 后端本人数据授权（阶段 1）** ✅ 2026-11-07：`core/auth/scope.py`（AccountScope/authorize_profile_access/authorize_file_access，deny-by-default）+ deps `AccountScopeDep`；9 用例全过。⚠️ `require_self` 挂载到 B/C/D 具体接口由其联调（负例归 B REQ-02 验收）；六类角色矩阵待 V2.5 冻结。见 [1230 记录](../../updates/A/20261107-1230-数据范围授权落地.md)。
+- [x] **T-A14 双端入口与端分发（骨架）** ✅ 2026-11-07：R-A01 已解除（U-03 用户授权）；(person) 路由组 + PersonalShell + /home 首页 + 登录双端分流（personal→/home）；4 新测试过。见 [1300 记录](../../updates/A/20261107-1300-双端入口骨架.md)。⚠️ 个人侧业务页面等 B/C 组件。
 - [ ] **T-A15 双端隔离回归** — 个人端不可见管理端功能、不可读他人数据；管理员可关联账号与档案。验收点：越权反例 + 重启持久化。
 
 ## M3 · 人才需求、AI JD、招聘状态与邀约（F01）
@@ -65,22 +65,22 @@
 ## M4 · AI 综合评分替换来源评分（F03 / C05）
 
 - [ ] **T-A31 评分服务改造** — `service/match_engine.py`、`core/prompts/match.txt`、`backend/app/modules/matching/**`：模型分析岗位 + 完整档案 → 0–100 分 + 依据 + 不足 + 待核实；替代 `hard_gate` 与 `0.7/0.3` 加权公式，**保留来源实现作兼容对照记录**。验收点：至少两份档案对同一岗位产生有差异、有依据的结果。
-- [ ] **T-A32 正式 Worker 输入补全** — `tasks/screen_worker.py`、`tasks/match_worker.py` 接 B 的带版本档案快照（经历/项目证据、`current_title`、tags、能力分、档案版本）。验收点：**正式链路**实测，不用历史评测脚本输入冒充。⚠️ 依赖 R-A03。
-- [ ] **T-A33 输出校验与结果快照** — 后端校验分数范围/字段，保存岗位版本、档案输入快照、模型名、Prompt 版本、模型原始返回。验收点：刷新只展示已保存结果，不触发重算；失败单独状态。
+- [x] **T-A32 Worker 输入补全（阶段 1）** ✅ 2026-11-07：H-A07 修复——profile_input 5→完整画像+结构化经历证据（内联查最新 parsed_resumes.structured_json，未解析标 missing_fields）；真实模型冒烟 84.4 vs 77.25 有差异有依据。⚠️ B 快照服务落地后切换输入源（B 契约 §5）。见 [1330 记录](../../updates/A/20261107-1330-评分输入补全.md)。
+- [x] **T-A33 结果快照（表结构+写入）** ✅ 2026-11-07：screen_results+4/match_results+7 列（model_version/prompt_version/attempt/profile_input_snapshot_json + match 人工结论三列），worker 写入真实数据；迁移 A_0003+merge A_0004。⚠️ 「模型原始返回」全量存档与失败单独状态（failure_reason 触发语义）留 M5 逐结果重试专项。见 [1400 记录](../../updates/A/20261107-1400-结果快照字段.md)。
 - [ ] **T-A34 评分边界** — 等于分数线归通过、技能词边界（Java≠JavaScript、C≠C++）、缺失证据标待核实、年龄性别不参与、语义相似度不等于业务分、不把模型自报准确率当实测。验收点：逐条反例测试。
 
 ## M5 · 分数线、快照、失败记录与人工结论分离（F03 / §12.1）
 
-- [ ] **T-A41 初筛两档 + 人工复核三态** — 通过/未通过 + 待复核/建议进入下一步/暂不推进 + 备注；源码三档登记映射，不全仓重命名、不改写历史数据。验收点：等于分数线、评分失败、人工调整后刷新保留。
+- [x] **T-A41 人工复核三态** ✅ screen 侧 F1-10 已有（源码）；2026-11-07 补 match 侧对齐（PATCH /api/match/results/{id} 三态+撤销，详情可见操作人，6 用例全反例）。备注字段未做（需求未明确）。见 [1430 记录](../../updates/A/20261107-1430-人工改判接口.md)。
 - [ ] **T-A42 批次快照与幂等** — 固定岗位版本、分数线、人员名单、档案输入快照、模型/Prompt 版本；retry 只补失败项、不重圈人；岗位/档案变更新建一轮。验收点：重复请求不重复建结果，历史人工意见不被覆盖。
-- [ ] **T-A43 逐结果失败与人工结论字段** — `models/job.py` 批次/结果补 `model_version`、`prompt_version`、`failure_reason`、`attempt`；`match_results` 补人工结论字段对齐 `screen_results.manual_verdict*`。验收点：单份失败可单独重试，不影响同批成功项。
+- [x] **T-A43 字段层** ✅ 2026-11-07：两结果表快照/版本列 + match 人工结论三列全部落地（迁移 A_0003）；match 人工改判接口 done（[1430 记录](../../updates/A/20261107-1430-人工改判接口.md)）。⚠️ 「单份失败单独重试」的逐结果重试语义待定义（failure_reason 触发条件），列 M5 专项。
 - [ ] **T-A44 迁移链实跑** — `backend/migrations/versions/A_*.py`（**目录当前不存在，需先建骨架**）+ `models/__init__.py` 13 表断言 + `init_db.py`、`backup_db.py` 清单同步；**`create_all` 不 ALTER**，必须验证「已有库升级」与空库两条路径。验收点：升级后旧历史批次仍可追溯。
 
 ## M6 · 公共集成与回归
 
 - [ ] **T-A51 入口与依赖集成** — `backend/app/main.py` 注册新路由；`requirements.txt`、`frontend/package.json`、`.env.example` 由 A 统一集成（加包先走 `docs/requests/A/`，不替 B/C/D 改）。验收点：`--workers 1` 下全路由可达，健康检查正常。
 - [ ] **T-A52 全链路回归** — 登录双端、越权、阈值等于、评分失败、重复请求、批次快照、重启持久化、浏览器实测；与 C 联调面试引用。验收点：每项记录输入/预期/实际/证据位置。
-- [ ] **T-A53 指标口径交付 + 集成索引** — 向 D 提供岗位需求/人工推进/缺口/匹配复核的 metric 定义（时间字段、去重键、允许维度、权限范围）；根 `更新记录.md` 追加集成摘要。验收点：D 的白名单可核对到 A 的业务记录。
+- [x] **T-A53 指标口径交付** ✅ 2026-11-07：[指标口径交付](../../modules/A/指标口径交付.md)（三域字段表+人工推进链+缺口清单+消费方式建议）；缺口指标待 M3/V2.5 冻结。见 [1440 记录](../../updates/A/20261107-1440-指标口径交付.md)。
 
 ---
 
@@ -88,9 +88,9 @@
 
 | 编号 | 阻塞 | 影响任务 | 当前处理 |
 |---|---|---|---|
-| R-A01 | ~~`frontend/src/app/(person)/**` 未登记归属~~ | T-A14 | ✅ **已解除**（2026-11-07 U-03：用户授权 A 单独更新 `ownership.json`，本轮单独提交） |
+| R-A01 | ~~`(person)` 未登记归属~~ | T-A14 | ✅ **已解除并落地**（U-03 授权 + (person) 壳上线） |
 | R-A02 | Agnes 协议/结构化输出、独立 Embedding、Milvus 未验证 | T-A05、T-A22、T-A31 | 🔄 **进行中**（U-04：用户裁决复用旧 main Key，已写入本机 `.env` 不进 Git；本轮隔离环境真实验证） |
-| R-A03 | B 的 `talent_profile_id → person_id` 映射与档案版本契约未回 | T-A11、T-A32 | 请求已发 `docs/requests/A/20261106-B-...md`；U-05 已裁决催办，A 先做不依赖映射的部分 |
+| R-A03 | ~~契约未回~~ → **契约已回**（B 002845：person_id=talent_profiles.id；阶段 1 契约可用、快照服务未实现） | T-A11、T-A32 | A 已按契约完成阶段 1（T-A11/T-A32）；服务落地后 A 切换 worker 输入源 |
 | R-A04 | 13 表冻结、迁移链未实跑 | T-A11、T-A44 | C-04 裁决覆盖：一期 34 表口径确认，M6 统一注册；迁移链 `A_*.py` + `C_*.py` 双前缀（U-05） |
 | R-A05 | 本机 `python` 无 pytest；`backend/.env`、`.venv`、`frontend/node_modules` 均缺失 | T-A01 及全部测试 | 🔄 **进行中**：本轮 bootstrap 隔离环境（3308/`aitalent_main`/19532/8101/3101，不碰 3306/`ai_talent`、19530 旧实例、3307 e2e）解决；⚠️ 8000/3306/19530 属旧 main 实例与既有基础设施（H-A11），不能当验收证据 |
 

@@ -16,6 +16,7 @@ from app.schemas.match import (
     MatchBatchCreatedData,
     MatchBatchDetail,
     MatchBatchListItem,
+    ManualVerdictRequest,
     MatchResultDetail,
     MatchResultItem,
     MatchRetryData,
@@ -114,3 +115,14 @@ def get_match_result(
 ):
     data = match_service.get_result_detail(db, result_id)
     return ok(MatchResultDetail.model_validate(data).model_dump())
+
+
+@router.patch("/results/{result_id}", summary="人工推进标记（T-A41，撤销传 null）")
+def patch_match_result(
+    result_id: int,
+    payload: ManualVerdictRequest,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    result = match_service.set_manual_verdict(db, result_id, payload.manual_verdict, user_id=user.id)
+    return ok(MatchResultDetail.model_validate(match_service.get_result_detail(db, result.id)).model_dump())
