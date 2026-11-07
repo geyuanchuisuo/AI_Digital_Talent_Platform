@@ -207,6 +207,12 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "id", "session_id", "event_type", "operator_id", "note",
         "payload_json", "created_at", "updated_at",
     },
+    # ---- 组织范围授权（功能 11，A_0007；跨部门授权记录依据+期限）----
+    "user_scope_grants": {
+        "id", "granter_user_id", "grantee_user_id", "scope_type", "scope_ref_id",
+        "reason", "valid_from", "valid_until", "revoked_at", "revoked_by",
+        "created_at", "updated_at",
+    },
     # ---- 招聘域 5 表（M3-V2.6 功能 8a-1，冻结口径）----
     "project_groups": {
         "id", "name", "description", "status", "created_by",
@@ -360,10 +366,10 @@ def ddl(model) -> str:
     return str(CreateTable(model.__table__).compile(dialect=DIALECT))
 
 
-def test_exactly_50_tables_and_no_phase2_table():
-    assert len(TABLE_NAMES) == 50
-    assert len(MODEL_CLASSES) == 50
-    assert len(Base.metadata.tables) == 50
+def test_exactly_51_tables_and_no_phase2_table():
+    assert len(TABLE_NAMES) == 51
+    assert len(MODEL_CLASSES) == 51
+    assert len(Base.metadata.tables) == 51
     assert set(TABLE_NAMES) == set(EXPECTED_COLUMNS)
     # D-7 缓办：一期不建 llm_score_cache
     assert "llm_score_cache" not in Base.metadata.tables
