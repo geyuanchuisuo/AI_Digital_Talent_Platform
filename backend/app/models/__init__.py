@@ -1,4 +1,4 @@
-"""ORM 实体统一入口（T-03 + 裁决 C-04，35 张表 = 13 公共 + 22 C 模块）。
+"""ORM 实体统一入口（T-03 + 裁决 C-04，35 张表 = 13 公共 + 22 C 模块；C_0002 自适应加 1 表）。
 
 `import app.models` 即把全部表注册到 `app.database.Base.metadata`，
 `scripts/init_db.py` 与备份脚本据此建表/导出，不需要各任务自行 import 单表。

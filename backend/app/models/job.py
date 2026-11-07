@@ -135,6 +135,11 @@ class ScreenResult(PKMixin, CreatedAtMixin, Base):
     reason_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     hits_json: Mapped[list | None] = mapped_column(JSONList, nullable=True)
     misses_json: Mapped[list | None] = mapped_column(JSONList, nullable=True)
+    # ---- 结果快照与版本追溯（T-A33/T-A43，2026-11-07 功能 5b；D 指标口径可追溯基础）----
+    model_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    attempt: Mapped[int | None] = mapped_column(UINT_TYPE, nullable=True)
+    profile_input_snapshot_json: Mapped[dict | None] = mapped_column(JSONDict, nullable=True)
 
 
 class MatchBatch(PKMixin, CreatedAtMixin, Base):
@@ -198,3 +203,12 @@ class MatchResult(PKMixin, CreatedAtMixin, Base):
     hits_json: Mapped[list | None] = mapped_column(JSONList, nullable=True)
     misses_json: Mapped[list | None] = mapped_column(JSONList, nullable=True)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ---- 结果快照与版本追溯（T-A33/T-A43，2026-11-07 功能 5b）----
+    model_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    attempt: Mapped[int | None] = mapped_column(UINT_TYPE, nullable=True)
+    profile_input_snapshot_json: Mapped[dict | None] = mapped_column(JSONDict, nullable=True)
+    # ---- 人工结论（对齐 screen_results.manual_verdict*，T-A43；评分失败≠初筛未通过）----
+    manual_verdict: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    manual_verdict_by: Mapped[int | None] = mapped_column(PK_TYPE, nullable=True)
+    manual_verdict_at: Mapped[datetime | None] = mapped_column(nullable=True)

@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.dao import screen as screen_dao
 from app.models import ParsedResume, ScreenBatch
+from app.config import settings
 from app.service import match_engine
 from app.service.screen_service import build_config_snapshot
 
@@ -126,6 +127,10 @@ def _run_batch(db: Session, batch: ScreenBatch) -> None:
         score = None if result.score is None else round(float(result.score), 2)
         screen_dao.create_result(
             db,
+            model_version=settings.llm_model,
+            prompt_version=settings.prompt_version,
+            attempt=1,
+            profile_input_snapshot_json=profile_input,
             screen_batch_id=batch.id,
             job_profile_id=batch.job_profile_id,
             talent_profile_id=talent_id,

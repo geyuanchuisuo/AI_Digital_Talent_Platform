@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any, Mapping
 
 from sqlalchemy import select
@@ -248,6 +249,13 @@ def get_result_detail(db: Session, result_id: int) -> dict[str, Any]:
     base["vector_degraded"] = bool(batch.vector_degraded) if batch is not None else False
     base.update(
         {
+            "manual_verdict": result.manual_verdict,
+            "manual_verdict_by": result.manual_verdict_by,
+            "manual_verdict_at": (
+                result.manual_verdict_at.isoformat(timespec="seconds")
+                if result.manual_verdict_at is not None
+                else None
+            ),
             "dimension_scores": dict(result.dimension_scores_json or {}),
             "vector_similarity": (
                 float(result.dimension_scores_json.get("vector_similarity"))
@@ -272,3 +280,30 @@ def list_batches_with_title(
 
 def get_batch_row(db: Session, batch_id: int) -> MatchBatch | None:
     return match_dao.get_batch(db, batch_id)
+
+
+MANUAL_VERDICTS = ("passed", "pending", "rejected")
+
+
+def set_manual_verdict(
+    db: Session, result_id: int, manual_verdict: str | None, *, user_id: int
+) -> MatchResult:
+    """人工推进标记（T-A41，对齐 screen_service.set_manual_verdict；撤销置 NULL）。
+
+    match_results 无批次三档计数列（匹配是排名语义，V2.2 §12.2 三态属筛选侧），
+    故不重算批次计数；改判只写人工结论三字段，不改 score/hard_fail。
+    """
+    result = match_dao.get_result(db, result_id)
+    if result is None:
+        raise BizError(404, RESULT_NOT_FOUND)
+    if manual_verdict is not None and manual_verdict not in MANUAL_VERDICTS:
+        raise BizError(400, f"manual_verdict 仅支持 {' / '.join(MANUAL_VERDICTS)} 或 null（撤销）")
+    result.manual_verdict = manual_verdict
+    if manual_verdict is None:
+        result.manual_verdict_by = None
+        result.manual_verdict_at = None
+    else:
+        result.manual_verdict_by = user_id
+        result.manual_verdict_at = datetime.now()
+    db.commit()
+    return result

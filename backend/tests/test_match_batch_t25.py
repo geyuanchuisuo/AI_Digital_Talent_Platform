@@ -386,3 +386,59 @@ def test_embedding_down_full_degrade(env, fakes):
 def test_requires_token(env, client):
     assert client.post("/api/match/batches", json={}).status_code == 401
     assert client.get("/api/match/batches").status_code == 401
+
+
+def test_manual_verdict_set_revoke_invalid_and_auth(env, fakes, client, auth):
+    """T-A41：人工推进标记——设置/撤销/非法值 400/404/无 token 401（对齐 F1-10）。"""
+    job_id = env.make_job()
+    p1, _ = env.make_profile(work_years=Decimal("5.0"))
+    env.make_parsed(p1)
+    resp = client.post(
+        "/api/match/batches",
+        json={"job_profile_id": job_id, "scope": {"type": "all"}},
+        headers=auth,
+    )
+    assert resp.status_code == 202, resp.text
+    batch_id = resp.json()["data"]["batch_id"]
+    env.track_batch(batch_id)
+    handle_match_batch(batch_id)
+
+    with SessionLocal() as db:
+        row = db.query(MatchResult).filter(MatchResult.match_batch_id == batch_id).one()
+    result_id = row.id
+
+    # 无 token → 401（统一错误体，路由挂 CurrentUser）
+    assert client.patch(f"/api/match/results/{result_id}", json={"manual_verdict": "passed"}).status_code == 401
+
+    # 非法值 → 422（Pydantic Literal 由 T-02 处理器归一为统一错误体；screen 同口径）
+    resp = client.patch(
+        f"/api/match/results/{result_id}", json={"manual_verdict": "hire"}, headers=auth
+    )
+    assert resp.status_code == 422, resp.text
+
+    # 404
+    resp = client.patch("/api/match/results/999999", json={"manual_verdict": "passed"}, headers=auth)
+    assert resp.status_code == 404
+
+    # 设置 → 详情可见 + 落库字段
+    resp = client.patch(
+        f"/api/match/results/{result_id}", json={"manual_verdict": "passed"}, headers=auth
+    )
+    assert resp.status_code == 200, resp.text
+    detail = resp.json()["data"]
+    assert detail["manual_verdict"] == "passed"
+    assert detail["manual_verdict_by"] is not None and detail["manual_verdict_at"]
+
+    with SessionLocal() as db:
+        row = db.get(MatchResult, result_id)
+        assert row.manual_verdict == "passed" and row.manual_verdict_by is not None
+        assert row.score is not None  # 改判不改 score（对齐 screen 口径）
+
+    # 撤销 → 三字段全空
+    resp = client.patch(
+        f"/api/match/results/{result_id}", json={"manual_verdict": None}, headers=auth
+    )
+    assert resp.status_code == 200
+    detail = resp.json()["data"]
+    assert detail["manual_verdict"] is None
+    assert detail["manual_verdict_by"] is None and detail["manual_verdict_at"] is None
