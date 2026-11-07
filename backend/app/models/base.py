@@ -55,10 +55,33 @@ class CreatedAtMixin:
 
 
 class UpdatedAtMixin(CreatedAtMixin):
-    """created_at + updated_at（ON UPDATE 由 MySQL 维护，不依赖客户端 onupdate）。"""
+    """created_at + updated_at（ON UPDATE 由 MySQL 维护，不依赖客户端 onupdate）。
+
+    ⚠️ 仅适用于 MySQL；server_default 含 `ON UPDATE` 文本，SQLite 下建表报语法错
+    （C 实测，2026-11-07）。跨库（SQLite/测试内存库）请用 `CrossDbUpdatedAtMixin`。
+    """
 
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=UPDATED_DEFAULT
+    )
+
+
+class CrossDbUpdatedAtMixin(CreatedAtMixin):
+    """跨库安全的 updated_at 变体（2026-11-07 交付，回应 C 反向请求）。
+
+    server_default 仅 CURRENT_TIMESTAMP（MySQL/SQLite 均可建表），
+    updated_at 由应用层 onupdate 维护——语义与 C 的 CTimestampMixin 一致，
+    但职责收归公共层（C 不再自带自定义时间戳 mixin）。
+
+    采用方式：MySQL 专属表继续用 `UpdatedAtMixin`；需要跨库（如 C 的 SQLite
+    测试夹具）的表用本变体。两变体的列对照断言见 test_models_structure。
+    """
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=CREATED_DEFAULT,
+        onupdate=datetime.now,
     )
 
 
