@@ -21,11 +21,15 @@ from fastapi import APIRouter
 
 from app.modules.assessments.registry_models import ALL_MODELS
 from app.modules.assessments.router import router as assessments_router
+from app.modules.interviews.ai_router import router as ai_interviews_router
 from app.modules.interviews.router import router as interviews_router
+from app.modules.inventory.router import router as inventory_router
 from app.modules.training.router import router as training_router
 
 ALL_ROUTERS: tuple[APIRouter, ...] = (
     assessments_router,
     interviews_router,
+    ai_interviews_router,
     training_router,
+    inventory_router,
 )

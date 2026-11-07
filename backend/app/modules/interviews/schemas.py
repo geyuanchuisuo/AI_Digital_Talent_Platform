@@ -20,6 +20,7 @@ class RoundCreateRequest(_StrictModel):
     candidate_user_id: int | None = None
     talent_profile_id: int | None = None
     job_id: int | None = None
+    application_id: int | None = None
     job_title: str | None = Field(default=None, max_length=100)
     round_no: int = Field(default=1, ge=1, le=20)
     round_name: str = Field(min_length=1, max_length=50)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, SmallInteger, String, Text, UniqueConstraint, text
+from sqlalchemy import DateTime, Float, Integer, SmallInteger, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -170,18 +170,62 @@ class TrainingLearningRecord(PKMixin, CTimestampMixin, Base):
     is_self_reported: Mapped[int] = mapped_column(
         SmallInteger, nullable=False, default=1, server_default=text("1")
     )
+    formal_completed: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, default=0, server_default=text("0")
+    )
+    evidence_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default=text("0"))
 
 
 class TrainingGrowthEvent(PKMixin, CTimestampMixin, Base):
-    """追加式成长事件：测评完成、培训分配、课程完成。"""
+    """追加式成长事件：来源 assessment/interview/training/hr_ability。"""
 
     __tablename__ = "training_growth_events"
     __table_args__ = MYSQL_TABLE_OPTIONS
 
     employee_user_id: Mapped[int] = mapped_column(Integer, nullable=False)
     talent_profile_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="training", server_default=str_default("training")
+    )
     event_type: Mapped[str] = mapped_column(String(30), nullable=False)
     ref_type: Mapped[str | None] = mapped_column(String(30), nullable=True)
     ref_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     payload_json: Mapped[dict] = mapped_column(JSONDict, nullable=False, default=dict)
+
+
+class TrainingEnrollment(PKMixin, CTimestampMixin, Base):
+    """员工课程报名：必修/选修，审批占位与候补队列，24h 超时释放。"""
+
+    __tablename__ = "training_enrollments"
+    __table_args__ = (
+        UniqueConstraint("course_id", "employee_user_id", name="uk_enrollment_course_employee"),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    course_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    employee_user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    priority: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="elective", server_default=str_default("elective")
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", server_default=str_default("pending")
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    decided_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class TrainingLearningEvidence(PKMixin, CTimestampMixin, Base):
+    """有效学习证据（防挂机）：服务端可校验的心跳/页面停留/测验/出勤等。"""
+
+    __tablename__ = "training_learning_evidence"
+    __table_args__ = MYSQL_TABLE_OPTIONS
+
+    learning_record_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    employee_user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    evidence_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    payload_json: Mapped[dict] = mapped_column(JSONDict, nullable=False, default=dict)
+    score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default=text("0"))
+    verified_by: Mapped[str | None] = mapped_column(String(30), nullable=True)

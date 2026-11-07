@@ -85,3 +85,21 @@ class FeedbackSubmitRequest(_StrictModel):
 
 class FeedbackNoteRequest(_StrictModel):
     note: str = Field(min_length=1, max_length=2000)
+
+
+class EnrollmentRequest(_StrictModel):
+    course_id: int
+    priority: Literal["required", "elective"] = "elective"
+
+
+class EnrollmentDecideRequest(_StrictModel):
+    status: Literal["approved", "rejected", "cancelled"]
+    note: str | None = Field(default=None, max_length=500)
+
+
+class EvidenceSubmitRequest(_StrictModel):
+    learning_record_id: int
+    evidence_type: str = Field(min_length=1, max_length=30)
+    payload: dict = Field(default_factory=dict)
+    score: float = Field(default=0.0, ge=0, le=100)
+    verified_by: str | None = Field(default=None, max_length=30)
