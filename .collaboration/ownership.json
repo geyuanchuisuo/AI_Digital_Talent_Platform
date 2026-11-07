@@ -207,8 +207,7 @@
       "frontend/src/app/(main)/job-profiles/**",
       "frontend/src/app/(main)/match/**",
       "frontend/src/app/(person)/**",
-      "frontend/src/app/login/**",
-      "tests/C/c_harness.py"
+      "frontend/src/app/login/**"
     ],
     "B": [
       "frontend/src/features/files/**",
