@@ -90,6 +90,7 @@ class AssessmentFlowTest(unittest.TestCase):
                 ],
                 "total_question_count": total,
                 "pass_score": pass_score,
+                "mode": "fixed",
             },
         )
 
@@ -274,6 +275,7 @@ class AssessmentFlowTest(unittest.TestCase):
                 "dimensions": [{"name": "专业", "type": "professional", "weight": 100}],
                 "total_question_count": 1,
                 "pass_score": 60,
+                "mode": "fixed",
             },
         )
         plan_id = plan.json()["data"]["id"]

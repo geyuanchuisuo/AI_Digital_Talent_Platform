@@ -29,6 +29,7 @@ from app.modules.assessments.schemas import (
     PlanCreateRequest,
     PlanUpdateRequest,
     QuestionCreateRequest,
+    QuestionGenerateRequest,
     QuestionUpdateRequest,
 )
 
@@ -70,11 +71,19 @@ def _plan_out(row: AssessmentPlan, paper: AssessmentPaper | None = None) -> dict
         "pass_score": float(row.pass_score),
         "difficulty_structure": dict(row.difficulty_structure_json or {}),
         "status": row.status,
+        "mode": row.mode,
+        "strategy": dict(row.strategy_json or {}),
         "version": row.version,
         "published_at": row.published_at,
         "created_at": row.created_at,
         "updated_at": row.updated_at,
     }
+    snapshot = dict(row.bank_snapshot_json or {})
+    if snapshot:
+        data["bank_snapshot"] = {
+            "question_count": snapshot.get("question_count"),
+            "frozen_at": snapshot.get("frozen_at"),
+        }
     if paper is not None:
         data["paper"] = {
             "id": paper.id,
@@ -96,6 +105,8 @@ def _assignment_item(row: AssessmentAssignment) -> dict[str, Any]:
         "job_id": row.job_id,
         "job_title": row.job_title,
         "status": row.status,
+        "mode": row.mode,
+        "target_question_count": row.target_question_count,
         "attempt_no": row.attempt_no,
         "answers_open": bool(row.answers_open),
         "published_result_version": row.published_result_version,
@@ -106,8 +117,18 @@ def _assignment_item(row: AssessmentAssignment) -> dict[str, Any]:
     }
 
 
+def _answer_block(answer, visible: bool) -> dict[str, Any] | None:
+    if answer is None:
+        return None
+    return {
+        "selected_option": answer.selected_option,
+        "answer_text": answer.answer_text,
+        "grading_status": answer.grading_status,
+        "score": float(answer.score) if (visible and answer.score is not None) else None,
+    }
+
+
 def _assignment_detail(db: Session, assignment: AssessmentAssignment, user) -> dict[str, Any]:
-    paper = service.get_paper(db, assignment)
     visible = service._answer_visible(assignment, user)
     answers = {
         row.question_id: row
@@ -125,40 +146,52 @@ def _assignment_detail(db: Session, assignment: AssessmentAssignment, user) -> d
         .all()
     }
     questions: list[dict[str, Any]] = []
-    for item in paper.questions_json or []:
-        question = dict(item)
-        question_id = int(question["question_id"])
-        if not visible:
-            question = service.question_public_snapshot(question)
-        else:
-            completed = review_items.get(question_id)
-            question = {
-                **question,
-                "review_completed": bool(completed.is_completed) if completed else False,
-            }
-        answer = answers.get(question_id)
-        question["answer"] = (
-            {
-                "selected_option": answer.selected_option,
-                "answer_text": answer.answer_text,
-                "grading_status": answer.grading_status,
-                "score": float(answer.score) if (visible and answer.score is not None) else None,
-            }
-            if answer
-            else None
-        )
-        questions.append(question)
+    paper_info: dict[str, Any] | None = None
+    if assignment.mode == "adaptive":
+        selections = service._selection_rows(db, assignment.id)
+        for selection in selections:
+            question = dict(selection.question_snapshot_json or {})
+            question["sequence_no"] = selection.sequence_no
+            if service.is_admin(user):
+                question["selection_reason"] = dict(selection.selection_reason_json or {})
+            if not visible:
+                question = service.question_public_snapshot(question)
+            else:
+                completed = review_items.get(selection.question_id)
+                question = {
+                    **question,
+                    "review_completed": bool(completed.is_completed) if completed else False,
+                }
+            question["answer"] = _answer_block(answers.get(selection.question_id), visible)
+            questions.append(question)
+    else:
+        paper = service.get_paper(db, assignment)
+        paper_info = {
+            "id": paper.id,
+            "question_count": paper.question_count,
+            "pass_score": float(paper.pass_score),
+            "dimensions": list(paper.dimensions_json or []),
+        }
+        for item in paper.questions_json or []:
+            question = dict(item)
+            question_id = int(question["question_id"])
+            if not visible:
+                question = service.question_public_snapshot(question)
+            else:
+                completed = review_items.get(question_id)
+                question = {
+                    **question,
+                    "review_completed": bool(completed.is_completed) if completed else False,
+                }
+            question["answer"] = _answer_block(answers.get(question_id), visible)
+            questions.append(question)
 
     visible_result = service.visible_result(db, assignment, user)
     latest = service._latest_result(db, assignment.id)
     return {
         "assignment": _assignment_item(assignment),
-        "paper": {
-            "id": paper.id,
-            "question_count": paper.question_count,
-            "pass_score": float(paper.pass_score),
-            "dimensions": list(paper.dimensions_json or []),
-        },
+        "mode": assignment.mode,
+        "paper": paper_info,
         "questions": questions,
         "result": service.public_result(visible_result) if visible_result else None,
         "result_available": (latest is not None) if service.is_admin(user) else False,
@@ -267,6 +300,17 @@ def approve_question(
     service.require_admin(user)
     row = service.approve_question(db, question_id, user_id=user.id)
     return ok(_question_out(row))
+
+
+@router.post("/questions/generate-draft", summary="模型生成待审核题目（自适应题库供给）")
+def generate_question_drafts(
+    payload: QuestionGenerateRequest,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    service.require_admin(user)
+    rows = service.generate_question_drafts(db, payload, user_id=user.id)
+    return ok([_question_out(row) for row in rows])
 
 
 # ---------------------------------------------------------------- 方案与发布
@@ -395,6 +439,44 @@ def start_assignment(
 ):
     row = service.start_assignment(db, assignment_id, user)
     return ok(_assignment_item(row))
+
+
+@router.post("/assignments/{assignment_id}/next-question", summary="自适应获取下一题（幂等）")
+def next_question(
+    assignment_id: int,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    return ok(service.next_question(db, assignment_id, user))
+
+
+@router.get("/assignments/{assignment_id}/selections", summary="自适应选题留痕")
+def list_selections(
+    assignment_id: int,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    rows = service.list_selections(db, assignment_id, user)
+    include_reason = service.is_admin(user)
+    return ok(
+        {
+            "items": [
+                {
+                    "sequence_no": row.sequence_no,
+                    "question_id": row.question_id,
+                    "dimension_name": row.dimension_name,
+                    "difficulty": row.difficulty,
+                    "question_snapshot": dict(row.question_snapshot_json or {}),
+                    "selection_reason": (
+                        dict(row.selection_reason_json or {}) if include_reason else None
+                    ),
+                    "created_at": row.created_at,
+                }
+                for row in rows
+            ],
+            "total": len(rows),
+        }
+    )
 
 
 @router.put("/assignments/{assignment_id}/answers/{question_id}", summary="保存单题答案")

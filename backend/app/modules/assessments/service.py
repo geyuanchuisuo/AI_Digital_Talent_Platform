@@ -19,6 +19,16 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import BizError
 from app.models import User
+from app.modules.assessments.adaptive import (
+    build_ability,
+    choose_next_question,
+    ending_reason,
+    validate_strategy,
+)
+from app.modules.assessments.generation import (
+    GENERATION_PROMPT_VERSION,
+    default_generate_questions,
+)
 from app.modules.assessments.grading import GRADING_PROMPT_VERSION, default_grade_short_answer
 from app.modules.assessments.models import (
     AssessmentAnswer,
@@ -29,6 +39,7 @@ from app.modules.assessments.models import (
     AssessmentResult,
     AssessmentReview,
     AssessmentReviewItem,
+    AssessmentSelection,
 )
 from app.modules.assessments.scoring import (
     DEFAULT_DIFFICULTY_STRUCTURE,
@@ -47,6 +58,7 @@ from app.modules.assessments.schemas import (
     PlanCreateRequest,
     PlanUpdateRequest,
     QuestionCreateRequest,
+    QuestionGenerateRequest,
     QuestionUpdateRequest,
 )
 from app.modules.training.models import TrainingGrowthEvent
@@ -231,6 +243,59 @@ def list_questions(
     return rows, int(total)
 
 
+def generate_question_drafts(
+    db: Session,
+    payload: QuestionGenerateRequest,
+    *,
+    user_id: int,
+    generator: Callable[[dict[str, Any]], list[dict[str, Any]]] | None = None,
+) -> list[AssessmentQuestion]:
+    """管理员触发真实模型生成待审核题目；失败 503，不伪造题目。"""
+    effective = generator or default_generate_questions
+    request = {
+        "job_title": payload.job_title,
+        "dimension_name": payload.dimension_name,
+        "dimension_type": payload.dimension_type,
+        "difficulty": payload.difficulty,
+        "question_type": payload.question_type,
+        "count": payload.count,
+        "prompt_version": GENERATION_PROMPT_VERSION,
+    }
+    try:
+        items = effective(request)
+    except Exception as exc:  # noqa: BLE001 - 模型失败必须明确为 503，而不是静默造题
+        raise BizError(503, f"题目生成失败：{type(exc).__name__}") from exc
+    if not items:
+        raise BizError(503, "模型未返回题目，请稍后重试")
+    created: list[AssessmentQuestion] = []
+    prepared: list[QuestionCreateRequest] = []
+    for item in items[: payload.count]:
+        try:
+            data = QuestionCreateRequest(
+                job_id=payload.job_id,
+                job_version=payload.job_version,
+                job_title=payload.job_title,
+                dimension_name=payload.dimension_name,
+                dimension_type=payload.dimension_type,
+                difficulty=payload.difficulty,
+                question_type=payload.question_type,
+                stem=str(item.get("stem") or "").strip(),
+                options=item.get("options"),
+                correct_answer=item.get("correct_answer"),
+                reference_points=item.get("reference_points"),
+                scoring_guideline=item.get("scoring_guideline"),
+            )
+            _validate_question(data, partial=False)
+        except BizError as exc:
+            raise BizError(503, f"模型返回的题目未通过校验：{exc.message}") from exc
+        except Exception as exc:  # noqa: BLE001 - 模型输出结构不合法
+            raise BizError(503, "模型返回的题目结构不合法，请重试") from exc
+        prepared.append(data)
+    for data in prepared:
+        created.append(create_question(db, data, user_id=user_id))
+    return created
+
+
 # ---------------------------------------------------------------- 方案与固定试卷
 
 def _plan_dimensions(payload_dimensions: list) -> list[dict[str, Any]]:
@@ -246,6 +311,15 @@ def create_plan(db: Session, payload: PlanCreateRequest, *, user_id: int) -> Ass
     validate_plan_input(
         parse_dimensions(dimensions), payload.total_question_count, payload.pass_score, structure
     )
+    strategy = (
+        validate_strategy(
+            payload.strategy,
+            total_question_count=payload.total_question_count,
+            dimension_count=len(dimensions),
+        )
+        if payload.mode == "adaptive"
+        else None
+    )
     row = AssessmentPlan(
         purpose=payload.purpose,
         job_id=payload.job_id,
@@ -256,6 +330,8 @@ def create_plan(db: Session, payload: PlanCreateRequest, *, user_id: int) -> Ass
         pass_score=round(float(payload.pass_score), 2),
         difficulty_structure_json=structure,
         status="draft",
+        mode=payload.mode,
+        strategy_json=strategy,
         version=1,
         created_by=user_id,
         updated_by=user_id,
@@ -287,12 +363,23 @@ def update_plan(db: Session, plan_id: int, payload: PlanUpdateRequest, *, user_i
         row.difficulty_structure_json = validate_difficulty_structure(
             fields["difficulty_structure"] or {}
         )
+    if "mode" in fields:
+        row.mode = fields["mode"]
     validate_plan_input(
         parse_dimensions(list(row.dimensions_json)),
         row.total_question_count,
         float(row.pass_score),
         dict(row.difficulty_structure_json),
     )
+    if row.mode == "adaptive":
+        raw_strategy = fields.get("strategy", dict(row.strategy_json or {}))
+        row.strategy_json = validate_strategy(
+            dict(raw_strategy or {}),
+            total_question_count=row.total_question_count,
+            dimension_count=len(row.dimensions_json or []),
+        )
+    else:
+        row.strategy_json = None
     row.updated_by = user_id
     db.commit()
     db.refresh(row)
@@ -413,7 +500,50 @@ def _paper_question_snapshot(question: AssessmentQuestion) -> dict[str, Any]:
     }
 
 
-def publish_plan(db: Session, plan_id: int, *, user_id: int) -> tuple[AssessmentPlan, AssessmentPaper]:
+def _bank_candidates(db: Session, plan: AssessmentPlan) -> list[AssessmentQuestion]:
+    """方案维度可用的已审核题目（自适应题库快照来源）。"""
+    dimensions = parse_dimensions(list(plan.dimensions_json))
+    pairs = {(item.name, item.type) for item in dimensions}
+    rows = list(
+        db.scalars(select(AssessmentQuestion).where(AssessmentQuestion.status == "approved"))
+    )
+    return [row for row in rows if (row.dimension_name, row.dimension_type) in pairs]
+
+
+def _publish_adaptive(db: Session, plan: AssessmentPlan, *, user_id: int) -> AssessmentPlan:
+    """自适应发布：冻结策略与题库快照，不生成固定试卷。"""
+    dimensions = parse_dimensions(list(plan.dimensions_json))
+    strategy = validate_strategy(
+        dict(plan.strategy_json or {}),
+        total_question_count=plan.total_question_count,
+        dimension_count=len(dimensions),
+    )
+    bank = _bank_candidates(db, plan)
+    missing = [item.name for item in dimensions if not any(q.dimension_name == item.name for q in bank)]
+    if missing:
+        raise BizError(400, f"题库不足，无法发布：维度「{'、'.join(missing)}」缺少已审核题目")
+    if len(bank) < plan.total_question_count:
+        raise BizError(
+            400,
+            f"题库不足，无法发布：自适应方案至少需要 {plan.total_question_count} 道已审核题目，"
+            f"当前可用 {len(bank)} 道",
+        )
+    plan.strategy_json = strategy
+    plan.bank_snapshot_json = {
+        "mode": "adaptive",
+        "question_ids": sorted(int(q.id) for q in bank),
+        "question_count": len(bank),
+        "frozen_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    plan.status = "published"
+    plan.published_at = datetime.now()
+    plan.updated_by = user_id
+    db.commit()
+    db.refresh(plan)
+    return plan
+
+
+def publish_plan(db: Session, plan_id: int, *, user_id: int) -> tuple[AssessmentPlan, AssessmentPaper | None]:
     plan = get_plan(db, plan_id)
     if plan.status == "published":
         paper = db.scalar(
@@ -422,7 +552,7 @@ def publish_plan(db: Session, plan_id: int, *, user_id: int) -> tuple[Assessment
                 AssessmentPaper.plan_version == plan.version,
             )
         )
-        if paper is not None:
+        if plan.mode != "fixed" or paper is not None:
             return plan, paper
     validate_plan_input(
         parse_dimensions(list(plan.dimensions_json)),
@@ -430,6 +560,8 @@ def publish_plan(db: Session, plan_id: int, *, user_id: int) -> tuple[Assessment
         float(plan.pass_score),
         dict(plan.difficulty_structure_json),
     )
+    if plan.mode == "adaptive":
+        return _publish_adaptive(db, plan, user_id=user_id), None
     questions, allocation = _select_questions(db, plan)
     if len(questions) != plan.total_question_count:
         raise BizError(500, "组卷题量与方案总题量不一致，已阻止发布")
@@ -477,6 +609,8 @@ def publish_plan(db: Session, plan_id: int, *, user_id: int) -> tuple[Assessment
 # ---------------------------------------------------------------- 分配与作答
 
 def get_paper(db: Session, assignment: AssessmentAssignment) -> AssessmentPaper:
+    if assignment.paper_id is None:
+        raise BizError(400, "自适应测评不绑定固定试卷，请使用 next-question 逐题作答")
     paper = db.get(AssessmentPaper, assignment.paper_id)
     if paper is None:
         raise BizError(404, "试卷不存在")
@@ -489,14 +623,23 @@ def create_assignment(
     plan = get_plan(db, payload.plan_id)
     if plan.status != "published":
         raise BizError(400, "方案未发布，不能分配测评")
-    paper = db.scalar(
-        select(AssessmentPaper).where(
-            AssessmentPaper.plan_id == plan.id,
-            AssessmentPaper.plan_version == plan.version,
+    paper: AssessmentPaper | None = None
+    strategy: dict[str, Any] | None = None
+    target_question_count: int | None = None
+    if plan.mode == "fixed":
+        paper = db.scalar(
+            select(AssessmentPaper).where(
+                AssessmentPaper.plan_id == plan.id,
+                AssessmentPaper.plan_version == plan.version,
+            )
         )
-    )
-    if paper is None:
-        raise BizError(400, "方案已发布但缺少试卷快照，请联系管理员重新发布")
+        if paper is None:
+            raise BizError(400, "方案已发布但缺少试卷快照，请联系管理员重新发布")
+    else:
+        if plan.bank_snapshot_json is None:
+            raise BizError(400, "自适应方案缺少题库快照，请联系管理员重新发布")
+        strategy = dict(plan.strategy_json or {})
+        target_question_count = int(plan.total_question_count)
 
     key = (payload.idempotency_key or "").strip() or uuid.uuid4().hex
     existing = db.scalar(
@@ -508,7 +651,10 @@ def create_assignment(
     row = AssessmentAssignment(
         plan_id=plan.id,
         plan_version=plan.version,
-        paper_id=paper.id,
+        paper_id=paper.id if paper is not None else None,
+        mode=plan.mode,
+        strategy_snapshot_json=strategy,
+        target_question_count=target_question_count,
         purpose=plan.purpose,
         user_id=payload.user_id,
         talent_profile_id=payload.talent_profile_id,
@@ -607,6 +753,225 @@ def _paper_question(paper: AssessmentPaper, question_id: int) -> dict[str, Any]:
     raise BizError(400, "题目不属于当前试卷")
 
 
+def _assignment_context(db: Session, assignment: AssessmentAssignment) -> dict[str, Any]:
+    """固定模式取试卷快照，自适应模式取方案冻结信息，供评分、修分与能力分析。"""
+    if assignment.mode == "fixed":
+        paper = get_paper(db, assignment)
+        return {
+            "dimensions": parse_dimensions(list(paper.dimensions_json)),
+            "pass_score": float(paper.pass_score),
+            "plan_id": paper.plan_id,
+            "plan_version": paper.plan_version,
+            "paper_id": paper.id,
+            "strategy": None,
+        }
+    plan = get_plan(db, assignment.plan_id)
+    return {
+        "dimensions": parse_dimensions(list(plan.dimensions_json)),
+        "pass_score": float(plan.pass_score),
+        "plan_id": plan.id,
+        "plan_version": assignment.plan_version,
+        "paper_id": None,
+        "strategy": dict(assignment.strategy_snapshot_json or {}),
+    }
+
+
+def _selection_rows(db: Session, assignment_id: int) -> list[AssessmentSelection]:
+    return list(
+        db.scalars(
+            select(AssessmentSelection)
+            .where(AssessmentSelection.assignment_id == assignment_id)
+            .order_by(AssessmentSelection.sequence_no.asc())
+        )
+    )
+
+
+def _selection_answers(db: Session, assignment: AssessmentAssignment) -> list[AssessmentAnswer]:
+    """自适应交卷：为每道已出题目建/取答案行，未作答的由评分环节记 0。"""
+    existing = {
+        row.question_id: row
+        for row in db.scalars(
+            select(AssessmentAnswer).where(AssessmentAnswer.assignment_id == assignment.id)
+        )
+    }
+    for selection in _selection_rows(db, assignment.id):
+        if selection.question_id in existing:
+            continue
+        row = AssessmentAnswer(
+            assignment_id=assignment.id,
+            question_id=selection.question_id,
+            question_snapshot_json=dict(selection.question_snapshot_json or {}),
+            grading_status="pending",
+        )
+        db.add(row)
+        existing[selection.question_id] = row
+    db.flush()
+    return list(existing.values())
+
+
+def _issue_payload(
+    selection: AssessmentSelection,
+    *,
+    answered_count: int,
+    target_question_count: int,
+    done: bool = False,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "done": done,
+        "reason": reason,
+        "answered_count": answered_count,
+        "target_question_count": target_question_count,
+        "sequence_no": selection.sequence_no,
+    }
+    if not done:
+        payload["question"] = question_public_snapshot(dict(selection.question_snapshot_json or {}))
+    return payload
+
+
+def next_question(db: Session, assignment_id: int, user: User) -> dict[str, Any]:
+    """自适应逐题出题：幂等返回当前未答题；达到结束规则返回 done。"""
+    assignment = get_assignment(db, assignment_id, user)
+    if assignment.mode != "adaptive":
+        raise BizError(400, "固定模式请按试卷逐题作答")
+    if assignment.status == "cancelled":
+        raise BizError(400, "测评已撤销，不能作答")
+    target = int(assignment.target_question_count or 0)
+    if assignment.status == "completed" or assignment.status == "grading":
+        return {
+            "done": True,
+            "reason": "assignment_" + assignment.status,
+            "answered_count": len(_selection_rows(db, assignment.id)),
+            "target_question_count": target,
+        }
+    if assignment.status == "assigned":
+        assignment.status = "in_progress"
+        assignment.started_at = assignment.started_at or datetime.now()
+        db.commit()
+        db.refresh(assignment)
+
+    context = _assignment_context(db, assignment)
+    dimensions = context["dimensions"]
+    strategy = validate_strategy(
+        dict(assignment.strategy_snapshot_json or {}),
+        total_question_count=target,
+        dimension_count=len(dimensions),
+    )
+    selections = _selection_rows(db, assignment.id)
+    answers = {
+        row.question_id: row
+        for row in db.scalars(
+            select(AssessmentAnswer).where(AssessmentAnswer.assignment_id == assignment.id)
+        )
+    }
+    if selections and selections[-1].question_id not in answers:
+        return _issue_payload(
+            selections[-1],
+            answered_count=len(answers),
+            target_question_count=target,
+        )
+
+    asked = []
+    for selection in selections:
+        answer = answers.get(selection.question_id)
+        score = None
+        if answer is not None and answer.grading_status in {"graded", "manual"}:
+            score = float(answer.score or 0)
+        asked.append(
+            {
+                "question_id": selection.question_id,
+                "dimension_name": selection.dimension_name,
+                "difficulty": selection.difficulty,
+                "score": score,
+            }
+        )
+    pending_reason = ending_reason(
+        asked_count=len(selections),
+        covered_dimensions=sorted({item.dimension_name for item in selections}),
+        dimensions=dimensions,
+        strategy=strategy,
+        target_question_count=target,
+    )
+    if pending_reason:
+        return {
+            "done": True,
+            "reason": pending_reason,
+            "answered_count": len(answers),
+            "target_question_count": target,
+        }
+
+    plan = get_plan(db, assignment.plan_id)
+    bank_ids = [int(item) for item in (plan.bank_snapshot_json or {}).get("question_ids") or []]
+    rows = list(
+        db.scalars(
+            select(AssessmentQuestion).where(
+                AssessmentQuestion.id.in_(bank_ids),
+                AssessmentQuestion.status == "approved",
+            )
+        )
+    ) if bank_ids else _bank_candidates(db, plan)
+    candidates = [
+        {
+            "question_id": row.id,
+            "dimension_name": row.dimension_name,
+            "dimension_type": row.dimension_type,
+            "difficulty": row.difficulty,
+            "job_id": row.job_id,
+        }
+        for row in rows
+    ]
+    chosen = choose_next_question(
+        candidates=candidates,
+        asked=asked,
+        dimensions=dimensions,
+        strategy=strategy,
+        target_question_count=target,
+        seed=assignment.id,
+        plan_job_id=assignment.job_id or plan.job_id,
+    )
+    if chosen is None:
+        return {
+            "done": True,
+            "reason": "bank_exhausted",
+            "answered_count": len(answers),
+            "target_question_count": target,
+        }
+    question = db.get(AssessmentQuestion, int(chosen["question_id"]))
+    if question is None:
+        raise BizError(500, "选题结果对应的题目不存在，请联系管理员")
+    selection = AssessmentSelection(
+        assignment_id=assignment.id,
+        sequence_no=len(selections) + 1,
+        question_id=question.id,
+        dimension_name=question.dimension_name,
+        difficulty=question.difficulty,
+        question_snapshot_json=_paper_question_snapshot(question),
+        selection_reason_json=dict(chosen["reason"]),
+        strategy_snapshot_json=strategy,
+    )
+    db.add(selection)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        latest = _selection_rows(db, assignment.id)
+        if not latest:
+            raise BizError(409, "出题并发冲突，请刷新后重试") from exc
+        return _issue_payload(latest[-1], answered_count=len(answers), target_question_count=target)
+    db.refresh(selection)
+    return _issue_payload(selection, answered_count=len(answers), target_question_count=target)
+
+
+def list_selections(
+    db: Session, assignment_id: int, user: User
+) -> list[AssessmentSelection]:
+    """选题留痕：管理员始终可见；本人仅在答案开放后可见。"""
+    assignment = get_assignment(db, assignment_id, user)
+    if not is_admin(user) and not _answer_visible(assignment, user):
+        raise BizError(403, "选题留痕尚未开放")
+    return _selection_rows(db, assignment.id)
+
+
 def save_answer(
     db: Session,
     assignment_id: int,
@@ -617,8 +982,15 @@ def save_answer(
     assignment = get_assignment(db, assignment_id, user)
     if assignment.status in {"completed", "cancelled"}:
         raise BizError(400, "交卷后不能修改答案")
-    paper = get_paper(db, assignment)
-    snapshot = _paper_question(paper, question_id)
+    if assignment.mode == "adaptive":
+        selections = _selection_rows(db, assignment.id)
+        if not selections:
+            raise BizError(400, "请先获取题目再作答")
+        if selections[-1].question_id != question_id:
+            raise BizError(400, "只能作答当前题目；已出题的历史题目不可再修改")
+        snapshot = dict(selections[-1].question_snapshot_json or {})
+    else:
+        snapshot = _paper_question(get_paper(db, assignment), question_id)
     if snapshot["question_type"] == "single_choice":
         if not payload.selected_option:
             raise BizError(400, "单选题请选择答案")
@@ -658,6 +1030,9 @@ def save_answer(
     if assignment.status == "assigned":
         assignment.status = "in_progress"
         assignment.started_at = assignment.started_at or datetime.now()
+    # 自适应需要即时表现来调整下一题难度；单选为确定性评分，不调用模型
+    if assignment.mode == "adaptive" and snapshot.get("question_type") == "single_choice":
+        _grade_answer(row, default_grade_short_answer)
     db.commit()
     db.refresh(row)
     return row
@@ -753,12 +1128,13 @@ def visible_result(
 def _create_result(
     db: Session,
     assignment: AssessmentAssignment,
-    paper: AssessmentPaper,
+    context: dict[str, Any],
     answers: list[AssessmentAnswer],
     *,
     user_id: int | None,
 ) -> AssessmentResult:
-    dimensions = parse_dimensions(list(paper.dimensions_json))
+    dimensions = context["dimensions"]
+    pass_score = float(context["pass_score"])
     payload = [
         {
             "dimension_name": (row.question_snapshot_json or {}).get("dimension_name"),
@@ -766,7 +1142,14 @@ def _create_result(
         }
         for row in answers
     ]
-    computed = compute_result(dimensions, payload, float(paper.pass_score))
+    computed = compute_result(dimensions, payload, pass_score)
+    strategy = dict(context.get("strategy") or {})
+    ability = build_ability(
+        computed["dimension_scores"],
+        total_score=computed["total_score"],
+        pass_score=pass_score,
+        strategy=strategy,
+    )
     latest = db.scalar(
         select(AssessmentResult.version)
         .where(AssessmentResult.assignment_id == assignment.id)
@@ -778,15 +1161,19 @@ def _create_result(
         version=version,
         dimension_scores_json=computed["dimension_scores"],
         total_score=computed["total_score"],
-        pass_score=paper.pass_score,
+        pass_score=pass_score,
         passed=1 if computed["passed"] else 0,
         grading_snapshot_json={
             "prompt_version": GRADING_PROMPT_VERSION,
-            "paper_id": paper.id,
-            "plan_id": paper.plan_id,
-            "plan_version": paper.plan_version,
+            "mode": assignment.mode,
+            "paper_id": context["paper_id"],
+            "plan_id": context["plan_id"],
+            "plan_version": context["plan_version"],
+            "selected_question_count": len(answers) if assignment.mode == "adaptive" else None,
+            "strategy": strategy or None,
             "calculated_total_raw": computed["total_score_raw"],
         },
+        ability_json=ability,
         created_by=user_id,
     )
     db.add(result)
@@ -822,7 +1209,7 @@ def _create_result(
                 event_type="assessment_completed",
                 ref_type="assessment_result",
                 ref_id=result.id,
-                summary=f"完成员工能力测评（方案 {paper.plan_id}，总分 {computed['total_score']}）",
+                summary=f"完成员工能力测评（方案 {context['plan_id']}，总分 {computed['total_score']}）",
                 payload_json={"assignment_id": assignment.id, "version": version},
             )
         )
@@ -839,8 +1226,13 @@ def submit_assignment(
     if existing is not None and assignment.status == "completed":
         return {"assignment_id": assignment.id, "status": assignment.status, "result": existing}
 
-    paper = get_paper(db, assignment)
-    answers = _upsert_empty_answers(db, assignment, paper)
+    context = _assignment_context(db, assignment)
+    if assignment.mode == "adaptive":
+        if not _selection_rows(db, assignment.id):
+            raise BizError(400, "尚未出题，不能交卷")
+        answers = _selection_answers(db, assignment)
+    else:
+        answers = _upsert_empty_answers(db, assignment, get_paper(db, assignment))
     effective_grader = grader or default_grade_short_answer
     for row in answers:
         if row.grading_status == "pending":
@@ -859,7 +1251,7 @@ def submit_assignment(
             "result": None,
         }
 
-    result = _create_result(db, assignment, paper, answers, user_id=None)
+    result = _create_result(db, assignment, context, answers, user_id=None)
     assignment.status = "completed"
     assignment.completed_at = now
     db.commit()
@@ -874,12 +1266,15 @@ def retry_grading(
     assignment = get_assignment(db, assignment_id, user)
     if assignment.status == "cancelled":
         raise BizError(400, "测评已撤销")
-    paper = get_paper(db, assignment)
-    answers = list(
-        db.scalars(
-            select(AssessmentAnswer).where(AssessmentAnswer.assignment_id == assignment.id)
+    context = _assignment_context(db, assignment)
+    if assignment.mode == "adaptive":
+        answers = _selection_answers(db, assignment)
+    else:
+        answers = list(
+            db.scalars(
+                select(AssessmentAnswer).where(AssessmentAnswer.assignment_id == assignment.id)
+            )
         )
-    )
     effective_grader = grader or default_grade_short_answer
     retried = 0
     for row in answers:
@@ -895,7 +1290,7 @@ def retry_grading(
 
     result = _latest_result(db, assignment.id)
     if result is None:
-        result = _create_result(db, assignment, paper, answers, user_id=None)
+        result = _create_result(db, assignment, context, answers, user_id=None)
         assignment.completed_at = datetime.now()
     assignment.status = "completed"
     db.commit()
@@ -975,7 +1370,7 @@ def manual_score(
     assignment = db.get(AssessmentAssignment, assignment_id)
     if assignment is None:
         raise BizError(404, "测评任务不存在")
-    paper = get_paper(db, assignment)
+    context = _assignment_context(db, assignment)
     answer = db.scalar(
         select(AssessmentAnswer).where(
             AssessmentAnswer.assignment_id == assignment.id,
@@ -1017,7 +1412,7 @@ def manual_score(
         db.commit()
         return {"assignment": assignment, "result": None, "review_id": review.id,
                 "message": "仍有未完成评分的题目，暂不生成新结果版本"}
-    result = _create_result(db, assignment, paper, answers, user_id=user.id)
+    result = _create_result(db, assignment, context, answers, user_id=user.id)
     assignment.status = "completed"
     assignment.completed_at = assignment.completed_at or datetime.now()
     db.commit()
@@ -1057,6 +1452,7 @@ def public_result(result: AssessmentResult) -> dict[str, Any]:
         "total_score": float(result.total_score),
         "pass_score": float(result.pass_score),
         "passed": bool(result.passed),
+        "ability": dict(result.ability_json or {}) or None,
         "grading_snapshot": dict(result.grading_snapshot_json or {}),
         "created_at": result.created_at,
     }

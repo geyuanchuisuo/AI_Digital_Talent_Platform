@@ -1,6 +1,6 @@
-"""C 测评域 ORM（一期，`docs/modules/C/C模块接口与数据契约.md` §2）。
+"""C 测评域 ORM（`docs/modules/C/C模块接口与数据契约.md` §2/§3）。
 
-8 张表：题库、方案、试卷、分配、答案、结果、复核、复习事项。
+9 张表：题库、方案、试卷（固定模式）、分配、逐题选题留痕、答案、结果、复核、复习事项。
 - 时间列使用 C 自有可移植 Mixin（`CURRENT_TIMESTAMP` 默认 + 应用层 onupdate），
   不使用公共 `UpdatedAtMixin` 的 `ON UPDATE` DDL，保证 SQLite 测试可直接建表。
 - 表间不建外键，沿用一期 BIGINT 列风格；一致性由 service 层保证。
@@ -89,6 +89,11 @@ class AssessmentPlan(PKMixin, CTimestampMixin, Base):
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="draft", server_default=str_default("draft")
     )
+    mode: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="adaptive", server_default=str_default("adaptive")
+    )
+    strategy_json: Mapped[dict | None] = mapped_column(JSONDict, nullable=True)
+    bank_snapshot_json: Mapped[dict | None] = mapped_column(JSONDict, nullable=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default=text("1"))
     published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -129,7 +134,13 @@ class AssessmentAssignment(PKMixin, CTimestampMixin, Base):
 
     plan_id: Mapped[int] = mapped_column(Integer, nullable=False)
     plan_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    paper_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    # 固定模式绑定试卷快照；自适应模式按需出题，无纸卷
+    paper_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    mode: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="adaptive", server_default=str_default("adaptive")
+    )
+    strategy_snapshot_json: Mapped[dict | None] = mapped_column(JSONDict, nullable=True)
+    target_question_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     purpose: Mapped[str] = mapped_column(String(20), nullable=False)
     user_id: Mapped[int] = mapped_column(Integer, nullable=False)
     talent_profile_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -149,6 +160,26 @@ class AssessmentAssignment(PKMixin, CTimestampMixin, Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     cancelled_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class AssessmentSelection(PKMixin, CTimestampMixin, Base):
+    """自适应逐题选题留痕；按出题顺序记录题目快照、选题理由与策略上下文。"""
+
+    __tablename__ = "assessment_selections"
+    __table_args__ = (
+        UniqueConstraint("assignment_id", "sequence_no", name="uk_selection_sequence"),
+        UniqueConstraint("assignment_id", "question_id", name="uk_selection_question"),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    assignment_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    sequence_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    question_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    dimension_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    difficulty: Mapped[str] = mapped_column(String(20), nullable=False)
+    question_snapshot_json: Mapped[dict] = mapped_column(JSONDict, nullable=False)
+    selection_reason_json: Mapped[dict] = mapped_column(JSONDict, nullable=False)
+    strategy_snapshot_json: Mapped[dict] = mapped_column(JSONDict, nullable=False)
 
 
 class AssessmentAnswer(PKMixin, CTimestampMixin, Base):
@@ -191,6 +222,8 @@ class AssessmentResult(PKMixin, CTimestampMixin, Base):
     pass_score: Mapped[float] = mapped_column(DECIMAL(5, 2), nullable=False)
     passed: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     grading_snapshot_json: Mapped[dict] = mapped_column(JSONDict, nullable=False)
+    # 能力结构分析：雷达数据、维度档位、强项/短板与评级
+    ability_json: Mapped[dict | None] = mapped_column(JSONDict, nullable=True)
     created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 

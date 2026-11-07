@@ -58,7 +58,8 @@ from app.api.deps import get_current_user  # noqa: E402
 from app.core.errors import BizError, register_exception_handlers  # noqa: E402
 from app.database import Base, get_db  # noqa: E402
 from app.models import User  # noqa: E402
-from app.modules.assessments.registry import ALL_MODELS, ALL_ROUTERS  # noqa: E402
+from app.modules.assessments.registry import ALL_ROUTERS  # noqa: E402
+from app.modules.assessments.registry_models import ALL_MODELS  # noqa: E402
 
 USERS_DDL = """
 CREATE TABLE users (

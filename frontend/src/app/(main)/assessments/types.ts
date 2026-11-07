@@ -44,6 +44,15 @@ export interface AssessmentPlan {
   total_question_count: number;
   pass_score: number;
   status: string;
+  mode: 'adaptive' | 'fixed';
+  strategy?: {
+    min_question_count?: number;
+    max_question_count?: number;
+    start_difficulty?: string;
+    adjust_difficulty?: boolean;
+    rating_bands?: { level: string; min_score: number }[];
+  };
+  bank_snapshot?: { question_count: number | null; frozen_at: string | null };
   version: number;
   paper?: { id: number; question_count: number };
 }
@@ -55,6 +64,8 @@ export interface AssessmentAssignmentItem {
   user_id: number;
   job_title: string | null;
   status: 'assigned' | 'in_progress' | 'grading' | 'completed' | 'cancelled';
+  mode: 'adaptive' | 'fixed';
+  target_question_count: number | null;
   answers_open: boolean;
   published_result_version: number | null;
   attempt_no: number;
@@ -62,13 +73,16 @@ export interface AssessmentAssignmentItem {
 
 export interface AssignmentQuestion {
   question_id: number;
+  sequence_no?: number;
   dimension_name: string;
+  difficulty?: string;
   question_type: 'single_choice' | 'short_answer';
   stem: string;
   options: string[];
   correct_answer?: string | null;
   reference_points?: string | null;
   scoring_guideline?: string | null;
+  selection_reason?: Record<string, unknown> | null;
   review_completed?: boolean;
   answer: {
     selected_option: string | null;
@@ -80,10 +94,38 @@ export interface AssignmentQuestion {
 
 export interface AssessmentDetail {
   assignment: AssessmentAssignmentItem;
-  paper: { id: number; question_count: number; pass_score: number };
+  mode: 'adaptive' | 'fixed';
+  paper: { id: number; question_count: number; pass_score: number } | null;
   questions: AssignmentQuestion[];
   result: AssessmentResultOut | null;
   answers_visible: boolean;
+}
+
+export interface AdaptiveQuestion {
+  question_id: number;
+  dimension_name: string;
+  difficulty: string;
+  question_type: 'single_choice' | 'short_answer';
+  stem: string;
+  options: string[];
+}
+
+export interface NextQuestionOut {
+  done: boolean;
+  reason: string | null;
+  answered_count: number;
+  target_question_count: number;
+  sequence_no?: number;
+  question?: AdaptiveQuestion;
+}
+
+export interface AbilityOut {
+  radar: { dimensions: string[]; scores: number[]; max_score: number };
+  dimension_levels: { name: string; score: number; weight: number; question_count: number; level: string }[];
+  strengths: string[];
+  gaps: string[];
+  rating: { level: string; min_score: number; total_score: number; pass_score: number };
+  summary: string;
 }
 
 export interface DimensionScore {
@@ -100,6 +142,7 @@ export interface AssessmentResultOut {
   total_score: number;
   pass_score: number;
   passed: boolean;
+  ability?: AbilityOut | null;
   published: boolean;
   answers_open: boolean;
 }
