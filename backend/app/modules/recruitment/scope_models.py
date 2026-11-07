@@ -13,12 +13,12 @@ from sqlalchemy import DateTime, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
-from app.models.base import MYSQL_TABLE_OPTIONS, PKMixin, PK_TYPE
+from app.models.base import MYSQL_TABLE_OPTIONS, PKMixin, PK_TYPE, UpdatedAtMixin
 
 SCOPE_TYPES = ("department", "project", "all")  # 授权范围类型（V2.6：部门/项目/全量）
 
 
-class UserScopeGrant(PKMixin, Base):
+class UserScopeGrant(PKMixin, UpdatedAtMixin, Base):
     """跨部门/跨项目授权记录：granter 授予 grantee 对 scope 的数据范围。"""
 
     __tablename__ = "user_scope_grants"
