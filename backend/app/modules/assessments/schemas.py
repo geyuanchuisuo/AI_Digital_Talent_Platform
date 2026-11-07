@@ -35,6 +35,7 @@ class QuestionCreateRequest(_StrictModel):
     dimension_type: DimensionType = "professional"
     difficulty: Difficulty = "medium"
     question_type: QuestionType = "single_choice"
+    knowledge_point: str | None = Field(default=None, max_length=200)
     stem: str = Field(min_length=1)
     options: list[str] | None = Field(default=None, max_length=8)
     correct_answer: str | None = None
@@ -50,6 +51,7 @@ class QuestionUpdateRequest(_StrictModel):
     dimension_type: DimensionType | None = None
     difficulty: Difficulty | None = None
     question_type: QuestionType | None = None
+    knowledge_point: str | None = Field(default=None, max_length=200)
     stem: str | None = Field(default=None, min_length=1)
     options: list[str] | None = Field(default=None, max_length=8)
     correct_answer: str | None = None

@@ -20,13 +20,27 @@ from app.modules.assessments.models import (
     AssessmentReviewItem,
     AssessmentSelection,
 )
+from app.modules.interviews.ai_models import (
+    AiInterviewEvent,
+    AiInterviewQuestion,
+    AiInterviewSession,
+)
 from app.modules.interviews.models import InterviewFeedback, InterviewRound, InterviewRoundEvent
+from app.modules.inventory.models import (
+    InventoryDevelopmentPlan,
+    InventoryDispute,
+    InventoryEvent,
+    InventoryReview,
+    InventoryTalentPool,
+)
 from app.modules.training.models import (
     TrainingAttendance,
     TrainingCourse,
+    TrainingEnrollment,
     TrainingFeedback,
     TrainingFeedbackTheme,
     TrainingGrowthEvent,
+    TrainingLearningEvidence,
     TrainingLearningRecord,
     TrainingPlan,
     TrainingPlanItem,
@@ -47,6 +61,9 @@ ALL_MODELS: tuple[type, ...] = (
     InterviewRound,
     InterviewFeedback,
     InterviewRoundEvent,
+    AiInterviewSession,
+    AiInterviewQuestion,
+    AiInterviewEvent,
     TrainingCourse,
     TrainingSession,
     TrainingAttendance,
@@ -57,4 +74,11 @@ ALL_MODELS: tuple[type, ...] = (
     TrainingPlanVersion,
     TrainingLearningRecord,
     TrainingGrowthEvent,
+    TrainingEnrollment,
+    TrainingLearningEvidence,
+    InventoryReview,
+    InventoryTalentPool,
+    InventoryDispute,
+    InventoryDevelopmentPlan,
+    InventoryEvent,
 )

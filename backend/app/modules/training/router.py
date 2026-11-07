@@ -26,6 +26,9 @@ from app.modules.training.schemas import (
     CourseCreateRequest,
     CourseUpdateRequest,
     DraftRequest,
+    EnrollmentDecideRequest,
+    EnrollmentRequest,
+    EvidenceSubmitRequest,
     FeedbackNoteRequest,
     FeedbackSubmitRequest,
     PlanCreateRequest,
@@ -68,10 +71,12 @@ def _item_out(
         "reason": item.reason,
         "sort_order": item.sort_order,
         "learning": {
+            "record_id": record.id if record else None,
             "status": record.status if record else "not_started",
             "note": record.note if record else None,
             "reported_at": record.reported_at if record else None,
             "is_self_reported": bool(record.is_self_reported) if record else True,
+            "formal_completed": bool(record.formal_completed) if record else False,
         },
         "feedback": feedback,
     }
@@ -304,6 +309,82 @@ def update_feedback_note(
 ):
     row = service.update_feedback_note(db, course_id, payload, admin=user)
     return ok(_course_out(row))
+
+
+# ---------------------------------------------------------------- 报名审批/候补
+
+
+@router.post("/enrollments", summary="员工报名课程")
+def post_enrollment(
+    payload: EnrollmentRequest,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    row = service.apply_enrollment(db, payload, user=user)
+    return ok({"id": row.id, "status": row.status, "expires_at": row.expires_at.isoformat() if row.expires_at else None})
+
+
+@router.post("/enrollments/{enrollment_id}/decide", summary="审批报名")
+def post_enrollment_decide(
+    enrollment_id: int,
+    payload: EnrollmentDecideRequest,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    row = service.decide_enrollment(db, enrollment_id, payload, admin=user)
+    return ok({"id": row.id, "status": row.status})
+
+
+@router.get("/enrollments", summary="报名列表")
+def get_enrollments(
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+    course_id: int | None = None,
+):
+    rows = service.list_enrollments(db, course_id=course_id, user=user)
+    return ok([
+        {"id": r.id, "course_id": r.course_id, "employee_user_id": r.employee_user_id,
+         "priority": r.priority, "status": r.status,
+         "expires_at": r.expires_at.isoformat() if r.expires_at else None, "note": r.note}
+        for r in rows
+    ])
+
+
+# ---------------------------------------------------------------- 防挂机/有效学习证据
+
+
+@router.post("/learning-evidence", summary="提交学习证据")
+def post_evidence(
+    payload: EvidenceSubmitRequest,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    row = service.submit_evidence(db, payload, user=user)
+    return ok({"id": row.id, "score": row.score})
+
+
+@router.post("/learning-records/{record_id}/confirm-completion", summary="管理员认定正式完成")
+def post_confirm_completion(
+    record_id: int,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    row = service.confirm_formal_completion(db, record_id, admin=user)
+    return ok({"id": row.id, "formal_completed": bool(row.formal_completed)})
+
+
+@router.get("/learning-records/{record_id}/evidence", summary="学习证据列表")
+def get_evidence(
+    record_id: int,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    rows = service.list_evidence(db, record_id, user=user)
+    return ok([
+        {"id": r.id, "evidence_type": r.evidence_type, "score": r.score,
+         "verified_by": r.verified_by, "payload": r.payload_json}
+        for r in rows
+    ])
 
 
 # ---------------------------------------------------------------- 草稿（静态路径需先注册）
