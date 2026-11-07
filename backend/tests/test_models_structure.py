@@ -314,6 +314,12 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "id", "review_id", "event_type", "operator_id", "note",
         "payload_json", "created_at", "updated_at",
     },
+    # ---- D 通知中心（T-D03，契约 docs/modules/D/通知契约.md §2）----
+    "notifications": {
+        "id", "event_type", "ref_type", "ref_id", "actor_user_id",
+        "recipient_user_id", "payload_json", "idempotency_key", "status",
+        "failure_reason", "created_at", "sent_at", "read_at",
+    },
 }
 
 EXPECTED_UNIQUE: dict[str, set[str]] = {
@@ -343,6 +349,7 @@ EXPECTED_UNIQUE: dict[str, set[str]] = {
     "training_plan_versions": {"uk_plan_version"},
     "training_learning_records": {"uk_learning_item_employee"},
     "inventory_development_plans": {"uk_idp_review"},
+    "notifications": {"uk_notifications_idempotency"},
 }
 
 EXPECTED_INDEXES: dict[str, set[str]] = {
@@ -359,6 +366,7 @@ EXPECTED_INDEXES: dict[str, set[str]] = {
     "screen_results": {"idx_batch_verdict", "idx_screen_job_result", "idx_talent"},
     "match_batches": {"idx_match_job"},
     "match_results": {"idx_match_talent"},
+    "notifications": {"idx_notifications_recipient", "idx_notifications_ref"},
 }
 
 
@@ -366,10 +374,10 @@ def ddl(model) -> str:
     return str(CreateTable(model.__table__).compile(dialect=DIALECT))
 
 
-def test_exactly_51_tables_and_no_phase2_table():
-    assert len(TABLE_NAMES) == 51
-    assert len(MODEL_CLASSES) == 51
-    assert len(Base.metadata.tables) == 51
+def test_exactly_52_tables_and_no_phase2_table():
+    assert len(TABLE_NAMES) == 52
+    assert len(MODEL_CLASSES) == 52
+    assert len(Base.metadata.tables) == 52
     assert set(TABLE_NAMES) == set(EXPECTED_COLUMNS)
     # D-7 缓办：一期不建 llm_score_cache
     assert "llm_score_cache" not in Base.metadata.tables
