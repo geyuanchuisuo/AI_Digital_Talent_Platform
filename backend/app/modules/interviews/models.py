@@ -22,6 +22,7 @@ class InterviewRound(PKMixin, CTimestampMixin, Base):
     candidate_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     talent_profile_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     job_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    application_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     job_title: Mapped[str | None] = mapped_column(String(100), nullable=True)
     round_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     round_name: Mapped[str] = mapped_column(String(50), nullable=False)

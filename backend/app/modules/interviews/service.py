@@ -72,6 +72,7 @@ def create_round(db: Session, payload: RoundCreateRequest, *, admin: User) -> In
         candidate_user_id=payload.candidate_user_id,
         talent_profile_id=payload.talent_profile_id,
         job_id=payload.job_id,
+        application_id=payload.application_id,
         job_title=(payload.job_title or "").strip() or None,
         round_no=payload.round_no,
         round_name=payload.round_name.strip(),

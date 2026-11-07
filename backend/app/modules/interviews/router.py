@@ -24,6 +24,7 @@ def _round_out(row: InterviewRound, user) -> dict[str, Any]:
         "candidate_user_id": row.candidate_user_id,
         "talent_profile_id": row.talent_profile_id,
         "job_id": row.job_id,
+        "application_id": row.application_id,
         "job_title": row.job_title,
         "round_no": row.round_no,
         "round_name": row.round_name,

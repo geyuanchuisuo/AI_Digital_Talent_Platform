@@ -1,6 +1,6 @@
 # C 模块接口与数据契约
 
-日期：2026-11-06；更新：2026-11-07（自适应测评）；维护角色：C；状态：实施中（C 自有代码与测试已落地后更新验证结论）。
+日期：2026-11-06；更新：2026-11-07（自适应测评 + 一期扩表：盘点/AI 面试间/报名审批/学习证据）；维护角色：C；状态：实施中（C 自有代码与测试已落地后更新验证结论）。
 依据：[一期需求细化](一期需求细化.md)、[需求细化与确认](需求细化与确认.md) C-Q01～15、[跨模块配合清单](跨模块配合清单.md)。
 
 本文件只描述 C 自有实现，不用“已完成/已验收”描述待 A/B/D 接入的部分。所有接口统一使用现有 `{code,message,data}` 信封，成功由 `app.core.response.ok()` 返回；错误由 `BizError` 抛出。
@@ -16,11 +16,13 @@
 
 ## 2. 数据表（C 归属，模型位于 backend/app/modules）
 
-22 张表，均使用 `app.database.Base`、`PKMixin`、C 自有可移植时间 Mixin（`created_at/updated_at` 默认 `CURRENT_TIMESTAMP`，应用层维护 `updated_at`，避免 MySQL `ON UPDATE` DDL 阻断 SQLite 测试）。
+32 张表，均使用 `app.database.Base`、`PKMixin`、C 自有可移植时间 Mixin（`created_at/updated_at` 默认 `CURRENT_TIMESTAMP`，应用层维护 `updated_at`，避免 MySQL `ON UPDATE` DDL 阻断 SQLite 测试）。
 
 测评：`assessment_questions`、`assessment_plans`、`assessment_papers`、`assessment_assignments`、`assessment_selections`、`assessment_answers`、`assessment_results`、`assessment_reviews`、`assessment_review_items`。
 面试：`interview_rounds`、`interview_feedback`、`interview_round_events`。
-培训：`training_courses`、`training_sessions`、`training_attendances`、`training_feedbacks`、`training_feedback_themes`、`training_plans`、`training_plan_items`、`training_plan_versions`、`training_learning_records`、`training_growth_events`。
+AI 面试间：`ai_interview_sessions`、`ai_interview_questions`、`ai_interview_events`。
+培训：`training_courses`、`training_sessions`、`training_attendances`、`training_feedbacks`、`training_feedback_themes`、`training_plans`、`training_plan_items`、`training_plan_versions`、`training_learning_records`、`training_growth_events`、`training_enrollments`、`training_learning_evidence`。
+盘点：`inventory_reviews`、`inventory_talent_pools`、`inventory_disputes`、`inventory_development_plans`、`inventory_events`。
 
 关键字段与语义：
 
@@ -98,6 +100,25 @@
 - `POST /courses/{id}/sessions`、`GET /courses/{id}/sessions`、`POST /sessions/{id}/attendance`、`GET /sessions/{id}/attendance`（管理员：期次与实际出勤）
 - `GET /courses/{id}/feedback/mine`（员工本人状态）、`POST /courses/{id}/feedback`、`PATCH /courses/{id}/feedback`、`POST /courses/{id}/feedback/withdraw`（员工本人，窗口内）
 - `GET /courses/{id}/feedback/summary`、`POST /courses/{id}/feedback-themes/refresh`、`PUT /courses/{id}/feedback-note`（管理员：匿名汇总、主题归纳、统一改进说明）
+- `POST /enrollments`、`GET /enrollments`、`POST /enrollments/{id}/decide`（员工报名必修/选修，管理员审批/候补，24h 未确认超时释放）
+- `POST /learning-evidence`、`GET /learning-records/{id}/evidence`（员工提交学习证据：视频心跳/测验/出勤等；列表本人或管理员可见）
+- `POST /learning-records/{id}/confirm-completion`（管理员依据有效证据认定正式完成，无证据返回 400）
+
+AI 面试间 `/api/ai-interviews`：
+
+- `POST /sessions`、`GET /sessions`、`GET /sessions/{id}`（管理员创建/查看面试会话）
+- `POST /sessions/{id}/start`、`POST /sessions/{id}/finish`（候选人启动/结束；结束时计算 `overall_score` 为已评分题目均分）
+- `POST /sessions/{id}/questions`、`GET /sessions/{id}/questions`（管理员添加题目，含题干与期望要点；按 `sequence_no` 排序）
+- `POST /questions/{id}/answer`（候选人作答；真实模型评分，失败标记 `failed` 可重试）、`POST /questions/{id}/retry-judge`（重评）
+
+盘点 `/api/inventory`（F10 九宫格/人才池）：
+
+- `POST /reviews`、`GET /reviews`、`GET /reviews/{id}`、`PATCH /reviews/{id}`、`POST /reviews/{id}/submit`、`POST /reviews/{id}/confirm`（管理员创建盘点；绩效+HR 潜力计算 `grid_cell`；提交/确认）
+- `POST /pools`、`GET /pools`、`POST /pools/{id}/decide`（人才池提名/审批：nominated/approved/rejected/removed）
+- `POST /reviews/{id}/disputes`、`POST /disputes/{id}/respond`（员工异议、HR 回复）
+- `PUT /reviews/{id}/idp`（个人发展计划，review 唯一）
+- `GET /summary`（管理员部门匿名汇总；单格 <5 条隐藏到 `_under_threshold`）
+- 可见性：员工本人查看不返回 `grid_cell` 与内部评分；非管理员查看汇总 403。
 
 ## 5. 后端执行与依赖边界
 
@@ -106,9 +127,16 @@
 - 表注册与路由注册需 A 集成：`backend/app/models/__init__.py` 导入 C 模型（或 init_db 显式导入）、`backend/app/main.py` 引入并 `include_router`。C 提供 `backend/app/modules/assessments/registry.py` 供 A 一次性引用。
 - 本地测试使用 SQLite 持久化 + 注入式模型替身；MySQL、真实模型、真实浏览器联调未执行前不标验收通过。
 
-## 6. 一期明确不做
+## 6. 一期范围（2026-11-07 用户裁决：原"一期不做"清单全部纳入一期）
 
-AI 面试、音视频/监考/人脸/防挂机、面试总分与自动推进、候选人培训、培训自动分配/报名、课程审批候补、九宫格/人才池、自动人事决策、有效学时证明。固定试卷保留为兼容模式，不作为自适应替代；在线运行时自动生成并直接使用未审核题目不做。
+固定试卷保留为兼容模式，不作为自适应替代；在线运行时不自动生成并直接使用未审核题目（生成题一律 `pending` 待人工审核）。其余原"不做"项全部纳入一期实施：
+
+- AI 面试间：在线考试与结构化问答组织记录、AI 评判；音视频/情绪推断涉及个人信息的须先完成告知授权与隐私评审后启用（隐私评审前不上线音视频）。
+- 防挂机/有效学习证据：学习进度须由服务端可校验的学习证据支撑，自报与正式完成分离。
+- 课程审批/候补/名额占位/24h 超时：员工可自主报名必修/选修课，审批占位、候补队列、24h 未确认超时释放。
+- 九宫格/人才池（F10）：绩效（最近 HR 确认周期）+ 潜力（经理初评、HR 审核）→ 九宫格；人才池进出审批、年度/提前复核、员工异议、个人发展计划、部门匿名汇总 <5 隐藏、导出审计。
+- 有效学时证明：按课程配置的完成条件（学习进度/线下出勤/测验）认定正式完成，无证据不认定。
+- 面试总分与自动招聘推进仍不做（人工面试不计总分、不自动推进招聘状态）；自动人事决策不做；候选人培训不做（候选人入职后由 A 改员工角色后再分配）。
 
 ## 7. 培训评价规则（D-34 / REQ-TRN-001 AC-6，2026-11-06 纳入一期）
 
@@ -122,8 +150,8 @@ AI 面试、音视频/监考/人脸/防挂机、面试总分与自动推进、�
 
 ## 8. 本轮实现与验证状态（2026-11-07）
 
-- 已实现：`backend/app/modules/assessments`（模型/自适应策略与选题/评分/服务/路由/registry/模型出题）、`interviews`、`training` 三域与 22 张表；前端 `frontend/src/app/(main)/{assessments,interviews,target,training}` 页面、类型与接口封装，含自适应逐题答题与能力雷达。
-- 已验证：`$env:PYTHONPATH="backend"; python -m unittest discover -s tests/C -p "test_*.py" -v` 运行 42 项全部通过（SQLite 内存库 + FastAPI TestClient + 注入式评分/出题/草稿/主题替身，覆盖固定组卷、自适应策略校验、覆盖优先与难度升降、任务种子分散与不重复、题量/维度结束规则、发布题库快照与不足拒绝、逐题幂等出题、单选即时评分、选题留痕权限、能力雷达/评级、模型出题 503 不写入、交卷幂等、评分失败重试、结果版本/公开、答案开放、面试可见性裁剪、培训分配/修订/自报/成长事件、评价资格/7 天窗口/跨期合并/撤回/5 份门槛/主题支持）。
+- 已实现：`backend/app/modules/assessments`（模型/自适应策略与选题/评分/服务/路由/registry/模型出题）、`interviews`（人工面试 + AI 面试间）、`training`（课程/计划/评价 + 报名审批/候补 + 学习证据）、`inventory`（F10 九宫格/人才池/异议/IDP）四域与 32 张表；前端 `frontend/src/app/(main)/{assessments,interviews,target,training}` 页面、类型与接口封装，含自适应逐题答题与能力雷达（盘点/AI 面试间/报名审批前端页待补）。
+- 已验证：`$env:PYTHONPATH="backend"; python -m unittest discover -s tests/C -p "test_*.py" -v` 运行 49 项全部通过（SQLite 内存库 + FastAPI TestClient + 注入式评分/出题/草稿/主题替身，覆盖固定组卷、自适应策略校验、覆盖优先与难度升降、任务种子分散与不重复、题量/维度结束规则、发布题库快照与不足拒绝、逐题幂等出题、单选即时评分、选题留痕权限、能力雷达/评级、模型出题 503 不写入、交卷幂等、评分失败重试、结果版本/公开、答案开放、面试可见性裁剪、培训分配/修订/自报/成长事件、评价资格/7 天窗口/跨期合并/撤回/5 份门槛/主题支持、培训报名审批/24h 超时、学习证据与正式完成门槛、盘点九宫格计算与可见性/异议/IDP/人才池、AI 面试间会话/题目/作答/评分/重试/总分）。
 - 已验证：`npm run typecheck` 与 `npm run build`（frontend）均通过（Next.js 静态页 `/assessments` 正常产出）。
-- 未验证：MySQL/Alembic 实际迁移（C_0002 依赖 A 的 C_0001 链，本地无链文件与 MySQL 环境）、真实 LLM 评分/出题/主题归纳、真实 JWT 与账号权限、真实浏览器页面（自适应答题与雷达图未实机查看）、A 的 `main.py`/`models/__init__.py`/`AppShell` 集成。上述未验证项不得表述为验收通过。
+- 未验证：MySQL/Alembic 实际迁移（C_0003 依赖 A 的 C_0001/C_0002 链，本地无链文件与 MySQL 环境）、真实 LLM 评分/出题/主题归纳/AI 面试评分、真实 JWT 与账号权限、真实浏览器页面（自适应答题与雷达图未实机查看）、A 的 `main.py`/`models/__init__.py`/`AppShell` 集成。上述未验证项不得表述为验收通过。
 - 接入方式：A 可 `from app.modules.assessments.registry import ALL_MODELS, ALL_ROUTERS`，在 `models/__init__.py` 导入模型（或 `init_db` 显式导入）并在 `main.py` 逐个 `include_router`；具体请求见 `docs/requests/C/20261106-A-公共集成接入请求.md`。

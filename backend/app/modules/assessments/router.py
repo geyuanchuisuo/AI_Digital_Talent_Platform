@@ -46,6 +46,7 @@ def _question_out(row: AssessmentQuestion) -> dict[str, Any]:
         "dimension_type": row.dimension_type,
         "difficulty": row.difficulty,
         "question_type": row.question_type,
+        "knowledge_point": row.knowledge_point,
         "stem": row.stem,
         "options": list(row.options_json or []),
         "correct_answer": row.correct_answer,
