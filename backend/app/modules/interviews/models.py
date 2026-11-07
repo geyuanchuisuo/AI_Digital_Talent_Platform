@@ -7,11 +7,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
-from app.models.base import JSONDict, JSONList, MYSQL_TABLE_OPTIONS, PKMixin, str_default
+from app.models.base import JSONDict, JSONList, MYSQL_TABLE_OPTIONS, PK_TYPE, PKMixin, str_default
 from app.modules.assessments.models import CTimestampMixin
 
 
@@ -22,7 +22,10 @@ class InterviewRound(PKMixin, CTimestampMixin, Base):
     candidate_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     talent_profile_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     job_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    application_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 关联 A 的招聘申请（applications.id，同人多岗位独立申请）；RESTRICT 防误删申请丢面试记录
+    application_id: Mapped[int | None] = mapped_column(
+        PK_TYPE, ForeignKey("applications.id"), nullable=True
+    )
     job_title: Mapped[str | None] = mapped_column(String(100), nullable=True)
     round_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     round_name: Mapped[str] = mapped_column(String(50), nullable=False)

@@ -8,11 +8,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
-from app.models.base import JSONDict, MYSQL_TABLE_OPTIONS, PKMixin, str_default
+from app.models.base import JSONDict, MYSQL_TABLE_OPTIONS, PK_TYPE, PKMixin, str_default
 from app.modules.assessments.models import CTimestampMixin
 
 
@@ -23,7 +23,10 @@ class AiInterviewSession(PKMixin, CTimestampMixin, Base):
     candidate_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     talent_profile_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     job_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    application_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 关联 A 的招聘申请（applications.id）；RESTRICT 防误删申请丢面试记录
+    application_id: Mapped[int | None] = mapped_column(
+        PK_TYPE, ForeignKey("applications.id"), nullable=True
+    )
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="pending", server_default=str_default("pending")
     )
