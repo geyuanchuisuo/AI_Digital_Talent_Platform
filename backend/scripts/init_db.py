@@ -31,12 +31,23 @@ import app.models  # noqa: E402,F401 - 触发 34 张表注册到 Base.metadata
 from app.config import settings  # noqa: E402
 from app.database import Base, SessionLocal, engine  # noqa: E402
 from app.models import JobProfile, SysSetting, TalentProfile, User  # noqa: E402
+from app.modules.system.models import SysMenu, SysRole, SysUserRole  # noqa: E402
 from app.models.enums import SETTING_TASK_CONCURRENCY  # noqa: E402
 
 SEED_USERNAME = "hr"
 SEED_PASSWORD = "hr123456"
 SEED_JOB_TITLE = "高级后端工程师"
 SEED_PERSONAL_USERNAME = "personal"
+SEED_PERSONAL_PASSWORD = "personal123456"
+# 8c：基础角色（RBAC 最小集；data_scope 三值见 system/models.py）
+SEED_ROLES = (
+    ("system_admin", "系统管理员", "all"),
+    ("hr", "HR/招聘", "all"),
+    ("dept_manager", "部门经理", "dept"),
+    ("trainer", "培训管理员/讲师", "dept"),
+    ("employee", "员工", "self"),
+    ("candidate", "候选人", "self"),
+)
 SEED_PERSONAL_PASSWORD = "personal123456"
 
 
@@ -151,6 +162,41 @@ def seed(session) -> list[str]:
             f"user:{SEED_PERSONAL_USERNAME}(role=personal, person_id={demo_profile.id}) + talent_profile:演示个人用户"
         )
 
+    created.extend(seed_system_roles(session))
+    created.extend(_seed_job_and_setting(session))
+    return created
+
+
+def seed_system_roles(session) -> list[str]:
+    """基础角色与绑定（8c：RBAC 最小集，幂等按 code；独立函数便于单测 mock）。"""
+    created: list[str] = []
+    role_ids: dict[str, int] = {}
+    for code, name, scope in SEED_ROLES:
+        exists = session.scalar(select(func.count()).select_from(SysRole).where(SysRole.code == code))
+        if not exists:
+            role = SysRole(code=code, name=name, data_scope=scope, status="active")
+            session.add(role)
+            session.flush()
+            created.append(f"sys_role:{code}")
+        role_ids[code] = session.scalar(select(SysRole.id).where(SysRole.code == code))
+
+    # hr 账号绑定 hr 角色（sys_user_roles 多职责最小映射；重复执行幂等）
+    hr_user_id = session.scalar(select(User.id).where(User.username == SEED_USERNAME))
+    if hr_user_id and role_ids.get("hr"):
+        bound = session.scalar(
+            select(func.count()).select_from(SysUserRole).where(
+                SysUserRole.user_id == hr_user_id, SysUserRole.role_id == role_ids["hr"]
+            )
+        )
+        if not bound:
+            session.add(SysUserRole(user_id=hr_user_id, role_id=role_ids["hr"]))
+            created.append("sys_user_role:hr->hr")
+    return created
+
+
+def _seed_job_and_setting(session) -> list[str]:
+    """岗位与运行配置种子（原主 seed 尾部；拆分事故恢复——2026-11-08）。"""
+    created: list[str] = []
     job_count = session.scalar(
         select(func.count())
         .select_from(JobProfile)
