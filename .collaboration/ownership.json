@@ -177,6 +177,7 @@
       "docs/源码接入与需求决策.md",
       "frontend/src/app/(main)/job-profiles/**",
       "frontend/src/app/(main)/match/**",
+      "frontend/src/app/(person)/**",
       "frontend/src/app/login/**"
     ],
     "B": [
