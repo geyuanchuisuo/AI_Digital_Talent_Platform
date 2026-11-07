@@ -134,6 +134,9 @@ def build_dump(conn) -> tuple[str, dict[str, int]]:
     with conn.cursor() as cur:
         cur.execute("SHOW TABLES")
         tables = [row[0] for row in cur.fetchall()]
+        # alembic_version 是迁移状态表，不属于业务数据：不入备份，
+        # 恢复后由 init_db stamp / alembic 重新对齐（见 docs/modules/A/迁移链说明.md）
+        tables = [t for t in tables if t != "alembic_version"]
         for table in sorted(tables):
             cur.execute(f"SHOW CREATE TABLE `{table}`")
             ddl = cur.fetchone()[1]
@@ -186,6 +189,8 @@ def restore(sql_path: Path, database: str) -> dict[str, int]:
                 cur.execute(stmt)
             cur.execute("SHOW TABLES")
             tables = [row[0] for row in cur.fetchall()]
+            # 与 dump 侧一致：alembic_version 不计入业务表统计
+            tables = [t for t in tables if t != "alembic_version"]
             counts = {}
             for table in tables:
                 cur.execute(f"SELECT COUNT(*) FROM `{table}`")

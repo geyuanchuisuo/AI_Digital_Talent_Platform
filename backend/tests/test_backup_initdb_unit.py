@@ -21,14 +21,14 @@ if str(SCRIPTS_DIR) not in sys.path:
 import backup_db  # noqa: E402
 import init_db  # noqa: E402
 
-from app.models import JobProfile, SysSetting, User  # noqa: E402
+from app.models import JobProfile, SysSetting, TalentProfile, User  # noqa: E402
 from app.models.enums import SETTING_TASK_CONCURRENCY  # noqa: E402
 
 
 class FakeSession:
-    """按 seed() 中三次 scalar 的固定顺序返回 count；记录 add/commit。"""
+    """按 seed() 中四次 scalar 的固定顺序返回 count（hr/personal/job/setting）。"""
 
-    def __init__(self, counts: tuple[int, int, int]):
+    def __init__(self, counts: tuple[int, int, int, int]):
         self._counts = iter(counts)
         self.added: list[object] = []
         self.committed = False
@@ -39,19 +39,38 @@ class FakeSession:
     def add(self, obj):
         self.added.append(obj)
 
+    def flush(self):
+        """seed 用 flush 取自增 id；假 session 不持久化，id 保持 ORM 默认（None）。
+
+        真实绑定（personal.person_id == 主档自增 id）由 test_db_integration_t03
+        的真实库用例验证；本测试只核对 seed 的调用结构与字段赋值。
+        """
+        return None
+
     def commit(self):
         self.committed = True
 
 
-def test_seed_creates_all_three_items_on_empty_db():
-    session = FakeSession((0, 0, 0))
+def test_seed_creates_all_items_on_empty_db():
+    session = FakeSession((0, 0, 0, 0))
     created = init_db.seed(session)
-    assert len(created) == 3
+    assert len(created) == 4
     assert session.committed
 
-    user = next(x for x in session.added if isinstance(x, User))
+    user = next(x for x in session.added if isinstance(x, User) and x.username == "hr")
+    personal_user = next(
+        x for x in session.added if isinstance(x, User) and x.username == "personal"
+    )
+    profile = next(x for x in session.added if isinstance(x, TalentProfile))
     job = next(x for x in session.added if isinstance(x, JobProfile))
     setting = next(x for x in session.added if isinstance(x, SysSetting))
+
+    # 个人端演示账号：role=personal；person_id 绑定值由 t03 真实库用例验证
+    # （假 session 不持久化，flush 后 ORM 对象 id 仍为 None）
+    assert personal_user.role == "personal"
+    assert personal_user.person_id is None or isinstance(personal_user.person_id, int)
+    assert bcrypt.checkpw(b"personal123456", personal_user.password_hash.encode("ascii"))
+    assert profile.name == "演示个人用户"
 
     assert user.username == "hr" and user.role == "hr" and user.is_active == 1
     assert bcrypt.checkpw(b"hr123456", user.password_hash.encode("ascii"))
@@ -75,14 +94,14 @@ def test_seed_creates_all_three_items_on_empty_db():
 
 def test_seed_is_idempotent_when_everything_exists():
     """§9 第 4 条：重复执行跳过已存在数据，不删除不覆盖。"""
-    session = FakeSession((1, 1, 1))
+    session = FakeSession((1, 1, 1, 1))
     assert init_db.seed(session) == []
     assert session.added == []
     assert session.committed
 
 
 def test_seed_only_fills_missing_items():
-    session = FakeSession((1, 0, 1))
+    session = FakeSession((1, 1, 0, 1))
     created = init_db.seed(session)
     assert len(created) == 1 and "job_profile" in created[0]
     assert len(session.added) == 1 and isinstance(session.added[0], JobProfile)

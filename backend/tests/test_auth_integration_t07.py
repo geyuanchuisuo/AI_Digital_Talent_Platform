@@ -75,7 +75,9 @@ def test_seed_account_login_ok(client: TestClient):
     assert body["code"] == 0 and body["message"] == "success"
     data = body["data"]
     assert data["expires_in"] == settings.jwt_expire_hours * 3600
-    assert set(data["user"]) == {"id", "username", "display_name", "role"}
+    # 2026-11-07 起含 person_id（REQ-B-20261106-02 贯通；hr 账号为 null）
+    assert set(data["user"]) == {"id", "username", "display_name", "role", "person_id"}
+    assert data["user"]["person_id"] is None
     assert data["user"]["username"] == "hr"
     assert data["token"].count(".") == 2  # JWT 三段式
 
