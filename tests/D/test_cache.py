@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import socket
 from urllib.parse import urlparse
 
@@ -133,3 +134,25 @@ async def test_real_redis_roundtrip():
         assert await client.delete("data", "real:1") is True
     finally:
         await client.aclose()
+
+
+@pytest.mark.skipif(not _redis_reachable(REDIS_TEST_URL), reason="测试 Redis 未运行（6399）")
+def test_client_rebinds_across_event_loops():
+    """跨事件循环回归（T-D01b 切片暴露）：redis.asyncio 客户端绑定创建时的 loop，
+    脚本/测试里多次 asyncio.run 复用同一 CacheClient 会 "Event loop is closed"——
+    修复后按运行循环自动重建连接，两次独立 loop 均可读写。"""
+    client = CacheClient(REDIS_TEST_URL)
+
+    async def one(i: int):
+        await client.set("data", "loop:switch", {"i": i}, ttl=30)
+        return await client.get("data", "loop:switch")
+
+    try:
+        assert asyncio.run(one(1)) == {"i": 1}
+        assert asyncio.run(one(2)) == {"i": 2}  # 新 loop：重建后仍可用
+        assert client.stats()["errors"] == 0  # 未发生降级误判
+    finally:
+        try:
+            asyncio.run(client.aclose())
+        except Exception:  # noqa: BLE001 - aclose 跨 loop 容错
+            pass

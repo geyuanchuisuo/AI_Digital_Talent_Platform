@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -48,6 +49,7 @@ class CacheClient:
         self._enabled = bool(url)
         self._external = client
         self._redis: Any | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._unavailable_until = 0.0
         self._probe_cooldown = probe_cooldown
         self._stats = {"hits": 0, "misses": 0, "degraded_ops": 0, "errors": 0}
@@ -66,7 +68,10 @@ class CacheClient:
     def _client(self) -> Any:
         if self._external is not None:
             return self._external
-        if self._redis is None:
+        # redis.asyncio 客户端绑定创建时的事件循环：跨循环复用（脚本多次
+        # asyncio.run / 测试新建 loop）会 "Event loop is closed"。按运行循环重建。
+        loop = asyncio.get_running_loop()
+        if self._redis is None or self._loop is not loop:
             import redis.asyncio as aioredis
 
             self._redis = aioredis.Redis.from_url(
@@ -75,6 +80,7 @@ class CacheClient:
                 socket_connect_timeout=0.5,
                 decode_responses=True,
             )
+            self._loop = loop
         return self._redis
 
     @staticmethod

@@ -164,3 +164,8 @@ app.include_router(recruitment_router)
 from app.modules.notifications.router import router as notifications_router  # noqa: E402
 
 app.include_router(notifications_router)
+
+# D 问数切片（T-D01b）：/api/analytics 活跃岗位数 + SSE 进度端点首用（2026-11-07 用户指令直接落地）
+from app.modules.analytics.router import router as analytics_router  # noqa: E402
+
+app.include_router(analytics_router)

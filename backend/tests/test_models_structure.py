@@ -325,6 +325,11 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "id", "graph_name", "thread_id", "status", "error",
         "finished_at", "created_at", "updated_at",
     },
+    # ---- D 问数切片（T-D01b）----
+    "analytics_query_snapshots": {
+        "id", "metric_id", "params_json", "data_time", "result_json",
+        "source", "cache_hit", "created_by", "created_at",
+    },
 }
 
 EXPECTED_UNIQUE: dict[str, set[str]] = {
@@ -374,6 +379,7 @@ EXPECTED_INDEXES: dict[str, set[str]] = {
     "match_results": {"idx_match_talent"},
     "notifications": {"idx_notifications_recipient", "idx_notifications_ref"},
     "workflow_engine_runs": {"idx_workflow_engine_runs_status"},
+    "analytics_query_snapshots": {"idx_aqs_metric_time", "idx_aqs_user"},
 }
 
 
@@ -381,10 +387,10 @@ def ddl(model) -> str:
     return str(CreateTable(model.__table__).compile(dialect=DIALECT))
 
 
-def test_exactly_53_tables_and_no_phase2_table():
-    assert len(TABLE_NAMES) == 53
-    assert len(MODEL_CLASSES) == 53
-    assert len(Base.metadata.tables) == 53
+def test_exactly_54_tables_and_no_phase2_table():
+    assert len(TABLE_NAMES) == 54
+    assert len(MODEL_CLASSES) == 54
+    assert len(Base.metadata.tables) == 54
     assert set(TABLE_NAMES) == set(EXPECTED_COLUMNS)
     # D-7 缓办：一期不建 llm_score_cache
     assert "llm_score_cache" not in Base.metadata.tables
