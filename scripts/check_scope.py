@@ -1,4 +1,9 @@
-"""Check changed paths against role ownership; not an identity/security boundary."""
+"""Check changed paths against role ownership; not an identity/security boundary.
+
+Integration mode (--integration or local git config collab.integration=1) allows
+user-authorized full integration commits to include other owners' files; readonly
+sources, blocked segments, secret files, symlinks and master development still block.
+"""
 import argparse
 import json
 from pathlib import Path, PurePosixPath
@@ -60,6 +65,23 @@ def owner_of(path, policy):
     return None
 
 
+def protected_reason(path, policy):
+    """Reason a path stays blocked even in integration mode, or None."""
+    normalize(path)
+    folded = path.casefold()
+    parts = folded.split('/')
+    if any(p in policy['blocked_segments'] for p in parts):
+        return 'blocked segment'
+    name = parts[-1]
+    if name == '.env' or (name.startswith('.env.') and name not in ('.env.example', '.env.local.example')):
+        return 'secret env file'
+    if name.endswith(('.pem', '.key', '.p12')):
+        return 'secret key file'
+    if any(matches(folded, p.casefold()) for p in policy['readonly']):
+        return 'readonly source'
+    return None
+
+
 def parse_diff(data):
     fields = data.decode('utf-8', errors='strict').split('\0')
     if fields and not fields[-1]:
@@ -76,8 +98,9 @@ def parse_diff(data):
     return paths
 
 
-def check_paths(paths, actor, policy):
+def check_paths(paths, actor, policy, integration=False):
     errors = []
+    warnings = []
     for path in sorted(set(paths)):
         owner = owner_of(path, policy)
         governance = policy.get('governance', {})
@@ -88,13 +111,22 @@ def check_paths(paths, actor, policy):
                  or any(matches(path, rule) for rule in governance.get('shared_paths', [])))
         )
         if owner != actor and not shared_governance:
+            if integration:
+                reason = protected_reason(path, policy) if owner is None else None
+                if reason:
+                    errors.append(f'{path}: {reason}')
+                else:
+                    warnings.append(f'{path}: owner={owner or "UNASSIGNED"}, actor={actor}')
+                continue
             errors.append(f'{path}: owner={owner or "READONLY/UNASSIGNED"}, actor={actor}')
-    return errors
+    return errors, warnings
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--actor', choices=ACTORS)
+    parser.add_argument('--integration', action='store_true',
+                        help='User-authorized integration commit: cross-owner paths allowed, protected paths still blocked.')
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--staged', action='store_true')
     mode.add_argument('--base', help='Compare base...HEAD (committed branch changes)')
@@ -107,6 +139,11 @@ def main():
             actor = value.stdout.decode().strip()
         if actor not in ACTORS:
             raise ScopeError('Set collab.actor to A/B/C/D/MASTER or pass --actor; never guess your role.')
+        integration = args.integration
+        if not integration:
+            flag = subprocess.run(['git', '-C', str(root), 'config', '--local', '--get', 'collab.integration'],
+                                  capture_output=True).stdout.decode().strip().lower()
+            integration = flag in ('1', 'true', 'yes', 'on')
         policy = json.loads((root / '.collaboration/ownership.json').read_text(encoding='utf-8'))
         branch = git(root, 'branch', '--show-current').decode().strip()
         if branch == 'master':
@@ -127,7 +164,9 @@ def main():
             entries = git(root, 'ls-files', '--stage', '-z')
             symlinks = [r.split(b'\t', 1)[1].decode('utf-8') for r in entries.split(b'\0') if r.startswith(b'120000 ')]
             new_paths = git(root, 'diff', '--cached', '--no-ext-diff', '--no-renames', '--diff-filter=A', '--name-only', '-z')
-        errors = check_paths(paths, actor, policy)
+        errors, warnings = check_paths(paths, actor, policy, integration)
+        for warning in warnings:
+            print(f'Integration note (cross-owner, authorized): {warning}')
         added = set(new_paths.decode('utf-8').split('\0'))
         records = [p for p in paths if p.startswith(f'docs/updates/{actor}/')
                    and p.endswith('.md') and PurePosixPath(p).name != 'AGENTS.md']
@@ -142,7 +181,8 @@ def main():
             errors.extend(f'Symlink not permitted: {p}' for p in symlinks)
         if errors:
             raise ScopeError('\n'.join(errors))
-        print(f'Scope OK: actor={actor}, changed_paths={len(set(paths))}. No runtime tests implied.')
+        mode_note = ', integration mode' if integration else ''
+        print(f'Scope OK: actor={actor}, changed_paths={len(set(paths))}{mode_note}. No runtime tests implied.')
         return 0
     except (ScopeError, OSError, ValueError, UnicodeError) as exc:
         print(f'Scope check failed:\n{exc}', file=sys.stderr)

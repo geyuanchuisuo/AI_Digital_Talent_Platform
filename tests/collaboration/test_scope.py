@@ -23,7 +23,8 @@ class PolicyTests(unittest.TestCase):
                      'scripts/check_scope.py', 'tests/collaboration/test_scope.py',
                      'backend/app/modules/training/AGENTS.md']:
             self.assertEqual(scope.owner_of(path, POLICY), 'A', path)
-            self.assertEqual(scope.check_paths([path], 'MASTER', POLICY), [], path)
+            errors, _ = scope.check_paths([path], 'MASTER', POLICY)
+            self.assertEqual(errors, [], path)
         for path in ['docs/updates/MASTER/new.md', 'docs/requests/MASTER/new.md',
                      'docs/modules/MASTER/role.md', 'tasks/MASTER.md']:
             self.assertEqual(scope.owner_of(path, POLICY), 'MASTER', path)
@@ -34,13 +35,15 @@ class PolicyTests(unittest.TestCase):
                      'backend/app/modules/training/service.py',
                      'backend/app/tasks/runner.py', 'docs/updates/A/old.md',
                      'tasks/C.md', 'docs/modules/C/一期需求细化.md']:
-            self.assertTrue(scope.check_paths([path], 'MASTER', POLICY), path)
+            errors, _ = scope.check_paths([path], 'MASTER', POLICY)
+            self.assertTrue(errors, path)
 
     def test_master_still_rejects_private_readonly_and_unknown_paths(self):
         for path in ['.env', '.collaboration/.env', '.git/config',
                      'docs/imports/AGENTS.md', 'docs/requirements/sources/AGENTS.md',
                      'docs/AGENTS.override.md', 'unassigned.md']:
-            self.assertTrue(scope.check_paths([path], 'MASTER', POLICY), path)
+            errors, _ = scope.check_paths([path], 'MASTER', POLICY)
+            self.assertTrue(errors, path)
 
     def test_imported_next_routes_have_one_business_owner(self):
         examples = {
@@ -53,7 +56,8 @@ class PolicyTests(unittest.TestCase):
         for path, expected in examples.items():
             self.assertEqual(scope.owner_of(path, POLICY), expected, path)
             for other in set('ABCD') - {expected}:
-                self.assertTrue(scope.check_paths([path], other, POLICY), (path, other))
+                errors, _ = scope.check_paths([path], other, POLICY)
+                self.assertTrue(errors, (path, other))
 
     def test_only_named_environment_templates_are_allowed(self):
         for path in ['backend/.env.example', 'frontend/.env.local.example']:
@@ -84,9 +88,11 @@ class PolicyTests(unittest.TestCase):
                          f'frontend/src/features/{module}/Page.tsx',
                          f'docs/updates/{actor}/20261106-note.md', f'tasks/{actor}.md',
                          f'backend/migrations/versions/{actor}_001_example.py']:
-                self.assertEqual(scope.check_paths([path], actor, POLICY), [])
+                errors, _ = scope.check_paths([path], actor, POLICY)
+                self.assertEqual(errors, [])
                 for other in set('ABCD') - {actor}:
-                    self.assertTrue(scope.check_paths([path], other, POLICY), (other, path))
+                    errors, _ = scope.check_paths([path], other, POLICY)
+                    self.assertTrue(errors, (other, path))
 
     def test_private_and_unknown_paths_rejected_for_everyone(self):
         for path in ['.env', 'backend/.env.local', 'data/report.pdf', '.idea/misc.xml',
@@ -94,11 +100,21 @@ class PolicyTests(unittest.TestCase):
                      'frontend/src/features/talents2/Page.tsx', 'new_unknown.py',
                      'backend/app/core/authentication/x.py']:
             for actor in 'ABCD':
-                self.assertTrue(scope.check_paths([path], actor, POLICY), (actor, path))
+                errors, _ = scope.check_paths([path], actor, POLICY)
+                self.assertTrue(errors, (actor, path))
+
+    def test_integration_mode_allows_cross_owner_but_blocks_protected(self):
+        errors, warnings = scope.check_paths(['backend/app/main.py'], 'D', POLICY, integration=True)
+        self.assertEqual(errors, [])
+        self.assertTrue(warnings, 'integration mode should warn on cross-owner paths')
+        for path in ['.env', 'docs/requirements/sources/需求文档.md', 'data/report.pdf']:
+            errors, _ = scope.check_paths([path], 'D', POLICY, integration=True)
+            self.assertTrue(errors, path)
 
     def test_governance_cannot_be_rewritten_by_module_owner(self):
         self.assertEqual(scope.owner_of('backend/app/modules/talents/AGENTS.md', POLICY), 'A')
-        self.assertTrue(scope.check_paths(['backend/app/modules/talents/AGENTS.md'], 'B', POLICY))
+        errors, _ = scope.check_paths(['backend/app/modules/talents/AGENTS.md'], 'B', POLICY)
+        self.assertTrue(errors)
         self.assertIsNone(scope.owner_of('backend/app/modules/talents/AGENTS.override.md', POLICY))
 
     def test_unsafe_paths_and_migration_prefixes(self):
@@ -111,8 +127,10 @@ class PolicyTests(unittest.TestCase):
         raw = b'R100\x00backend/app/modules/talents/old.py\x00backend/app/modules/training/new.py\x00'
         paths = scope.parse_diff(raw)
         self.assertEqual(len(paths), 2)
-        self.assertTrue(scope.check_paths(paths, 'B', POLICY))
-        self.assertTrue(scope.check_paths(paths, 'C', POLICY))
+        errors, _ = scope.check_paths(paths, 'B', POLICY)
+        self.assertTrue(errors)
+        errors, _ = scope.check_paths(paths, 'C', POLICY)
+        self.assertTrue(errors)
 
 
 @unittest.skipUnless(shutil.which('git'), 'Git required')
