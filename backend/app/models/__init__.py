@@ -1,4 +1,4 @@
-"""ORM 实体统一入口（T-03 + 裁决 C-04，34 张表 = 13 公共 + 21 C 模块）。
+"""ORM 实体统一入口（T-03 + 裁决 C-04，35 张表 = 13 公共 + 22 C 模块）。
 
 `import app.models` 即把全部表注册到 `app.database.Base.metadata`，
 `scripts/init_db.py` 与备份脚本据此建表/导出，不需要各任务自行 import 单表。
@@ -43,6 +43,7 @@ from app.modules.assessments.models import (
     AssessmentResult,
     AssessmentReview,
     AssessmentReviewItem,
+    AssessmentSelection,
 )
 from app.modules.interviews.models import (
     InterviewFeedback,
@@ -84,6 +85,7 @@ MODEL_CLASSES: tuple[type[Base], ...] = (
     AssessmentResult,
     AssessmentReview,
     AssessmentReviewItem,
+    AssessmentSelection,
     InterviewRound,
     InterviewFeedback,
     InterviewRoundEvent,
@@ -101,8 +103,8 @@ MODEL_CLASSES: tuple[type[Base], ...] = (
 
 TABLE_NAMES: tuple[str, ...] = tuple(model.__tablename__ for model in MODEL_CLASSES)  # type: ignore[attr-defined]
 
-assert len(TABLE_NAMES) == 34, f"一期固定 34 张表（13 公共 + 21 C），实际 {len(TABLE_NAMES)}"
-assert len(set(TABLE_NAMES)) == 34, "表名重复"
+assert len(TABLE_NAMES) == 35, f"一期固定 35 张表（13 公共 + 22 C），实际 {len(TABLE_NAMES)}"
+assert len(set(TABLE_NAMES)) == 35, "表名重复"
 assert "llm_score_cache" not in TABLE_NAMES, "llm_score_cache 是 D-7 缓办项，一期不建"
 assert "upload_batches" not in TABLE_NAMES, (
     "批次不是实体表（决策 D-M）：靠 resume_files.upload_batch_id 聚合，"
