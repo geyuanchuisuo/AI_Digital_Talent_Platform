@@ -141,3 +141,9 @@ app.include_router(screen_api.router)
 app.include_router(match_api.router)
 # ⚠️ talents 的 `/duplicates` 必须排在将来 T-18 的 `/{talent_id}` 之前（api/talents.py 内已注明）
 app.include_router(talents_api.router)
+
+# C 模块三域路由（测评 / 人工面试 / 培训）：由 C 的 registry 单一来源提供（C 请求 §5.2）
+from app.modules.assessments.registry import ALL_ROUTERS as _C_ROUTERS  # noqa: E402
+
+for _c_router in _C_ROUTERS:
+    app.include_router(_c_router)

@@ -9,10 +9,13 @@
  */
 
 import {
+  AuditOutlined,
   BarChartOutlined,
   FileSearchOutlined,
   LogoutOutlined,
   ProfileOutlined,
+  ReadOutlined,
+  SolutionOutlined,
   TeamOutlined,
   UserOutlined,
 } from '@ant-design/icons';
@@ -29,6 +32,10 @@ const MENU_ITEMS = [
   { key: '/talents', icon: <TeamOutlined />, label: '人才画像' },
   { key: '/job-profiles', icon: <ProfileOutlined />, label: '岗位条件' },
   { key: '/match', icon: <BarChartOutlined />, label: '岗位匹配' },
+  // C 模块三域（C 请求 §5.3，页面已位于 app/(main)/ 下）
+  { key: '/assessments', icon: <AuditOutlined />, label: '岗位测评' },
+  { key: '/interviews', icon: <SolutionOutlined />, label: '人工面试' },
+  { key: '/training', icon: <ReadOutlined />, label: '培训成长' },
 ];
 
 export default function AppShell({ children }: { children: React.ReactNode }) {

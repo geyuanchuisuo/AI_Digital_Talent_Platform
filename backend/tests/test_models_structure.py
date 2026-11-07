@@ -1,7 +1,10 @@
-"""L1 单元测试 · 13 张表结构逐字段对照 `docs/数据库设计.md` v1.2（T-03 验收点）。
+"""L1 单元测试 · 34 张表结构逐字段对照（T-03 验收点 + 裁决 C-04）。
 
 不触真实 MySQL：用 MySQL dialect 编译 DDL + 检查 metadata，纯内存执行。
-期望列名/约束名在下方硬编码，来源为数据库设计 v1.2 各表小节，不反向从模型推导。
+期望列名/约束名在下方硬编码，不反向从模型推导：
+- 公共 13 表来源：`docs/数据库设计.md` v1.2 各表小节；
+- C 的 21 表来源：C 模块契约 `docs/modules/C/C模块接口与数据契约.md` 与
+  `backend/app/modules/*/models.py`（裁决 C-04 纳入一期，A 于 2026-11-07 注册）。
 """
 
 from __future__ import annotations
@@ -31,6 +34,21 @@ from app.models import (
 from app.models.enums import DEGREE_VALUES, PARSE_TASK_STATUSES, VECTOR_STATUSES
 
 DIALECT = mysql.dialect()
+
+# C 域表名前缀（测评 / 人工面试 / 培训）：updated_at 为应用层维护（CTimestampMixin），
+# 与公共 UpdatedAtMixin 的差异已发 docs/requests/A/ 请求 C 对齐。
+C_DOMAIN_TABLES = frozenset(
+    t for t in (
+        "assessment_questions", "assessment_plans", "assessment_papers",
+        "assessment_assignments", "assessment_answers", "assessment_results",
+        "assessment_reviews", "assessment_review_items",
+        "interview_rounds", "interview_feedback", "interview_round_events",
+        "training_courses", "training_sessions", "training_attendances",
+        "training_feedbacks", "training_feedback_themes", "training_plans",
+        "training_plan_items", "training_plan_versions",
+        "training_learning_records", "training_growth_events",
+    )
+)
 
 # 逐表期望列名（含 id / created_at / updated_at），来源：数据库设计 v1.2 §3~§6
 EXPECTED_COLUMNS: dict[str, set[str]] = {
@@ -100,6 +118,111 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "hard_fail_reason", "dimension_scores_json", "hits_json", "misses_json",
         "reason", "created_at",
     },
+    # ---- C 模块 21 表（测评 8 / 人工面试 3 / 培训 10，裁决 C-04）----
+    "assessment_questions": {
+        "id", "job_id", "job_version", "job_title", "dimension_name",
+        "dimension_type", "difficulty", "question_type", "stem", "options_json",
+        "correct_answer", "reference_points", "scoring_guideline", "status",
+        "created_by", "updated_by", "created_at", "updated_at",
+    },
+    "assessment_plans": {
+        "id", "purpose", "job_id", "job_title", "job_version", "dimensions_json",
+        "total_question_count", "pass_score", "difficulty_structure_json",
+        "status", "version", "published_at", "created_by", "updated_by",
+        "created_at", "updated_at",
+    },
+    "assessment_papers": {
+        "id", "plan_id", "plan_version", "purpose", "job_id", "job_title",
+        "question_count", "total_score", "pass_score", "dimensions_json",
+        "questions_json", "grading_rule_json", "created_by",
+        "created_at", "updated_at",
+    },
+    "assessment_assignments": {
+        "id", "plan_id", "plan_version", "paper_id", "purpose", "user_id",
+        "talent_profile_id", "job_id", "job_title", "status",
+        "published_result_version", "answers_open", "attempt_no",
+        "idempotency_key", "started_at", "submitted_at", "completed_at",
+        "cancelled_reason", "created_by", "created_at", "updated_at",
+    },
+    "assessment_answers": {
+        "id", "assignment_id", "question_id", "question_snapshot_json",
+        "selected_option", "answer_text", "is_correct", "score",
+        "grading_status", "failure_reason", "graded_by", "graded_at",
+        "created_at", "updated_at",
+    },
+    "assessment_results": {
+        "id", "assignment_id", "version", "dimension_scores_json", "total_score",
+        "pass_score", "passed", "grading_snapshot_json", "created_by",
+        "created_at", "updated_at",
+    },
+    "assessment_reviews": {
+        "id", "assignment_id", "result_id", "reviewer_id", "reason",
+        "before_json", "after_json", "created_at", "updated_at",
+    },
+    "assessment_review_items": {
+        "id", "assignment_id", "question_id", "user_id", "is_completed",
+        "completed_at", "question_snapshot_json", "created_at", "updated_at",
+    },
+    "interview_rounds": {
+        "id", "candidate_user_id", "talent_profile_id", "job_id", "job_title",
+        "round_no", "round_name", "scheduled_at", "mode", "location_or_link",
+        "interviewer_user_ids_json", "status", "internal_note",
+        "client_request_id", "version", "created_by", "updated_by",
+        "created_at", "updated_at",
+    },
+    "interview_feedback": {
+        "id", "round_id", "interviewer_user_id", "evaluation", "evidence",
+        "strengths", "weaknesses", "recommendation", "version",
+        "created_at", "updated_at",
+    },
+    "interview_round_events": {
+        "id", "round_id", "event_type", "before_json", "after_json",
+        "operator_id", "note", "created_at", "updated_at",
+    },
+    "training_courses": {
+        "id", "title", "description", "material_url", "dimension_names_json",
+        "status", "version", "feedback_note", "feedback_note_at",
+        "created_by", "updated_by", "created_at", "updated_at",
+    },
+    "training_sessions": {
+        "id", "course_id", "instructor_name", "starts_at", "ends_at",
+        "created_by", "created_at", "updated_at",
+    },
+    "training_attendances": {
+        "id", "session_id", "employee_user_id", "attended_at",
+        "created_at", "updated_at",
+    },
+    "training_feedbacks": {
+        "id", "course_id", "employee_user_id", "session_id", "content_score",
+        "instructor_score", "comment", "status", "submitted_at", "withdrawn_at",
+        "created_at", "updated_at",
+    },
+    "training_feedback_themes": {
+        "id", "course_id", "theme", "feedback_count", "prompt_version",
+        "generated_at", "created_at", "updated_at",
+    },
+    "training_plans": {
+        "id", "employee_user_id", "talent_profile_id", "job_id",
+        "target_job_title", "source", "status", "input_snapshot_json",
+        "gap_summary", "version", "created_by", "updated_by",
+        "created_at", "updated_at",
+    },
+    "training_plan_items": {
+        "id", "plan_id", "plan_version", "course_id", "course_snapshot_json",
+        "dimension_name", "reason", "sort_order", "created_at", "updated_at",
+    },
+    "training_plan_versions": {
+        "id", "plan_id", "version", "status", "snapshot_json", "note",
+        "created_by", "created_at", "updated_at",
+    },
+    "training_learning_records": {
+        "id", "plan_item_id", "employee_user_id", "status", "note",
+        "reported_at", "is_self_reported", "created_at", "updated_at",
+    },
+    "training_growth_events": {
+        "id", "employee_user_id", "talent_profile_id", "event_type", "ref_type",
+        "ref_id", "summary", "payload_json", "created_at", "updated_at",
+    },
 }
 
 EXPECTED_UNIQUE: dict[str, set[str]] = {
@@ -112,6 +235,19 @@ EXPECTED_UNIQUE: dict[str, set[str]] = {
     "talent_duplicates": {"uk_parsed_resume"},
     "screen_results": {"uk_screen_batch_talent"},
     "match_results": {"uk_match_batch_talent"},
+    # ---- C 模块唯一键（来自 app/modules/*/models.py，2026-11-07 注册时提取）----
+    "assessment_papers": {"uk_paper_plan_version"},
+    "assessment_assignments": {"uk_assignment_idempotency"},
+    "assessment_answers": {"uk_answer_assignment_question"},
+    "assessment_results": {"uk_result_assignment_version"},
+    "assessment_review_items": {"uk_review_assignment_question_user"},
+    "interview_feedback": {"uk_feedback_round"},
+    "training_attendances": {"uk_attendance_session_employee"},
+    "training_feedbacks": {"uk_feedback_course_employee"},
+    "training_feedback_themes": {"uk_feedback_theme_course"},
+    "training_plan_items": {"uk_plan_version_course"},
+    "training_plan_versions": {"uk_plan_version"},
+    "training_learning_records": {"uk_learning_item_employee"},
 }
 
 EXPECTED_INDEXES: dict[str, set[str]] = {
@@ -135,10 +271,10 @@ def ddl(model) -> str:
     return str(CreateTable(model.__table__).compile(dialect=DIALECT))
 
 
-def test_exactly_13_tables_and_no_phase2_table():
-    assert len(TABLE_NAMES) == 13
-    assert len(MODEL_CLASSES) == 13
-    assert len(Base.metadata.tables) == 13
+def test_exactly_34_tables_and_no_phase2_table():
+    assert len(TABLE_NAMES) == 34
+    assert len(MODEL_CLASSES) == 34
+    assert len(Base.metadata.tables) == 34
     assert set(TABLE_NAMES) == set(EXPECTED_COLUMNS)
     # D-7 缓办：一期不建 llm_score_cache
     assert "llm_score_cache" not in Base.metadata.tables
@@ -156,7 +292,13 @@ def test_columns_match_database_design(model):
 
 @pytest.mark.parametrize("model", MODEL_CLASSES, ids=lambda m: m.__tablename__)
 def test_primary_key_and_timestamps(model):
-    """§1 总体约定：BIGINT UNSIGNED AI 主键 + created_at DEFAULT CURRENT_TIMESTAMP。"""
+    """§1 总体约定：BIGINT UNSIGNED AI 主键 + created_at DEFAULT CURRENT_TIMESTAMP。
+
+    已知差异（2026-11-07 集成时发现，已发请求 C 对齐）：C 域 21 表用
+    `CTimestampMixin`，updated_at 由应用层维护、无 `ON UPDATE CURRENT_TIMESTAMP`；
+    公共 13 表用 `UpdatedAtMixin`，由 MySQL 维护。对齐前按各自口径断言，
+    C 收敛到公共 mixin 后本测试自动收紧（C_DOMAIN_TABLES 判定会随表名沿用）。
+    """
     table = model.__table__
     pk = list(table.primary_key.columns)
     assert len(pk) == 1 and pk[0].name == "id"
@@ -165,7 +307,11 @@ def test_primary_key_and_timestamps(model):
     assert "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT" in text, model.__tablename__
     assert "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP" in text
     if "updated_at" in EXPECTED_COLUMNS[model.__tablename__]:
-        assert "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" in text
+        if model.__tablename__ in C_DOMAIN_TABLES:
+            # C 域表：应用层维护 updated_at（CTimestampMixin），暂无 ON UPDATE
+            assert "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP" in text
+        else:
+            assert "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" in text
     else:
         assert "updated_at" not in text
     assert "ENGINE=InnoDB CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci" in text
@@ -198,6 +344,29 @@ def test_unique_constraints_by_name():
     )
     assert unique_cols("match_results", "uk_match_batch_talent") == (
         "match_batch_id", "talent_profile_id",
+    )
+    # C 模块唯一键列组合（2026-11-07 注册时从模型提取）
+    assert unique_cols("assessment_papers", "uk_paper_plan_version") == ("plan_id", "plan_version")
+    assert unique_cols("assessment_assignments", "uk_assignment_idempotency") == ("idempotency_key",)
+    assert unique_cols("assessment_answers", "uk_answer_assignment_question") == ("assignment_id", "question_id")
+    assert unique_cols("assessment_results", "uk_result_assignment_version") == ("assignment_id", "version")
+    assert unique_cols("assessment_review_items", "uk_review_assignment_question_user") == (
+        "assignment_id", "question_id", "user_id",
+    )
+    assert unique_cols("interview_feedback", "uk_feedback_round") == ("round_id",)
+    assert unique_cols("training_attendances", "uk_attendance_session_employee") == (
+        "session_id", "employee_user_id",
+    )
+    assert unique_cols("training_feedbacks", "uk_feedback_course_employee") == (
+        "course_id", "employee_user_id",
+    )
+    assert unique_cols("training_feedback_themes", "uk_feedback_theme_course") == ("course_id", "theme")
+    assert unique_cols("training_plan_items", "uk_plan_version_course") == (
+        "plan_id", "plan_version", "course_id",
+    )
+    assert unique_cols("training_plan_versions", "uk_plan_version") == ("plan_id", "version")
+    assert unique_cols("training_learning_records", "uk_learning_item_employee") == (
+        "plan_item_id", "employee_user_id",
     )
 
 

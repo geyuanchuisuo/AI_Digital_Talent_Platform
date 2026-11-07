@@ -17,6 +17,9 @@ SQLAlchemy>=2.0,<3
 PyMySQL>=1.1,<2
 cryptography>=42
 
+# --- 迁移链（G1 公共前置，2026-11-07；命名约定 A_*/C_*/B_*/D_* 见 docs/modules/A/迁移链说明.md）---
+alembic>=1.13,<2
+
 # --- 鉴权 ---
 python-jose[cryptography]>=3.3,<4
 bcrypt>=4.0,<5

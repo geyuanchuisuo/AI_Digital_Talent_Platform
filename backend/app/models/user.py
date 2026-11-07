@@ -20,7 +20,13 @@ from app.models.base import (
 
 
 class User(PKMixin, UpdatedAtMixin, Base):
-    """§3.1 users：登录名唯一；role 为二期 RBAC 扩展点。"""
+    """§3.1 users：登录名唯一；role 为二期 RBAC 扩展点。
+
+    ⏳ `person_id` 绑定列（B 契约 2026-11-07：复用 `talent_profiles.id`，同
+    `PK_TYPE` 整数、可空、个人账号唯一）已按 B 契约设计，但**延后落地**：
+    C 的 `tests/C/c_harness.py` 手写 users SQLite DDL 需先同步该列（见
+    docs/requests/A/ 请求），避免集成破坏 C 测试夹具。加列时必须走迁移链。
+    """
 
     __tablename__ = "users"
     __table_args__ = (
