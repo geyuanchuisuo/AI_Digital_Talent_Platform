@@ -1,25 +1,43 @@
 /**
- * 问数页（T-D01b 切片 + T-D10 多维分析/自动出图/决策建议）。
+ * 问数页（T-D01b 切片 + T-D10 多维分析/自动出图/决策建议 + T-D12 反馈入口）。
  *
  * 口径（docs/modules/A/指标口径交付.md §1）：活跃岗位数 = is_active=1 且按 title
  * 去重取最新 version。支持按部门分组（group_by），图表数据由后端从同一表格派生
  * （图表数据与表格一致），解读分段带 fact/inference 标记（机器可区分）。
+ * T-D12：结果卡「标记不准确」入口（仅结果创建者，幂等）+ 管理侧反馈列表。
  */
 
 'use client';
 
-import { ReloadOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { FlagOutlined, ReloadOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { Bar } from '@ant-design/charts';
-import { Button, Card, Empty, List, Space, Statistic, Switch, Tag, Typography } from 'antd';
+import {
+  Button,
+  Card,
+  Empty,
+  Form,
+  Input,
+  List,
+  Modal,
+  Space,
+  Statistic,
+  Switch,
+  Tag,
+  Typography,
+  message,
+} from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 
 import { getErrorMessage } from '@/lib/http';
 
 import {
+  createFeedback,
   fetchActiveJobs,
+  fetchFeedback,
   streamActiveJobsEvents,
   type ActiveJobsData,
   type InterpretationSegment,
+  type MetricFeedbackItem,
   type SseStage,
 } from './api';
 
@@ -41,6 +59,11 @@ export default function AnalyticsPage() {
   const [groupBy, setGroupBy] = useState(false);
   const [sseStage, setSseStage] = useState<SseStage | null>(null);
   const [sseRunning, setSseRunning] = useState(false);
+  // T-D12 反馈
+  const [fbOpen, setFbOpen] = useState(false);
+  const [fbComment, setFbComment] = useState('');
+  const [fbSubmitting, setFbSubmitting] = useState(false);
+  const [feedbacks, setFeedbacks] = useState<MetricFeedbackItem[] | null>(null);
 
   const load = useCallback(async (gb: boolean) => {
     setLoading(true);
@@ -54,9 +77,19 @@ export default function AnalyticsPage() {
     }
   }, []);
 
+  const loadFeedback = useCallback(async () => {
+    try {
+      setFeedbacks(await fetchFeedback());
+    } catch {
+      // 403（非管理侧）→ 隐藏反馈列表
+      setFeedbacks(null);
+    }
+  }, []);
+
   useEffect(() => {
     void load(groupBy);
-  }, [groupBy, load]);
+    void loadFeedback();
+  }, [groupBy, load, loadFeedback]);
 
   const runSse = useCallback(async () => {
     setSseRunning(true);
@@ -74,6 +107,22 @@ export default function AnalyticsPage() {
       setSseRunning(false);
     }
   }, []);
+
+  const submitFeedback = useCallback(async () => {
+    if (!data?.snapshot_id) return;
+    setFbSubmitting(true);
+    try {
+      await createFeedback(data.snapshot_id, fbComment || undefined);
+      message.success('已收到反馈，感谢纠错（不影响当次结果）');
+      setFbOpen(false);
+      setFbComment('');
+      void loadFeedback();
+    } catch (e) {
+      message.error(getErrorMessage(e));
+    } finally {
+      setFbSubmitting(false);
+    }
+  }, [data?.snapshot_id, fbComment, loadFeedback]);
 
   const chart = data?.chart;
   const interp = data?.interpretation;
@@ -143,20 +192,78 @@ export default function AnalyticsPage() {
       )}
 
       <div style={{ marginTop: 16 }}>
-        <Button
-          icon={<ThunderboltOutlined />}
-          onClick={() => void runSse()}
-          loading={sseRunning}
-          disabled={!data}
-        >
-          计算进度（SSE）
-        </Button>
-        {sseStage && (
-          <Text code style={{ marginLeft: 8 }}>
-            {sseStage}
-          </Text>
-        )}
+        <Space>
+          <Button
+            icon={<FlagOutlined />}
+            onClick={() => setFbOpen(true)}
+            disabled={!data?.snapshot_id}
+          >
+            标记不准确
+          </Button>
+          <Button
+            icon={<ThunderboltOutlined />}
+            onClick={() => void runSse()}
+            loading={sseRunning}
+            disabled={!data}
+          >
+            计算进度（SSE）
+          </Button>
+          {sseStage && (
+            <Text code style={{ marginLeft: 8 }}>
+              {sseStage}
+            </Text>
+          )}
+        </Space>
       </div>
+
+      {feedbacks !== null && (
+        <div style={{ marginTop: 16 }}>
+          <Text strong>反馈记录（管理侧可见）</Text>
+          {feedbacks.length === 0 ? (
+            <Empty description="暂无反馈" style={{ marginTop: 8 }} />
+          ) : (
+            <List
+              size="small"
+              dataSource={feedbacks}
+              style={{ marginTop: 8 }}
+              renderItem={(fb: MetricFeedbackItem) => (
+                <List.Item style={{ padding: '6px 0' }}>
+                  <Space size={6} align="start">
+                    <Tag>{fb.snapshot_metric_id ?? `快照#${fb.snapshot_id}`}</Tag>
+                    <Text>{fb.comment || '（未填说明）'}</Text>
+                    <Text type="secondary">
+                      {fb.created_at.replace('T', ' ').slice(0, 19)}
+                    </Text>
+                  </Space>
+                </List.Item>
+              )}
+            />
+          )}
+        </div>
+      )}
+
+      <Modal
+        title="标记结果不准确"
+        open={fbOpen}
+        onOk={() => void submitFeedback()}
+        onCancel={() => setFbOpen(false)}
+        confirmLoading={fbSubmitting}
+        okText="提交反馈"
+        cancelText="取消"
+      >
+        <Text type="secondary">
+          反馈仅用于纠错复核（关联本次查询快照 # {data?.snapshot_id ?? '-'}），不会修改当次结果。
+        </Text>
+        <Input.TextArea
+          rows={3}
+          maxLength={500}
+          showCount
+          value={fbComment}
+          onChange={(e) => setFbComment(e.target.value)}
+          placeholder="说明不准确之处（可选，≤500 字）"
+          style={{ marginTop: 12 }}
+        />
+      </Modal>
     </Card>
   );
 }

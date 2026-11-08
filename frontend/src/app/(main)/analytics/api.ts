@@ -3,7 +3,7 @@
  * SSE 用 fetch 流式读取（EventSource 不支持自定义 Authorization 头）。
  */
 
-import { get, API_PREFIX } from '@/lib/http';
+import { get, post, API_PREFIX } from '@/lib/http';
 import { getToken } from '@/lib/auth';
 
 export interface ChartSpec {
@@ -50,6 +50,37 @@ export type ActiveJobsData = MetricData;
 export function fetchActiveJobs(groupBy?: 'department'): Promise<ActiveJobsData> {
   const qs = groupBy ? `?group_by=${groupBy}` : '';
   return get<ActiveJobsData>(`/analytics/metrics/jobs/active${qs}`);
+}
+
+export interface MetricFeedbackItem {
+  id: number;
+  snapshot_id: number;
+  comment: string | null;
+  created_by: number;
+  created_at: string;
+  snapshot_metric_id: string | null;
+  snapshot?: {
+    metric_id: string;
+    params_json: Record<string, unknown> | null;
+    data_time: string | null;
+    result_json: Record<string, unknown> | null;
+  };
+}
+
+export function createFeedback(
+  snapshotId: number,
+  comment?: string,
+): Promise<MetricFeedbackItem> {
+  return post<MetricFeedbackItem>('/analytics/feedback', {
+    snapshot_id: snapshotId,
+    comment: comment ?? null,
+  });
+}
+
+export function fetchFeedback(): Promise<MetricFeedbackItem[]> {
+  return get<MetricFeedbackItem[]>('/analytics/feedback').then(
+    (resp) => resp ?? [],
+  );
 }
 
 export type SseStage = 'started' | 'computed' | 'done';
