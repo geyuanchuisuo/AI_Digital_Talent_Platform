@@ -50,4 +50,4 @@ def test_terminal_semantics_result_categories():
 def test_five_recruitment_tables_registered():
     for t in ("project_groups", "projects", "project_demands", "jd_publications", "applications"):
         assert t in TABLE_NAMES and t in Base.metadata.tables
-    assert len(TABLE_NAMES) == 62  # …61 + nl2sql_audit(T-D09)
+    assert len(TABLE_NAMES) == 63  # …62 + analytics_feedback(T-D12)

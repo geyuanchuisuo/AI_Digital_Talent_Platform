@@ -18,6 +18,7 @@ from app.api.deps import CurrentUser
 from app.core.auth.scope import get_account_scope
 from app.core.errors import BizError
 from app.modules.analytics import service
+from app.modules.analytics.feedback import service as feedback_service
 from app.modules.analytics.nl2sql import service as service_nl2sql
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
@@ -109,3 +110,17 @@ async def nl2sql_query(user: CurrentUser, body: dict):
 
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+@router.post("/feedback", summary="标记结果不准确（仅快照创建者；幂等）")
+async def create_feedback(user: CurrentUser, body: dict):
+    snapshot_id = int((body or {}).get("snapshot_id") or 0)
+    comment = (body or {}).get("comment")
+    row = await feedback_service.create_feedback(user, snapshot_id, comment)
+    return {"code": 0, "message": "success", "data": row}
+
+
+@router.get("/feedback", summary="反馈列表（管理侧全量可见）")
+async def list_feedback(user: CurrentUser):
+    items = await feedback_service.list_feedback(user)
+    return {"code": 0, "message": "success", "data": {"items": items}}

@@ -59,3 +59,9 @@ psycopg[binary]>=3,<4
 dify-client>=0.1.10,<1
 # neo4j：知识图谱（人才-技能-岗位-制度-证书实体与关系）
 neo4j>=5.28,<7
+
+# --- 问数/报告补项（T-D00e 清单余项；2026-11-08 用户授权 D 直接合入）---
+# sse-starlette：SSE 端点辅助（T-D06 长任务进度推送；当前用 StreamingResponse 实现，后续评估切换）
+sse-starlette>=2.0,<3
+# reportlab：PDF 报告生成（T-D11 同快照导出；python-docx 已在清单）
+reportlab>=4.0,<5

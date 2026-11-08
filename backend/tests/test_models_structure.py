@@ -365,6 +365,10 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "id", "question", "generated_sql", "stage", "refused_reason",
         "row_count", "duration_ms", "created_by", "created_at",
     },
+    # ---- D 问数反馈（T-D12）----
+    "analytics_feedback": {
+        "id", "snapshot_id", "comment", "created_by", "created_at",
+    },
 }
 
 EXPECTED_UNIQUE: dict[str, set[str]] = {
@@ -425,10 +429,10 @@ def ddl(model) -> str:
     return str(CreateTable(model.__table__).compile(dialect=DIALECT))
 
 
-def test_exactly_62_tables_and_no_phase2_table():
-    assert len(TABLE_NAMES) == 62
-    assert len(MODEL_CLASSES) == 62
-    assert len(Base.metadata.tables) == 62
+def test_exactly_63_tables_and_no_phase2_table():
+    assert len(TABLE_NAMES) == 63
+    assert len(MODEL_CLASSES) == 63
+    assert len(Base.metadata.tables) == 63
     assert set(TABLE_NAMES) == set(EXPECTED_COLUMNS)
     # D-7 缓办：一期不建 llm_score_cache
     assert "llm_score_cache" not in Base.metadata.tables

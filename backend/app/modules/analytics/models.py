@@ -6,6 +6,8 @@
 - `AnalyticsQuerySnapshot`：查询快照（问题/指标/参数/数据时间/结果/来源/命中/操作人），
   同快照导出（T-D11）与反馈审计（T-D12）引用本表 id。
 - `Nl2SqlAudit`：自由问数全链路审计（T-D09）——问题/生成 SQL/阶段/拒绝原因/行数/耗时。
+- `MetricFeedback`：结果页「标记不准确」反馈（T-D12）——关联查询快照，一用户一快照一条；
+  反馈不改当次结果、不自动改统计。
 """
 
 from __future__ import annotations
@@ -195,3 +197,23 @@ class Nl2SqlAudit(PKMixin, CreatedAtMixin, Base):
     row_count: Mapped[int | None] = mapped_column(nullable=True)
     duration_ms: Mapped[int | None] = mapped_column(nullable=True)
     created_by: Mapped[int | None] = mapped_column(PK_TYPE, nullable=True)
+
+
+class MetricFeedback(PKMixin, CreatedAtMixin, Base):
+    """问数反馈（`analytics_feedback`，T-D12）——结果页「标记不准确」。
+
+    唯一约束 (snapshot_id, created_by)：同一用户对同一快照只留一条反馈（重复标记
+    幂等返回已有行）。反馈不参与任何统计计算（T-D12 验收②）。
+    """
+
+    __tablename__ = "analytics_feedback"
+    __table_args__ = (
+        UniqueConstraint("snapshot_id", "created_by", name="uk_feedback_snapshot_user"),
+        Index("idx_feedback_snapshot", "snapshot_id"),
+        Index("idx_feedback_user", "created_by"),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    snapshot_id: Mapped[int] = mapped_column(PK_TYPE, nullable=False)
+    comment: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_by: Mapped[int] = mapped_column(PK_TYPE, nullable=False)
