@@ -31,9 +31,16 @@ pytestmark = pytest.mark.integration
 @pytest.fixture(scope="module")
 def client():
     from app.main import app
+    from app.tasks.runner import runner
 
-    with TestClient(app) as test_client:
-        yield test_client
+    # Module fixtures run before the function-scoped autouse runner isolation.
+    # Keep this lifespan from consuming the pending rows under test.
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(runner, "start", lambda: None)
+        patcher.setattr(runner, "stop", lambda *args, **kwargs: None)
+        with TestClient(app) as test_client:
+            assert not runner.is_running
+            yield test_client
 
 
 @pytest.fixture(scope="module")

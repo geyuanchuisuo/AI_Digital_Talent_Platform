@@ -1,12 +1,26 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AxiosError } from 'axios';
-import { get, http } from '@/lib/http';
+import { get, getWithHeaders, http } from '@/lib/http';
 import { getToken, setAuth } from '@/lib/auth';
 vi.mock('antd', () => ({ message: {error: vi.fn()} }));
 
 afterEach(() => { localStorage.clear(); vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe('authorization errors', () => {
+  it('clears a session when the shared AuthGuard probe is denied', async () => {
+    vi.useFakeTimers();
+    setAuth('test-token', {id: 1, username: 'personal', role: 'personal'});
+    const adapter = http.defaults.adapter;
+    http.defaults.adapter = async (config) => {
+      expect(config.headers.get('X-Auth-Probe')).toBe('1');
+      throw new AxiosError('Forbidden', 'ERR_BAD_REQUEST', config, undefined,
+        {config, data: {code: 403, message: '会话校验被拒绝'}, headers: {}, status: 403, statusText: 'Forbidden'});
+    };
+    try {
+      await expect(getWithHeaders('/auth/me', {'X-Auth-Probe':'1'})).rejects.toMatchObject({code:403});
+      expect(getToken()).toBeNull();
+    } finally { http.defaults.adapter = adapter; }
+  });
   it('keeps a valid session after a resource permission denial', async () => {
     setAuth('test-token', {id: 1, username: 'personal', role: 'personal'});
     const adapter = http.defaults.adapter;
