@@ -71,6 +71,14 @@ from app.modules.analytics.models import (  # noqa: F401 (D T-D01b/T-D08/T-D09/T
     Nl2SqlAudit,
 )
 from app.modules.reports.models import SnapshotExportAudit  # noqa: F401 (D T-D11)
+from app.modules.workflows.models import (  # noqa: F401 (D T-D14)
+    WorkflowDefinition,
+    WorkflowDefinitionVersion,
+    WorkflowEdge,
+    WorkflowNode,
+    WorkflowRun,
+    WorkflowRunStep,
+)
 from app.modules.recruitment.scope_models import UserScopeGrant
 from app.modules.system.models import (
     SysDepartment,
@@ -167,12 +175,18 @@ MODEL_CLASSES: tuple[type[Base], ...] = (
     Nl2SqlAudit,
     MetricFeedback,
     SnapshotExportAudit,
+    WorkflowDefinition,
+    WorkflowDefinitionVersion,
+    WorkflowNode,
+    WorkflowEdge,
+    WorkflowRun,
+    WorkflowRunStep,
 )
 
 TABLE_NAMES: tuple[str, ...] = tuple(model.__tablename__ for model in MODEL_CLASSES)  # type: ignore[attr-defined]
 
-assert len(TABLE_NAMES) == 64, f"一期 64 张表（…63 + 1 snapshot_export_audit/T-D11），实际 {len(TABLE_NAMES)}"
-assert len(set(TABLE_NAMES)) == 64, "表名重复"
+assert len(TABLE_NAMES) == 70, f"一期 70 张表（…64 + 6 workflow T-D14），实际 {len(TABLE_NAMES)}"
+assert len(set(TABLE_NAMES)) == 70, "表名重复"
 assert "llm_score_cache" not in TABLE_NAMES, "llm_score_cache 是 D-7 缓办项，一期不建"
 assert "upload_batches" not in TABLE_NAMES, (
     "批次不是实体表（决策 D-M）：靠 resume_files.upload_batch_id 聚合，"

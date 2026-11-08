@@ -42,6 +42,10 @@ pytestmark = pytest.mark.integration
 RESTORE_DB = "ai_talent_restore_test"
 PROBE_NAME = "_t03_mutable_probe"
 
+# T-D04 引擎检查点表：Core 层管理（saver.setup() 幂等建表），契约明确不入 ORM
+# 基线（工作流引擎契约 §1），与 alembic_version 同为非业务表，从逐表对照中排除。
+CORE_ENGINE_TABLES = {"workflow_checkpoints", "workflow_checkpoint_writes"}
+
 
 @pytest.fixture(scope="module", autouse=True)
 def ensure_schema():
@@ -75,13 +79,14 @@ def test_real_schema_matches_expected_columns():
     """真实库 information_schema 逐表对照，不只看 ORM metadata。
 
     `alembic_version` 是迁移状态表（非业务表），从对照中排除；
-    业务表清单仍必须与 EXPECTED_COLUMNS 完全一致。
+    workflow_checkpoints / workflow_checkpoint_writes 是引擎检查点表（Core 层
+    管理，不入 ORM 基线），一并排除；业务表清单仍必须与 EXPECTED_COLUMNS 完全一致。
     """
     conn = backup_db.connect(settings.mysql_db)
     try:
         with conn.cursor() as cur:
             cur.execute("SHOW TABLES")
-            tables = {row[0] for row in cur.fetchall()} - {"alembic_version"}
+            tables = {row[0] for row in cur.fetchall()} - {"alembic_version"} - CORE_ENGINE_TABLES
             assert tables == set(EXPECTED_COLUMNS)
 
             cur.execute(
@@ -187,7 +192,9 @@ def test_json_mutable_change_is_persisted():
 def test_backup_sql_is_restorable(backup_dir):
     sql_path, counts = backup_db.dump_sql(backup_dir / "backup.sql")
     assert sql_path.exists() and sql_path.stat().st_size > 0
-    assert set(counts) == set(EXPECTED_COLUMNS)
+    # 备份覆盖全部库表（含引擎检查点表）；业务表与 EXPECTED_COLUMNS 一致
+    assert set(counts) - CORE_ENGINE_TABLES == set(EXPECTED_COLUMNS)
+    assert set(counts) <= set(EXPECTED_COLUMNS) | CORE_ENGINE_TABLES
     sql = sql_path.read_text(encoding="utf-8")
     assert "CREATE TABLE" in sql and "INSERT INTO `users`" in sql
     statements = list(backup_db.iter_statements(sql))
