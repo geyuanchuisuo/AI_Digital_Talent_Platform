@@ -18,6 +18,7 @@ from app.api.deps import CurrentUser
 from app.core.auth.scope import get_account_scope
 from app.core.errors import BizError
 from app.modules.analytics import service
+from app.modules.analytics.nl2sql import service as service_nl2sql
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
@@ -92,6 +93,13 @@ async def query_metric(
     }
     result = await service.query_metric(user, metric_id, params=params, bypass_cache=bypass_cache)
     return {"code": 0, "message": "success", "data": _result_payload(result)}
+
+
+@router.post("/nl2sql/query", summary="自由问数（生成→校验→只读执行→审计，管理侧）")
+async def nl2sql_query(user: CurrentUser, body: dict):
+    question = (body or {}).get("question", "")
+    result = await service_nl2sql.nl2sql_query(user, question)
+    return {"code": 0, "message": "success", "data": result}
 
 
 def _sse(event: str, data: dict) -> str:

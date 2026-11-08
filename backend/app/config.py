@@ -87,6 +87,11 @@ class Settings(BaseSettings):
     # 空 ANALYTICS_DB_URL = 副本未启用：自由问数/报表降级主库 MySQL 直查（V2.6 确认的回退口径）。
     analytics_db_url: str = ""
 
+    # ---- NL2SQL 受控执行（T-D09，D 维度 analytics/nl2sql；契约 docs/modules/D/问数切片契约.md §8）----
+    # 超时由 PG statement_timeout 强制；行数由 fetchmany(max+1) 截断——均为 T-D09 ③ 默认口径。
+    nl2sql_timeout_seconds: int = 30
+    nl2sql_max_rows: int = 1000
+
     # ---- 应用与网络 ----
     cors_origins: str = "*"
     app_env: str = "development"

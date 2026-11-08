@@ -5,13 +5,14 @@
   允许角色、允许参数键、缓存 TTL。registry 是查询准入的唯一依据。
 - `AnalyticsQuerySnapshot`：查询快照（问题/指标/参数/数据时间/结果/来源/命中/操作人），
   同快照导出（T-D11）与反馈审计（T-D12）引用本表 id。
+- `Nl2SqlAudit`：自由问数全链路审计（T-D09）——问题/生成 SQL/阶段/拒绝原因/行数/耗时。
 """
 
 from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Index, String, UniqueConstraint
+from sqlalchemy import DateTime, Index, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -170,4 +171,27 @@ class AnalyticsQuerySnapshot(PKMixin, CreatedAtMixin, Base):
     cache_hit: Mapped[int] = mapped_column(
         BOOL_TYPE, nullable=False, default=0, server_default="0"
     )
+    created_by: Mapped[int | None] = mapped_column(PK_TYPE, nullable=True)
+
+
+class Nl2SqlAudit(PKMixin, CreatedAtMixin, Base):
+    """自由问数审计（`nl2sql_audit`，T-D09）——每次尝试一行，全链路留痕。
+
+    stage: generated → validated → executed；任一步失败/拒绝：
+    refused_unmappable（生成器拒答）/ refused_unsafe（校验器拦截）/ timeout / error。
+    """
+
+    __tablename__ = "nl2sql_audit"
+    __table_args__ = (
+        Index("idx_nl2sql_audit_stage", "stage"),
+        Index("idx_nl2sql_audit_user", "created_by"),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    question: Mapped[str] = mapped_column(String(500), nullable=False)
+    generated_sql: Mapped[str | None] = mapped_column(Text, nullable=True)
+    stage: Mapped[str] = mapped_column(String(32), nullable=False)
+    refused_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    row_count: Mapped[int | None] = mapped_column(nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(nullable=True)
     created_by: Mapped[int | None] = mapped_column(PK_TYPE, nullable=True)
