@@ -29,6 +29,7 @@ from app.api import screen as screen_api
 from app.api import resumes as resumes_api
 from app.api import talents as talents_api
 from app.config import settings
+from app.core.cache import RateLimitMiddleware
 from app.core.errors import register_exception_handlers
 from app.utils.ids import new_request_id
 from app.utils.mask import mask_sensitive
@@ -97,6 +98,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# T-D01（REQ-D-20261107-183200，2026-11-07 用户指令 D 直接落地）：Redis 限流/黑名单中间件。
+# REDIS_URL 为空 = 直通零副作用；配置后固定窗口限流 + 黑名单 403，Redis 停服降级放行。
+# 契约：docs/modules/D/缓存限流契约.md。
+app.add_middleware(RateLimitMiddleware)
+
 # T-02：四类全局异常处理器（BizError / HTTPException / RequestValidationError / Exception）
 # 口径见 docs/统一错误码与鉴权.md v1.2 §六；request_id 由下方中间件写入 request.state。
 register_exception_handlers(app)
@@ -147,3 +153,19 @@ from app.modules.assessments.registry import ALL_ROUTERS as _C_ROUTERS  # noqa: 
 
 for _c_router in _C_ROUTERS:
     app.include_router(_c_router)
+
+# M3 招聘域（人才需求/项目、JD 投放、申请五阶段状态机）：A 的 modules/recruitment（V2.6 冻结口径）
+from app.modules.recruitment.router import router as recruitment_router  # noqa: E402
+
+app.include_router(recruitment_router)
+
+# D 通知中心（T-D03，REQ-D-20261107-183200 第 5 项，2026-11-07 用户指令直接落地）：
+# /api/notifications 列表/详情/已读，鉴权走公共 deps（CurrentUser/get_db）
+from app.modules.notifications.router import router as notifications_router  # noqa: E402
+
+app.include_router(notifications_router)
+
+# D 问数切片（T-D01b）：/api/analytics 活跃岗位数 + SSE 进度端点首用（2026-11-07 用户指令直接落地）
+from app.modules.analytics.router import router as analytics_router  # noqa: E402
+
+app.include_router(analytics_router)

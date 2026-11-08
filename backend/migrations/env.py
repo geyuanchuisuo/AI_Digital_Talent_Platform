@@ -20,7 +20,10 @@ from app.config import settings
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers=False：fileConfig 默认会禁用所有已存在的 logger
+    # （含 app.request），导致 init_db/alembic 之后的 caplog 测试捕获为空
+    # （全量跑序相关失败根因，2026-11-07 D 会话定位）
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # Override the placeholder URL in alembic.ini with the runtime settings
 config.set_main_option("sqlalchemy.url", settings.database_url)

@@ -58,6 +58,7 @@ class AssessmentQuestion(PKMixin, CTimestampMixin, Base):
     question_type: Mapped[str] = mapped_column(
         String(20), nullable=False, default="single_choice", server_default=str_default("single_choice")
     )
+    knowledge_point: Mapped[str | None] = mapped_column(String(200), nullable=True)
     stem: Mapped[str] = mapped_column(Text, nullable=False)
     options_json: Mapped[list | None] = mapped_column(JSONList, nullable=True)
     correct_answer: Mapped[str | None] = mapped_column(Text, nullable=True)

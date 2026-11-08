@@ -75,6 +75,23 @@ class Settings(BaseSettings):
     task_heartbeat_timeout: int = 600
     task_shutdown_timeout: int = 30
 
+    # ---- Redis 缓存/限流（T-D01，D 维度 core/cache；契约 docs/modules/D/缓存限流契约.md）----
+    # 空 REDIS_URL = 未启用：缓存读写与限流全部按「缓存不存在」降级（限流放行/读直查库），
+    # 应用行为与无 Redis 时完全一致；配置后由 A 在 main.py 挂载 RateLimitMiddleware 生效。
+    redis_url: str = ""
+    rate_limit_per_minute: int = 120
+    rate_limit_window_seconds: int = 60
+    rate_limit_blacklist_ttl: int = 3600
+
+    # ---- PostgreSQL 只读分析副本（T-D02，D 维护 scripts/D/etl_pgsql.py；契约 docs/modules/D/ETL说明.md）----
+    # 空 ANALYTICS_DB_URL = 副本未启用：自由问数/报表降级主库 MySQL 直查（V2.6 确认的回退口径）。
+    analytics_db_url: str = ""
+
+    # ---- NL2SQL 受控执行（T-D09，D 维度 analytics/nl2sql；契约 docs/modules/D/问数切片契约.md §8）----
+    # 超时由 PG statement_timeout 强制；行数由 fetchmany(max+1) 截断——均为 T-D09 ③ 默认口径。
+    nl2sql_timeout_seconds: int = 30
+    nl2sql_max_rows: int = 1000
+
     # ---- 应用与网络 ----
     cors_origins: str = "*"
     app_env: str = "development"

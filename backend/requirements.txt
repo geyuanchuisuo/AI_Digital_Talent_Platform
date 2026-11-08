@@ -45,3 +45,23 @@ python-ulid>=2.2,<4
 # --- 测试 ---
 pytest>=8.0,<9
 httpx>=0.27,<1
+
+# --- 原需求强制组件（V2.6 冻结基线 §1/§16 D-04/D-05/D-06/D-07；2026-11-07 依赖冻结，用户确认方案 A）---
+# langgraph：受控 Agent 工作流执行引擎（有状态图/检查点恢复）
+langgraph>=0.2,<3
+# vanna：NL2SQL（自由问数）本地部署引擎；候选 SQL 经校验器后受控执行
+vanna>=0.7,<3
+# redis：统一缓存/会话/接口限流（四库协同）
+redis>=5,<9
+# psycopg：PostgreSQL 只读副本（自由问数分析宽表）驱动
+psycopg[binary]>=3,<4
+# dify-client：Dify 中台 API 对接层客户端（私有化部署的编排/发布/模型管理）
+dify-client>=0.1.10,<1
+# neo4j：知识图谱（人才-技能-岗位-制度-证书实体与关系）
+neo4j>=5.28,<7
+
+# --- 问数/报告补项（T-D00e 清单余项；2026-11-08 用户授权 D 直接合入）---
+# sse-starlette：SSE 端点辅助（T-D06 长任务进度推送；当前用 StreamingResponse 实现，后续评估切换）
+sse-starlette>=2.0,<3
+# reportlab：PDF 报告生成（T-D11 同快照导出；python-docx 已在清单）
+reportlab>=4.0,<5

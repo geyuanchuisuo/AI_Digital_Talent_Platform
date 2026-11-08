@@ -197,7 +197,14 @@ def test_retry_keeps_stage_and_only_failed(client, auth, user_id, batches):
     resp = client.post(f"/api/resumes/queue/{task_id}/retry", headers=auth)
     assert resp.status_code == 200, resp.text
     data = resp.json()["data"]
-    assert data == {"task_id": task_id, "status": "pending", "stage": "vector", "retries": 2}
+    # B 559c458 起动作响应带对外契约状态（waiting/running/completed/failed/cancelled）
+    assert data == {
+        "task_id": task_id,
+        "status": "pending",
+        "task_status": "waiting",
+        "stage": "vector",
+        "retries": 2,
+    }
 
     row = task_row(task_id)
     assert row.status == "pending"

@@ -23,9 +23,11 @@ from app.modules.training import drafting, feedback_themes
 from app.modules.training.models import (
     TrainingAttendance,
     TrainingCourse,
+    TrainingEnrollment,
     TrainingFeedback,
     TrainingFeedbackTheme,
     TrainingGrowthEvent,
+    TrainingLearningEvidence,
     TrainingLearningRecord,
     TrainingPlan,
     TrainingPlanItem,
@@ -37,6 +39,9 @@ from app.modules.training.schemas import (
     CourseCreateRequest,
     CourseUpdateRequest,
     DraftRequest,
+    EnrollmentDecideRequest,
+    EnrollmentRequest,
+    EvidenceSubmitRequest,
     FeedbackNoteRequest,
     FeedbackSubmitRequest,
     PlanCreateRequest,
@@ -1027,3 +1032,127 @@ def update_feedback_note(
     db.commit()
     db.refresh(course)
     return course
+
+
+# ---------------------------------------------------------------- 报名审批/候补/名额/超时
+
+ENROLLMENT_TTL_HOURS = 24
+
+
+def apply_enrollment(db: Session, payload: EnrollmentRequest, *, user: User) -> TrainingEnrollment:
+    """员工自主报名；pending 占位，24h 未决定则超时释放。"""
+    _require_employee_caller(user)
+    course = _require_course(db, payload.course_id)
+    if course.status != "active":
+        raise BizError(400, "课程未开放")
+    existing = db.scalar(
+        select(TrainingEnrollment).where(
+            TrainingEnrollment.course_id == payload.course_id,
+            TrainingEnrollment.employee_user_id == user.id,
+        )
+    )
+    if existing:
+        return existing
+    row = TrainingEnrollment(
+        course_id=payload.course_id,
+        employee_user_id=user.id,
+        priority=payload.priority,
+        status="pending",
+        expires_at=datetime.now() + timedelta(hours=ENROLLMENT_TTL_HOURS),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def decide_enrollment(
+    db: Session, enrollment_id: int, payload: EnrollmentDecideRequest, *, admin: User
+) -> TrainingEnrollment:
+    require_admin(admin)
+    row = db.get(TrainingEnrollment, enrollment_id)
+    if not row:
+        raise BizError(404, "报名记录不存在")
+    if row.status not in ("pending", "waitlisted"):
+        raise BizError(400, "该报名已处理")
+    if row.expires_at and row.expires_at < datetime.now() and payload.status == "approved":
+        raise BizError(400, "报名已超时，需员工重新申请")
+    row.status = payload.status
+    row.decided_by = admin.id
+    row.decided_at = datetime.now()
+    if payload.note is not None:
+        row.note = payload.note
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def list_enrollments(db: Session, *, course_id: int | None = None, user: User) -> list[TrainingEnrollment]:
+    stmt = select(TrainingEnrollment).order_by(TrainingEnrollment.id.desc())
+    if is_admin(user):
+        if course_id is not None:
+            stmt = stmt.where(TrainingEnrollment.course_id == course_id)
+    else:
+        stmt = stmt.where(TrainingEnrollment.employee_user_id == user.id)
+    return list(db.scalars(stmt))
+
+
+# ---------------------------------------------------------------- 防挂机/有效学习证据
+
+def submit_evidence(db: Session, payload: EvidenceSubmitRequest, *, user: User) -> TrainingLearningEvidence:
+    """员工提交学习证据；服务端记录证据类型与得分，不直接认定正式完成。"""
+    record = db.get(TrainingLearningRecord, payload.learning_record_id)
+    if not record or record.employee_user_id != user.id:
+        raise BizError(403, "只能提交本人学习记录的证据")
+    evidence = TrainingLearningEvidence(
+        learning_record_id=record.id,
+        employee_user_id=user.id,
+        evidence_type=payload.evidence_type.strip(),
+        payload_json=payload.payload,
+        score=float(payload.score),
+        verified_by=payload.verified_by,
+    )
+    db.add(evidence)
+    # 累计证据分供正式完成判定
+    existing = db.scalars(
+        select(TrainingLearningEvidence).where(TrainingLearningEvidence.learning_record_id == record.id)
+    ).all()
+    record.evidence_score = sum(e.score for e in existing) / len(existing) if existing else 0.0
+    db.commit()
+    db.refresh(evidence)
+    return evidence
+
+
+def confirm_formal_completion(db: Session, learning_record_id: int, *, admin: User) -> TrainingLearningRecord:
+    """管理员依据有效证据认定正式完成；无证据拒绝。"""
+    require_admin(admin)
+    record = db.get(TrainingLearningRecord, learning_record_id)
+    if not record:
+        raise BizError(404, "学习记录不存在")
+    evidence_count = db.scalar(
+        select(func.count(TrainingLearningEvidence.id)).where(
+            TrainingLearningEvidence.learning_record_id == learning_record_id
+        )
+    )
+    if not evidence_count:
+        raise BizError(400, "无有效学习证据，不能认定正式完成")
+    record.formal_completed = 1
+    record.status = "completed"
+    db.commit()
+    db.refresh(record)
+    return record
+
+
+def list_evidence(db: Session, learning_record_id: int, *, user: User) -> list[TrainingLearningEvidence]:
+    record = db.get(TrainingLearningRecord, learning_record_id)
+    if not record:
+        raise BizError(404, "学习记录不存在")
+    if not is_admin(user) and record.employee_user_id != user.id:
+        raise BizError(403, "无权查看他人证据")
+    return list(
+        db.scalars(
+            select(TrainingLearningEvidence)
+            .where(TrainingLearningEvidence.learning_record_id == learning_record_id)
+            .order_by(TrainingLearningEvidence.id.asc())
+        )
+    )

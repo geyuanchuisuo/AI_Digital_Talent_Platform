@@ -4,8 +4,10 @@
 
 关键约束：
 - 错误体恒为 `{code, message, data: null, request_id}`；**不加 `detail` 字段**。
-- `code` 只允许 400/401/403/404/409/422/500/503 八个值（外加成功 0），
+- `code` 只允许 400/401/403/404/409/422/429/500/503 九个值（外加成功 0），
   不引入 1001/4001 等细分码；`request_id` **仅错误响应携带**。
+  429 为 T-D01 限流响应（2026-11-07 用户指令纳入；由 RateLimitMiddleware 直接构造，
+  结构与本文件统一错误体一致）。
 - `GET /health` 是成功响应的唯一例外（不套统一体），异常时仍走本文件统一错误体。
 - **503 只用于「请求尚未产生任何业务写入」**（接口 §1.2）。MySQL 已提交后向量失败
   一律走 200 + `data.vector_status="failed"`，由业务接口用
@@ -28,7 +30,7 @@ from app.utils.mask import mask_sensitive
 logger = logging.getLogger("app.error")
 
 SUCCESS_CODE = 0
-ALLOWED_ERROR_CODES = frozenset({400, 401, 403, 404, 409, 422, 500, 503})
+ALLOWED_ERROR_CODES = frozenset({400, 401, 403, 404, 409, 422, 429, 500, 503})
 HALF_WRITE_VECTOR_MESSAGE = "画像已保存，向量同步失败，可稍后重试"
 
 DEFAULT_MESSAGES: dict[int, str] = {
@@ -38,6 +40,7 @@ DEFAULT_MESSAGES: dict[int, str] = {
     404: "记录不存在",
     409: "数据已存在，请勿重复提交",
     422: "请求参数结构不合法",
+    429: "请求过于频繁，请稍后重试",
     500: "服务器内部错误",
     503: "服务暂时不可用，请稍后重试",
 }
@@ -57,9 +60,9 @@ FRAMEWORK_DEFAULT_DETAILS = frozenset(
 
 
 class BizError(Exception):
-    """service 层业务异常。`code` 必须是八个白名单错误码之一。
+    """service 层业务异常。`code` 必须是白名单错误码之一。
 
-    文档 §六 建议 401/403/404 用原生 HTTPException，但本实现允许 BizError 使用全部八个码，
+    文档 §六 建议 401/403/404 用原生 HTTPException，但本实现允许 BizError 使用全部白名单码，
     这样 service 层不必为了状态码而依赖 fastapi；两者最终都归一为同一个错误体。
     """
 

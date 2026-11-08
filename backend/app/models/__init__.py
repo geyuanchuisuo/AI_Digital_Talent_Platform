@@ -1,4 +1,4 @@
-"""ORM 实体统一入口（T-03 + 裁决 C-04，35 张表 = 13 公共 + 22 C 模块；C_0002 自适应加 1 表）。
+"""ORM 实体统一入口（T-03 + 裁决 C-04，45 张表 = 13 公共 + 32 C 模块）。
 
 `import app.models` 即把全部表注册到 `app.database.Base.metadata`，
 `scripts/init_db.py` 与备份脚本据此建表/导出，不需要各任务自行 import 单表。
@@ -45,17 +45,56 @@ from app.modules.assessments.models import (
     AssessmentReviewItem,
     AssessmentSelection,
 )
+from app.modules.interviews.ai_models import (
+    AiInterviewEvent,
+    AiInterviewQuestion,
+    AiInterviewSession,
+)
 from app.modules.interviews.models import (
     InterviewFeedback,
     InterviewRound,
     InterviewRoundEvent,
 )
+from app.modules.recruitment.models import (
+    Application,
+    JdPublication,
+    Project,
+    ProjectDemand,
+    ProjectGroup,
+)
+from app.modules.notifications.models import Notification  # noqa: F401 (D T-D03)
+from app.core.workflows.engine.models import WorkflowEngineRun  # noqa: F401 (D T-D04)
+from app.modules.analytics.models import (  # noqa: F401 (D T-D01b/T-D08/T-D09/T-D12)
+    AnalyticsQuerySnapshot,
+    MetricFeedback,
+    MetricRegistry,
+    Nl2SqlAudit,
+    MetricFeedback,
+)
+from app.modules.recruitment.scope_models import UserScopeGrant
+from app.modules.system.models import (
+    SysDepartment,
+    SysMenu,
+    SysOperationLog,
+    SysRole,
+    SysRolePermission,
+    SysUserRole,
+)
+from app.modules.inventory.models import (
+    InventoryDevelopmentPlan,
+    InventoryDispute,
+    InventoryEvent,
+    InventoryReview,
+    InventoryTalentPool,
+)
 from app.modules.training.models import (
     TrainingAttendance,
     TrainingCourse,
+    TrainingEnrollment,
     TrainingFeedback,
     TrainingFeedbackTheme,
     TrainingGrowthEvent,
+    TrainingLearningEvidence,
     TrainingLearningRecord,
     TrainingPlan,
     TrainingPlanItem,
@@ -89,6 +128,9 @@ MODEL_CLASSES: tuple[type[Base], ...] = (
     InterviewRound,
     InterviewFeedback,
     InterviewRoundEvent,
+    AiInterviewSession,
+    AiInterviewQuestion,
+    AiInterviewEvent,
     TrainingCourse,
     TrainingSession,
     TrainingAttendance,
@@ -98,13 +140,38 @@ MODEL_CLASSES: tuple[type[Base], ...] = (
     TrainingPlanItem,
     TrainingPlanVersion,
     TrainingLearningRecord,
+    TrainingLearningEvidence,
+    TrainingEnrollment,
     TrainingGrowthEvent,
+    InventoryReview,
+    InventoryTalentPool,
+    InventoryDispute,
+    InventoryDevelopmentPlan,
+    InventoryEvent,
+    ProjectGroup,
+    Project,
+    ProjectDemand,
+    JdPublication,
+    Application,
+    UserScopeGrant,
+    SysDepartment,
+    SysRole,
+    SysUserRole,
+    SysRolePermission,
+    SysMenu,
+    SysOperationLog,
+    Notification,
+    WorkflowEngineRun,
+    AnalyticsQuerySnapshot,
+    MetricRegistry,
+    Nl2SqlAudit,
+    MetricFeedback,
 )
 
 TABLE_NAMES: tuple[str, ...] = tuple(model.__tablename__ for model in MODEL_CLASSES)  # type: ignore[attr-defined]
 
-assert len(TABLE_NAMES) == 35, f"一期固定 35 张表（13 公共 + 22 C），实际 {len(TABLE_NAMES)}"
-assert len(set(TABLE_NAMES)) == 35, "表名重复"
+assert len(TABLE_NAMES) == 63, f"一期 63 张表（…62 + 1 analytics_feedback/T-D12），实际 {len(TABLE_NAMES)}"
+assert len(set(TABLE_NAMES)) == 63, "表名重复"
 assert "llm_score_cache" not in TABLE_NAMES, "llm_score_cache 是 D-7 缓办项，一期不建"
 assert "upload_batches" not in TABLE_NAMES, (
     "批次不是实体表（决策 D-M）：靠 resume_files.upload_batch_id 聚合，"
