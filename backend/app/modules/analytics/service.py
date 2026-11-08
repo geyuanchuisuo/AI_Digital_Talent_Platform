@@ -33,6 +33,8 @@ from app.modules.analytics.models import (
     AnalyticsQuerySnapshot,
     MetricRegistry,
 )
+from app.modules.analytics.charts import build_chart
+from app.modules.analytics.insight import build_interpretation
 
 METRIC_ACTIVE_JOBS = "jobs.active"
 METRIC_DEMAND_GAP = "job.demand_progress_gap"
@@ -42,6 +44,7 @@ _UNKNOWN_METRIC = "未登记的指标（白名单外不支持）"
 _AWAITING_CALIBER = "指标口径待交付（B/C 域），暂不可查询"
 _PARAM_NOT_ALLOWED = "参数不在指标允许范围"
 _PARAM_INVALID = "参数类型非法"
+_DIM_NOT_ALLOWED = "分组维度不在指标允许范围"
 
 _replica_engine: Engine | None = None
 
@@ -57,6 +60,9 @@ class MetricResult:
     snapshot_id: int | None = None
     table: dict | None = field(default=None)
     note: str | None = field(default=None)
+    group_by: str | None = field(default=None)
+    chart: dict | None = field(default=None)
+    interpretation: dict | None = field(default=None)
 
 
 def _replica_engine_lazy() -> Engine | None:
@@ -117,8 +123,41 @@ WHERE pd.status IN ('open', 'in_progress')
 """
 
 
-def _stat_demand_gap(engine: Engine, params: dict) -> dict:
-    """人才需求缺口（A v0.2 §7）：缺口 = headcount − HR 确认已录用（逐需求非负，求和）。"""
+def _stat_demand_gap(engine: Engine, params: dict, *, group_by: str | None = None) -> dict:
+    """人才需求缺口（A v0.2 §7）：缺口 = headcount − HR 确认已录用（逐需求非负，求和）。
+
+    group_by="project_group" → 按项目群聚合（LEFT JOIN project_groups 取名）。
+    """
+    if group_by == "project_group":
+        sql = f"""
+        SELECT COALESCE(pg.name, '未分组') AS project_group, SUM(g.gap) AS gap,
+               SUM(g.headcount) AS headcount
+        FROM ({_GAP_SQL}) g
+        LEFT JOIN project_groups pg ON pg.id = g.project_group_id
+        GROUP BY g.project_group_id, pg.name ORDER BY gap DESC
+        """
+        bind: dict = {}
+        if params.get("project_group_id") is not None:
+            sql = sql.replace("WHERE pd.status IN ('open', 'in_progress')",
+                              "WHERE pd.status IN ('open', 'in_progress')"
+                              " AND pd.project_group_id = :pgid")
+            bind["pgid"] = params["project_group_id"]
+        with engine.connect() as conn:
+            rows = [dict(r) for r in conn.execute(text(sql), bind).mappings()]
+        value = int(sum(r["gap"] for r in rows))
+        table = {
+            "columns": ["project_group", "headcount", "gap"],
+            "rows": [
+                {
+                    "project_group": r["project_group"],
+                    "headcount": int(r["headcount"]),
+                    "gap": int(r["gap"]),
+                }
+                for r in rows
+            ],
+        }
+        return {"value": value, "table": table, "group_by": group_by}
+
     sql = _GAP_SQL
     bind: dict = {}
     if params.get("project_group_id") is not None:
@@ -142,10 +181,11 @@ def _stat_demand_gap(engine: Engine, params: dict) -> dict:
     return {"value": value, "table": table}
 
 
-def _stat_threshold_ref(engine: Engine, params: dict) -> dict:
+def _stat_threshold_ref(engine: Engine, params: dict, *, group_by: str | None = None) -> dict:
     """匹配参考达线（指标目录 卡3）：score≥threshold 行数 / 有效评分行数。
 
     硬淘汰 score=0 排除；仅参考标签。零分母 → 暂无数据（验收③）。
+    group_by="job" → 表本身即按岗位分组的 breakdown（同口径复用）。
     """
     sql = """
     SELECT jp.id AS job_id, jp.title, jp.pass_threshold AS threshold,
@@ -166,7 +206,8 @@ def _stat_threshold_ref(engine: Engine, params: dict) -> dict:
     total = int(sum(r["total"] for r in rows))
     reached = int(sum(r["reached"] for r in rows))
     if total == 0:
-        return {"value": None, "note": "暂无数据", "table": {"columns": [], "rows": []}}
+        return {"value": None, "note": "暂无数据", "table": {"columns": [], "rows": []},
+                "group_by": group_by}
     table = {
         "columns": ["job_id", "title", "threshold", "total", "reached", "ratio"],
         "rows": [
@@ -181,11 +222,32 @@ def _stat_threshold_ref(engine: Engine, params: dict) -> dict:
             for r in rows
         ],
     }
-    return {"value": round(reached / total, 4), "table": table}
+    return {"value": round(reached / total, 4), "table": table, "group_by": group_by}
 
 
-def _stat_active_jobs(engine: Engine, params: dict) -> dict:
-    return {"value": compute_active_jobs(engine)}
+def _stat_active_jobs(engine: Engine, params: dict, *, group_by: str | None = None) -> dict:
+    if group_by == "department":
+        sql = """
+        SELECT COALESCE(jp.department, '未指定') AS department, COUNT(*) AS active_jobs
+        FROM job_profiles jp
+        WHERE jp.is_active = 1
+          AND jp.version = (
+              SELECT MAX(j2.version) FROM job_profiles j2 WHERE j2.title = jp.title
+          )
+        GROUP BY jp.department ORDER BY active_jobs DESC
+        """
+        with engine.connect() as conn:
+            rows = [dict(r) for r in conn.execute(text(sql)).mappings()]
+        value = int(sum(r["active_jobs"] for r in rows))
+        table = {
+            "columns": ["department", "active_jobs"],
+            "rows": [
+                {"department": r["department"], "active_jobs": int(r["active_jobs"])}
+                for r in rows
+            ],
+        }
+        return {"value": value, "table": table, "group_by": group_by}
+    return {"value": compute_active_jobs(engine), "group_by": None}
 
 
 #: metric_id → 受控统计函数（registry.status=active 之外不在表内，注册即准入）。
@@ -194,6 +256,23 @@ STAT_FUNCS: dict[str, Any] = {
     METRIC_ACTIVE_JOBS: _stat_active_jobs,
     METRIC_DEMAND_GAP: _stat_demand_gap,
     METRIC_THRESHOLD_REF: _stat_threshold_ref,
+}
+
+# --------------------------------------------------------------------------- #
+# 多维分组（T-D10 ①）——metric_id → {dim_key: label}；breakdown 函数逐维度实现。
+# 代码级注册（与 STAT_FUNCS 同模式）；registry 表为查询准入依据，维度为分析配置。
+# --------------------------------------------------------------------------- #
+
+DIMENSIONS: dict[str, dict[str, str]] = {
+    METRIC_ACTIVE_JOBS: {"department": "按部门"},
+    METRIC_DEMAND_GAP: {"project_group": "按项目群"},
+    METRIC_THRESHOLD_REF: {"job": "按岗位"},
+}
+
+BREAKDOWN_FUNCS: dict[str, dict[str, Any]] = {
+    METRIC_ACTIVE_JOBS: {"department": lambda engine, params: _stat_active_jobs(engine, params, group_by="department")},
+    METRIC_DEMAND_GAP: {"project_group": lambda engine, params: _stat_demand_gap(engine, params, group_by="project_group")},
+    METRIC_THRESHOLD_REF: {"job": lambda engine, params: _stat_threshold_ref(engine, params, group_by="job")},
 }
 
 
@@ -260,8 +339,9 @@ def _validate_params(defn: dict, params: dict) -> dict:
     return clean
 
 
-def _cache_key(metric_id: str, params: dict) -> str:
-    return f"{metric_id}:v1" if not params else f"{metric_id}:v1:{json.dumps(params, sort_keys=True)}"
+def _cache_key(metric_id: str, params: dict, group_by: str | None = None) -> str:
+    base = f"{metric_id}:v1" if not params else f"{metric_id}:v1:{json.dumps(params, sort_keys=True)}"
+    return base if group_by is None else f"{base}:by_{group_by}"
 
 
 async def query_metric(
@@ -269,9 +349,14 @@ async def query_metric(
     metric_id: str,
     *,
     params: dict | None = None,
+    group_by: str | None = None,
     bypass_cache: bool = False,
 ) -> MetricResult:
-    """registry 准入的通用指标查询（403/422 先于任何统计）。"""
+    """registry 准入的通用指标查询（403/422 先于任何统计）。
+
+    group_by（T-D10 多维分组）须在 DIMENSIONS[metric_id] 白名单内；
+    同一 metric+params+group_by 组合完全可复现（确定性管道 + 快照留痕，验收①）。
+    """
     params = dict(params or {})
     scope = get_account_scope(user)
 
@@ -282,6 +367,8 @@ async def query_metric(
         raise BizError(403, DENY_MESSAGE)
     if defn["status"] != METRIC_STATUS_ACTIVE:
         raise BizError(422, _AWAITING_CALIBER)
+    if group_by is not None and group_by not in DIMENSIONS.get(metric_id, {}):
+        raise BizError(422, _DIM_NOT_ALLOWED)
     clean_params = _validate_params(defn, params)
 
     stat_fn = STAT_FUNCS.get(metric_id)
@@ -293,7 +380,7 @@ async def query_metric(
     result: dict | None = None
     source = "primary"
     data_time = datetime.now()
-    key = _cache_key(metric_id, clean_params)
+    key = _cache_key(metric_id, clean_params, group_by)
 
     if not bypass_cache:
         cached = await cache.get("data", key)
@@ -307,7 +394,17 @@ async def query_metric(
 
     if not cache_hit:
         engine, source = await asyncio.to_thread(_resolve_engine)
-        result = await asyncio.to_thread(stat_fn, engine, clean_params)
+        result = await asyncio.to_thread(
+            stat_fn, engine, clean_params, group_by=group_by
+        )
+        result = dict(result)
+        result["chart"] = build_chart(metric_id, defn["name"], result.get("value"),
+                                      result.get("table"), result.get("note"),
+                                      group_by=group_by)
+        result["interpretation"] = build_interpretation(
+            metric_id, defn["name"], result.get("value"), result.get("table"),
+            result.get("note"), group_by=group_by, data_time=datetime.now(),
+        )
         data_time = datetime.now()
         await cache.set(
             "data",
@@ -329,6 +426,9 @@ async def query_metric(
         snapshot_id=snapshot_id,
         table=(result or {}).get("table"),
         note=(result or {}).get("note"),
+        group_by=group_by,
+        chart=(result or {}).get("chart"),
+        interpretation=(result or {}).get("interpretation"),
     )
 
 
@@ -355,5 +455,5 @@ def _write_snapshot(
 # 切片兼容入口（T-D01b 语义不变，内部已 registry 化）
 # --------------------------------------------------------------------------- #
 
-async def get_jobs_active(user, *, bypass_cache: bool = False) -> MetricResult:
-    return await query_metric(user, METRIC_ACTIVE_JOBS, bypass_cache=bypass_cache)
+async def get_jobs_active(user, *, group_by: str | None = None, bypass_cache: bool = False) -> MetricResult:
+    return await query_metric(user, METRIC_ACTIVE_JOBS, group_by=group_by, bypass_cache=bypass_cache)

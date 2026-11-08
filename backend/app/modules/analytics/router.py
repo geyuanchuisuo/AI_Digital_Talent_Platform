@@ -34,6 +34,9 @@ def _result_payload(result) -> dict:
         "snapshot_id": result.snapshot_id,
         "table": result.table,
         "note": result.note,
+        "group_by": result.group_by,
+        "chart": result.chart,
+        "interpretation": result.interpretation,
     }
 
 
@@ -44,9 +47,9 @@ async def list_metrics(user: CurrentUser):
     return {"code": 0, "message": "success", "data": {"items": service.list_registry()}}
 
 
-@router.get("/metrics/jobs/active", summary="活跃岗位数（管理侧指标，Redis 缓存）")
-async def get_active_jobs(user: CurrentUser):
-    result = await service.get_jobs_active(user)
+@router.get("/metrics/jobs/active", summary="活跃岗位数（管理侧指标，Redis 缓存；支持按部门分组）")
+async def get_active_jobs(user: CurrentUser, group_by: str | None = Query(None, description="分组维度：department")):
+    result = await service.get_jobs_active(user, group_by=group_by)
     return {"code": 0, "message": "success", "data": _result_payload(result)}
 
 
@@ -78,12 +81,13 @@ async def get_active_jobs_events(user: CurrentUser):
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-@router.get("/metrics/{metric_id}", summary="指标查询（registry 准入；B/C 待口径指标拒绝）")
+@router.get("/metrics/{metric_id}", summary="指标查询（registry 准入；支持多维分组/图表/解读；B/C 待口径指标拒绝）")
 async def query_metric(
     metric_id: str,
     user: CurrentUser,
     project_group_id: int | None = Query(None, description="job.demand_progress_gap 分组过滤"),
     job_profile_id: int | None = Query(None, description="match.threshold_reference 过滤"),
+    group_by: str | None = Query(None, description="多维分组维度（见指标 registry 允许维度）"),
     bypass_cache: bool = Query(False, description="跳过缓存直查（调试用）"),
 ):
     params = {
@@ -91,7 +95,8 @@ async def query_metric(
         for k, v in {"project_group_id": project_group_id, "job_profile_id": job_profile_id}.items()
         if v is not None
     }
-    result = await service.query_metric(user, metric_id, params=params, bypass_cache=bypass_cache)
+    result = await service.query_metric(user, metric_id, params=params,
+                                        group_by=group_by, bypass_cache=bypass_cache)
     return {"code": 0, "message": "success", "data": _result_payload(result)}
 
 

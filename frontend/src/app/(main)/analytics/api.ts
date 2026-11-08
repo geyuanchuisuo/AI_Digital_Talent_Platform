@@ -1,23 +1,55 @@
 /**
- * 问数切片接口封装（T-D01b）。走 `lib/http.ts`；
+ * 问数接口封装（T-D01b 切片 + T-D10 多维/图表/解读）。走 `lib/http.ts`；
  * SSE 用 fetch 流式读取（EventSource 不支持自定义 Authorization 头）。
  */
 
 import { get, API_PREFIX } from '@/lib/http';
 import { getToken } from '@/lib/auth';
 
-export interface ActiveJobsData {
+export interface ChartSpec {
+  chart_type: 'bar' | 'number' | 'none';
+  label?: string;
+  value?: number | string | null;
+  x_field?: string;
+  y_field?: string;
+  data?: Array<{ name: string; value: number | string | null }>;
+  truncated_series?: boolean;
+  reason?: string;
+}
+
+export interface InterpretationSegment {
+  kind: 'fact' | 'inference';
+  key: string;
+  text: string;
+  ref?: Record<string, unknown>;
+  basis?: string[];
+}
+
+export interface Interpretation {
+  segments: InterpretationSegment[];
+  generator: 'rule' | 'llm';
+}
+
+export interface MetricData {
   metric_id: string;
   name: string;
-  value: number;
+  value: number | null;
   source: 'replica' | 'primary';
   cache_hit: boolean;
   data_time: string;
   snapshot_id: number | null;
+  table: { columns: string[]; rows: Array<Record<string, unknown>> } | null;
+  note: string | null;
+  group_by: string | null;
+  chart: ChartSpec | null;
+  interpretation: Interpretation | null;
 }
 
-export function fetchActiveJobs(): Promise<ActiveJobsData> {
-  return get<ActiveJobsData>('/analytics/metrics/jobs/active');
+export type ActiveJobsData = MetricData;
+
+export function fetchActiveJobs(groupBy?: 'department'): Promise<ActiveJobsData> {
+  const qs = groupBy ? `?group_by=${groupBy}` : '';
+  return get<ActiveJobsData>(`/analytics/metrics/jobs/active${qs}`);
 }
 
 export type SseStage = 'started' | 'computed' | 'done';

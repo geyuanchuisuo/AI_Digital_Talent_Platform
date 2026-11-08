@@ -144,7 +144,10 @@ def test_cache_hit_and_snapshot_written(env):
         snaps = list(db.execute(select(AnalyticsQuerySnapshot)).scalars())
     assert len(snaps) == 2  # 两次调用各落一行快照（含命中行）
     assert snaps[0].metric_id == "jobs.active" and snaps[0].created_by == 2
-    assert snaps[0].result_json == {"value": EXPECTED_ACTIVE}  # name 在 registry 层，快照只存结果
+    # T-D10 起：快照存 value+group_by+chart+interpretation（T-D11 同快照导出基础）
+    assert snaps[0].result_json["value"] == EXPECTED_ACTIVE
+    assert snaps[0].result_json["chart"]["chart_type"] == "number"
+    assert snaps[0].result_json["interpretation"]["segments"]
 
 
 def test_sse_stream_events(env):
