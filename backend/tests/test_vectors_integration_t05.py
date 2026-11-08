@@ -10,6 +10,8 @@
 6. `rebuild_vectors` 按 `profile_text_hash` 差异决定是否重嵌（hash 未变零 embedding）。
 
 运行前置：Milvus 19530 在监听（挂了按《开发日志·环境坑复现速查卡》卡 B 恢复）。
+真实 Embedding 用例（探活/同步超时/重建）另需有效 EMBEDDING_API_KEY：
+Key 为空或占位符（sk-your-*）时自动跳过而非 401 失败（2026-11-08 依赖修复）。
 """
 
 from __future__ import annotations
@@ -34,6 +36,18 @@ pytestmark = pytest.mark.integration
 
 COLLECTION = "aitalent_t05_it"
 DIM = settings.embedding_dim
+
+
+def _real_embedding_key_configured() -> bool:
+    """真实 Embedding 用例需要有效凭据：空/占位 Key（sk-your-*）时跳过而非 401 失败。"""
+    key = (settings.embedding_api_key or "").strip()
+    return bool(key) and not key.lower().startswith("sk-your")
+
+
+needs_real_embedding_key = pytest.mark.skipif(
+    not _real_embedding_key_configured(),
+    reason="EMBEDDING_API_KEY 为空/占位符，真实 Embedding 调用不可用；配置真实 Key 后重跑",
+)
 
 
 @pytest.fixture(scope="module")
@@ -89,6 +103,7 @@ def test_dimension_mismatch_raises_on_existing_collection(store: MilvusStore):
     assert "64" in str(excinfo.value) and str(DIM) in str(excinfo.value)
 
 
+@needs_real_embedding_key
 def test_real_embedding_call_sets_embedding_alive():
     client = EmbeddingClient()
     vector = client.embed_one("Python 后端工程师，5 年经验，熟悉 FastAPI 与 MySQL")
@@ -96,6 +111,7 @@ def test_real_embedding_call_sets_embedding_alive():
     assert health_api.get_embedding_alive() is True
 
 
+@needs_real_embedding_key
 def test_sync_vector_by_text_real_and_timeout(store: MilvusStore, monkeypatch):
     monkeypatch.setattr(ms, "get_store", lambda: store)
 
@@ -113,6 +129,7 @@ def test_sync_vector_by_text_real_and_timeout(store: MilvusStore, monkeypatch):
     store.delete(90010)
 
 
+@needs_real_embedding_key
 def test_rebuild_uses_hash_diff_to_skip_unchanged(store: MilvusStore):
     with SessionLocal() as db:
         profile = TalentProfile(

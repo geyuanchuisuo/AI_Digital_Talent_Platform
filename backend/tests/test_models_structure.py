@@ -369,6 +369,36 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     "analytics_feedback": {
         "id", "snapshot_id", "comment", "created_by", "created_at",
     },
+    # ---- D 报告导出（T-D11）----
+    "snapshot_export_audit": {
+        "id", "snapshot_id", "format", "created_by", "created_at",
+    },
+    # ---- D 工作流数据模型（T-D14，契约 docs/modules/D/工作流数据模型契约.md）----
+    "workflow_definitions": {
+        "id", "code", "name", "description", "created_at", "updated_at",
+    },
+    "workflow_definition_versions": {
+        "id", "definition_id", "version", "status", "note", "created_by",
+        "published_by", "published_at", "created_at", "updated_at",
+    },
+    "workflow_nodes": {
+        "id", "version_id", "node_key", "name", "node_type", "position_json",
+        "config_json", "inputs_json", "outputs_json", "created_at", "updated_at",
+    },
+    "workflow_edges": {
+        "id", "version_id", "source_node_key", "target_node_key", "branch",
+        "condition_json", "created_at", "updated_at",
+    },
+    "workflow_runs": {
+        "id", "definition_id", "version_id", "thread_id", "trigger_type",
+        "trigger_ref", "params_json", "status", "error", "created_by",
+        "finished_at", "created_at", "updated_at",
+    },
+    "workflow_run_steps": {
+        "id", "run_id", "node_key", "node_type", "attempt", "status",
+        "output_json", "error", "started_at", "finished_at",
+        "created_at", "updated_at",
+    },
 }
 
 EXPECTED_UNIQUE: dict[str, set[str]] = {
@@ -403,6 +433,13 @@ EXPECTED_UNIQUE: dict[str, set[str]] = {
     "inventory_development_plans": {"uk_idp_review"},
     "notifications": {"uk_notifications_idempotency"},
     "workflow_engine_runs": {"uk_workflow_engine_runs_thread"},
+    # ---- D 工作流数据模型（T-D14）----
+    "workflow_definitions": {"uk_workflow_definitions_code"},
+    "workflow_definition_versions": {"uk_workflow_version"},
+    "workflow_nodes": {"uk_workflow_node_key"},
+    "workflow_edges": {"uk_workflow_edge"},
+    "workflow_runs": {"uk_workflow_runs_thread"},
+    "workflow_run_steps": {"uk_workflow_step_attempt"},
 }
 
 EXPECTED_INDEXES: dict[str, set[str]] = {
@@ -422,6 +459,11 @@ EXPECTED_INDEXES: dict[str, set[str]] = {
     "notifications": {"idx_notifications_recipient", "idx_notifications_ref"},
     "workflow_engine_runs": {"idx_workflow_engine_runs_status"},
     "analytics_query_snapshots": {"idx_aqs_metric_time", "idx_aqs_user"},
+    # ---- D 工作流数据模型（T-D14）----
+    "workflow_definition_versions": {"idx_wdv_definition_status"},
+    "workflow_nodes": {"idx_workflow_nodes_version"},
+    "workflow_edges": {"idx_workflow_edges_version"},
+    "workflow_runs": {"idx_workflow_runs_status", "idx_workflow_runs_definition"},
 }
 
 
@@ -429,10 +471,10 @@ def ddl(model) -> str:
     return str(CreateTable(model.__table__).compile(dialect=DIALECT))
 
 
-def test_exactly_63_tables_and_no_phase2_table():
-    assert len(TABLE_NAMES) == 63
-    assert len(MODEL_CLASSES) == 63
-    assert len(Base.metadata.tables) == 63
+def test_exactly_70_tables_and_no_phase2_table():
+    assert len(TABLE_NAMES) == 70
+    assert len(MODEL_CLASSES) == 70
+    assert len(Base.metadata.tables) == 70
     assert set(TABLE_NAMES) == set(EXPECTED_COLUMNS)
     # D-7 缓办：一期不建 llm_score_cache
     assert "llm_score_cache" not in Base.metadata.tables
