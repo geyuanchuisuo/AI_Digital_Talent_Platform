@@ -13,15 +13,23 @@
 
 import { Avatar, Layout, Space, Tag, Typography } from 'antd';
 import { UserOutlined } from '@ant-design/icons';
-import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 import { clearAuth, getUser, type AuthUser } from '@/lib/auth';
 
 const { Header, Content } = Layout;
 
+// 个人端导航（页面级入口；B/C 的新页面在此追加）
+const NAV_ITEMS = [
+  { key: '/home', label: '首页' },
+  { key: '/applications', label: '我的岗位申请' },
+];
+
 export default function PersonalShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname() || '';
   const [user, setUser] = useState<AuthUser | null>(null);
 
   // localStorage 只能在客户端读，挂载后再取，避免 SSR 水合不一致
@@ -53,6 +61,24 @@ export default function PersonalShell({ children }: { children: React.ReactNode 
             个人端
           </Typography.Text>
           <Tag color="blue">员工 / 候选人自助入口</Tag>
+          <Space size={4}>
+            {NAV_ITEMS.map((item) => (
+              <Link
+                key={item.key}
+                href={item.key}
+                style={{
+                  paddingInline: 12,
+                  paddingBlock: 4,
+                  borderRadius: 4,
+                  fontWeight: pathname.startsWith(item.key) ? 600 : 400,
+                  background: pathname.startsWith(item.key) ? '#e6f4ff' : 'transparent',
+                  color: 'inherit',
+                }}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </Space>
         </Space>
         <Space
           style={{ cursor: 'pointer' }}
