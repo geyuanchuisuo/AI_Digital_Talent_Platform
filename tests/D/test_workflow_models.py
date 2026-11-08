@@ -26,6 +26,16 @@ from app.models import (
 from app.modules.workflows.models import NODE_TYPES
 from app.modules.workflows import service
 
+class _Actor:
+    """service 层门禁用最小 user 形（get_account_scope 只读 id/role/person_id）。"""
+
+    def __init__(self, user_id: int, role: str = "hr") -> None:
+        self.id = user_id
+        self.role = role
+
+
+AUTHOR = _Actor(9001)
+
 # conftest 自动加载（SQLite 编译规则）；本文件全部同步用例
 
 WF_TABLES = (
@@ -93,13 +103,13 @@ def _parse_approval_graph() -> tuple[list[dict], list[dict]]:
 
 
 def _make_definition(db, code: str = "hire_review") -> WorkflowDefinition:
-    return service.create_definition(db, code=code, name="招聘复核流程")
+    return service.create_definition(db, user=AUTHOR, code=code, name="招聘复核流程")
 
 
 def _publish_graph(db, definition_id: int, nodes=None, edges=None) -> WorkflowDefinitionVersion:
     if nodes is None:
         nodes, edges = _parse_approval_graph()
-    version = service.create_draft_version(db, definition_id, nodes=nodes, edges=edges or [])
+    version = service.create_draft_version(db, definition_id, user=AUTHOR, nodes=nodes, edges=edges or [])
     return service.publish_version(db, version.id)
 
 
@@ -121,6 +131,7 @@ def test_whitelisted_node_types_accepted(db, node_type):
     version = service.create_draft_version(
         db,
         definition.id,
+        user=AUTHOR,
         nodes=[{"key": "n1", "name": "节点", "node_type": node_type}],
         edges=[],
     )
@@ -135,6 +146,7 @@ def test_unknown_node_type_rejected_everywhere(db):
         service.create_draft_version(
             db,
             definition.id,
+        user=AUTHOR,
             nodes=[{"key": "magic", "name": "魔法节点", "node_type": "llm_magic"}],
             edges=[],
         )
@@ -154,7 +166,7 @@ def test_unknown_node_type_rejected_everywhere(db):
 def test_input_output_refs_persisted_and_reviewable(db):
     definition = _make_definition(db)
     nodes, edges = _parse_approval_graph()
-    version = service.create_draft_version(db, definition.id, nodes=nodes, edges=edges)
+    version = service.create_draft_version(db, definition.id, user=AUTHOR, nodes=nodes, edges=edges)
 
     detail = service.get_version_detail(db, version.id)
     assert detail["definition"]["code"] == "hire_review"
@@ -181,6 +193,7 @@ def test_bad_refs_rejected(db):
         service.create_draft_version(
             db,
             definition.id,
+        user=AUTHOR,
             nodes=[
                 {
                     "key": "n1",
@@ -211,6 +224,7 @@ def test_bad_refs_rejected(db):
     version = service.create_draft_version(
         db,
         definition.id,
+        user=AUTHOR,
         nodes=[
             {
                 "key": "early",
@@ -236,7 +250,7 @@ def test_approval_branch_rules(db):
     ]
 
     def try_edges(edges):
-        service.create_draft_version(db, definition.id, nodes=base_nodes, edges=edges)
+        service.create_draft_version(db, definition.id, user=AUTHOR, nodes=base_nodes, edges=edges)
 
     with pytest.raises(BizError, match="必须带分支"):
         try_edges([{"source": "a1", "target": "t1"}])
@@ -254,6 +268,7 @@ def test_approval_branch_rules(db):
     version = service.create_draft_version(
         db,
         definition.id,
+        user=AUTHOR,
         nodes=base_nodes,
         edges=[
             {"source": "a1", "target": "t1", "branch": "approve"},
@@ -296,11 +311,12 @@ def test_version_locking_running_run_unaffected(db):
                 vid,
                 nodes=[{"key": "hack", "name": "改图", "node_type": "data_analysis"}],
                 edges=[],
+                user=AUTHOR,
             )
         assert excinfo.value.code == 409 and "版本锁定" in excinfo.value.message
 
     # 草稿/废弃版本不可启动运行；缺省取最新发布
-    draft = service.create_draft_version(db, definition.id, nodes=v2_nodes, edges=[])
+    draft = service.create_draft_version(db, definition.id, user=AUTHOR, nodes=v2_nodes, edges=[])
     with pytest.raises(BizError, match="仅发布版本"):
         service.start_run(db, definition_id=definition.id, thread_id="th-draft", version_id=draft.id)
     run3 = service.start_run(db, definition_id=definition.id, thread_id="th-latest")
@@ -313,7 +329,7 @@ def test_version_locking_running_run_unaffected(db):
 def test_publish_rules_and_run_steps(db):
     definition = _make_definition(db)
     with pytest.raises(BizError, match="空图不可发布"):
-        service.publish_version(db, service.create_draft_version(db, definition.id, nodes=[], edges=[]).id)
+        service.publish_version(db, service.create_draft_version(db, definition.id, user=AUTHOR, nodes=[], edges=[]).id)
 
     _publish_graph(db, definition.id)
     run = service.start_run(db, definition_id=definition.id, thread_id="th-steps")
@@ -349,10 +365,10 @@ def test_publish_rules_and_run_steps(db):
 
 def test_definition_code_rules(db):
     with pytest.raises(BizError, match="node_key"):
-        service.create_definition(db, code="Bad Code", name="x")
-    service.create_definition(db, code="dup_check", name="一次")
+        service.create_definition(db, user=AUTHOR, code="Bad Code", name="x")
+    service.create_definition(db, user=AUTHOR, code="dup_check", name="一次")
     with pytest.raises(BizError, match="已存在"):
-        service.create_definition(db, code="dup_check", name="二次")
+        service.create_definition(db, user=AUTHOR, code="dup_check", name="二次")
     with pytest.raises(BizError) as notfound:
         service.start_run(db, definition_id=99999, thread_id="th-404")
     assert notfound.value.code == 404

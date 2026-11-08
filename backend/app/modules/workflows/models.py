@@ -53,8 +53,10 @@ NODE_TYPE_LABELS: dict[str, str] = {
 # 人工审批节点的出边分支（approve/reject 两路）；非审批节点不允许分支出边。
 APPROVAL_BRANCHES: tuple[str, ...] = ("approve", "reject")
 
-# 版本状态机：draft → published → deprecated（回滚 = 重新发布旧版本，T-D15 生命周期）。
-VERSION_STATUSES: tuple[str, ...] = ("draft", "published", "deprecated")
+# 版本状态机（T-D15 受控生命周期）：draft →(submit)→ pending_review
+# →(审核通过)→ published →(停用)→ deprecated；拒绝则退回 draft（附 review_note）。
+# 回滚 = 目标版本重新成为唯一发布版（其余 published 一并停用）。
+VERSION_STATUSES: tuple[str, ...] = ("draft", "pending_review", "published", "deprecated")
 
 # 运行状态机与引擎登记（workflow_engine_runs）同口径：running → (waiting | succeeded |
 # failed)；waiting 仅人工 resume 推进；cancelled 供管理面。本表为业务侧镜像。
@@ -106,6 +108,10 @@ class WorkflowDefinitionVersion(PKMixin, UpdatedAtMixin, Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="draft")
     note: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_by: Mapped[int | None] = mapped_column(nullable=True)
+    # T-D15 受控生命周期：提交与审核分离（四眼原则——提交人不可自行发布）
+    submitted_by: Mapped[int | None] = mapped_column(nullable=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    review_note: Mapped[str | None] = mapped_column(String(500), nullable=True)
     published_by: Mapped[int | None] = mapped_column(nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

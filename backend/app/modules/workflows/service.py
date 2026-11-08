@@ -39,9 +39,10 @@ _MUTATE_PUBLISHED = "已发布版本不可修改（版本锁定）；请新建�
 
 
 def create_definition(
-    db: Session, *, code: str, name: str, description: str | None = None
+    db: Session, *, code: str, name: str, description: str | None = None, user
 ) -> WorkflowDefinition:
-    """新建流程定义（code 唯一，小写蛇形）。"""
+    """新建流程定义（管理侧；code 唯一，小写蛇形）。"""
+    _require_management(user)
     if not _is_valid_key(code or ""):
         raise _KEY_BAD
     if not name or len(name) > 128:
@@ -64,10 +65,12 @@ def create_draft_version(
     *,
     nodes: list[dict[str, Any]],
     edges: list[dict[str, Any]],
+    user,
     created_by: int | None = None,
     note: str | None = None,
 ) -> WorkflowDefinitionVersion:
-    """新建草稿版本：整图校验（白名单/引用/连线）通过后版本号 = max+1 落库。"""
+    """新建草稿版本（管理侧）：整图校验（白名单/引用/连线）通过后版本号 = max+1 落库。"""
+    _require_management(user)
     definition = db.get(WorkflowDefinition, definition_id)
     if definition is None:
         raise BizError(404, "流程定义不存在")
@@ -98,8 +101,10 @@ def update_draft_version(
     *,
     nodes: list[dict[str, Any]],
     edges: list[dict[str, Any]],
+    user,
 ) -> WorkflowDefinitionVersion:
-    """整图替换草稿版本的节点/连线（发布版本拒绝——版本锁定）。"""
+    """整图替换草稿版本的节点/连线（管理侧；发布版本拒绝——版本锁定）。"""
+    _require_management(user)
     version = _get_version(db, version_id)
     if version.status != "draft":
         raise BizError(409, _MUTATE_PUBLISHED)
@@ -148,6 +153,121 @@ def deprecate_version(db: Session, version_id: int) -> WorkflowDefinitionVersion
     db.commit()
     db.refresh(version)
     return version
+
+
+# ---- T-D15 受控生命周期：提交 → 审核 → 发布/停用/回滚 ----
+# 权限口径（阶段 1）：创建/修改/提交 = 管理侧（can_view_all_persons）；
+# 审核（通过/驳回）额外要求四眼原则——提交人不可自行审核发布（T-D15 验收②）；
+# 停用/回滚 = 管理侧。service 直连的 publish_version/deprecate_version 保留为
+# 内部原语（T-D14 测试与回滚复用），router 只暴露受控路径。
+
+
+def _require_management(user) -> None:
+    """管理侧门禁（can_view_all_persons）；router 与 service 生命周期函数共用。"""
+    from app.core.auth.scope import get_account_scope  # noqa: PLC0415 - 避免环（scope 纯函数，安全）
+
+    if not get_account_scope(user).can_view_all_persons:
+        raise BizError(403, "仅管理侧可操作流程定义")
+
+
+require_management = _require_management  # router 侧公开别名（同一门禁，单一实现）
+
+
+def list_definitions(db: Session) -> list[WorkflowDefinition]:
+    """全部流程定义（id 升序）。"""
+    return list(
+        db.execute(select(WorkflowDefinition).order_by(WorkflowDefinition.id.asc())).scalars().all()
+    )
+
+
+def submit_version(db: Session, version_id: int, *, user) -> WorkflowDefinitionVersion:
+    """草稿 → 待审核（管理侧；空图拒绝）。记录提交人（四眼依据）。"""
+    _require_management(user)
+    version = _get_version(db, version_id)
+    if version.status != "draft":
+        raise BizError(409, f"仅草稿可提交审核，当前 {version.status}")
+    node_count = db.execute(
+        select(func.count()).select_from(WorkflowNode).where(WorkflowNode.version_id == version_id)
+    ).scalar_one()
+    if node_count < 1:
+        raise BizError(422, "空图不可提交审核（至少 1 个节点）")
+    version.status = "pending_review"
+    version.submitted_by = getattr(user, "id", None)
+    version.submitted_at = datetime.now()
+    db.commit()
+    db.refresh(version)
+    return version
+
+
+def review_version(
+    db: Session, version_id: int, *, user, approve: bool, note: str | None = None
+) -> WorkflowDefinitionVersion:
+    """审核待审版本：通过 → published（≥1 节点）；驳回 → draft（留 review_note）。
+
+    四眼原则（T-D15 验收②）：提交人不可自行审核——无论通过或驳回，403。
+    """
+    _require_management(user)
+    version = _get_version(db, version_id)
+    if version.status != "pending_review":
+        raise BizError(409, f"仅待审核版本可审核，当前 {version.status}")
+    submitter = version.submitted_by
+    if submitter is not None and getattr(user, "id", None) == submitter:
+        raise BizError(403, "提交与审核须为不同账号（四眼原则），不可自行发布")
+    version.review_note = note
+    if approve:
+        node_count = db.execute(
+            select(func.count()).select_from(WorkflowNode).where(WorkflowNode.version_id == version_id)
+        ).scalar_one()
+        if node_count < 1:
+            raise BizError(422, "空图不可发布（至少 1 个节点）")
+        version.status = "published"
+        version.published_by = getattr(user, "id", None)
+        version.published_at = datetime.now()
+    else:
+        version.status = "draft"
+    db.commit()
+    db.refresh(version)
+    return version
+
+
+def deactivate_published_version(db: Session, version_id: int, *, user) -> WorkflowDefinitionVersion:
+    """管理侧停用发布版本（运行中实例不受影响；回退边界见契约）。"""
+    _require_management(user)
+    return deprecate_version(db, version_id)
+
+
+def rollback_definition(
+    db: Session, definition_id: int, *, target_version_id: int, user
+) -> WorkflowDefinitionVersion:
+    """管理侧回滚：目标版本重新成为唯一发布版（其余 published 一并停用）。
+
+    目标须为 published/deprecated 且属于该定义；运行中实例钉死自身 version_id
+    不受影响，新启动的运行缺省取「最新发布」即回滚目标。
+    """
+    _require_management(user)
+    if db.get(WorkflowDefinition, definition_id) is None:
+        raise BizError(404, "流程定义不存在")
+    target = _get_version(db, target_version_id)
+    if target.definition_id != definition_id:
+        raise BizError(422, "回滚目标不属于该流程定义")
+    if target.status not in ("published", "deprecated"):
+        raise BizError(422, f"回滚目标须为已发布/已停用版本，当前 {target.status}")
+    now = datetime.now()
+    for other in db.execute(
+        select(WorkflowDefinitionVersion).where(
+            WorkflowDefinitionVersion.definition_id == definition_id,
+            WorkflowDefinitionVersion.status == "published",
+            WorkflowDefinitionVersion.id != target.id,
+        )
+    ).scalars():
+        other.status = "deprecated"
+    if target.status == "deprecated":
+        target.status = "published"
+        target.published_by = getattr(user, "id", None)
+        target.published_at = now
+    db.commit()
+    db.refresh(target)
+    return target
 
 
 def start_run(
@@ -298,6 +418,11 @@ def get_version_detail(db: Session, version_id: int) -> dict[str, Any]:
             "version": version.version,
             "status": version.status,
             "note": version.note,
+            "created_by": version.created_by,
+            "submitted_by": version.submitted_by,
+            "submitted_at": version.submitted_at,
+            "review_note": version.review_note,
+            "published_by": version.published_by,
             "published_at": version.published_at,
         },
         "nodes": [
