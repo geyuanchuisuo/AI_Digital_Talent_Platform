@@ -45,11 +45,17 @@ def test_list_user_roles_empty():
 
 
 def test_widest_data_scope_fallback_by_users_role():
-    """无 sys_user_roles 记录时按 users.role 回退：hr→all，其他→self。"""
+    """无 sys_user_roles 记录时按 users.role 回退：hr→all，其他→self。
+
+    用自建 rbac_ 前缀 hr 用户定位（REQ-D-20261108-052000）：勿假设 seed hr 的
+    自增 id——测试库重建后 id 会漂移（hr 曾从 1 漂到 68），user_id=1 不存在时
+    回退落到 'self' 造成误报。
+    """
     from app.database import SessionLocal
 
+    hr = _make_user(role="hr")
     with SessionLocal() as db:
-        assert widest_data_scope(db, user_id=1) == "all"  # seed hr
+        assert widest_data_scope(db, user_id=hr.id) == "all"
         personal = _make_user(role="personal")
         assert widest_data_scope(db, user_id=personal.id) == "self"
 
