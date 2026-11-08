@@ -101,7 +101,12 @@ app.add_middleware(
 # T-D01（REQ-D-20261107-183200，2026-11-07 用户指令 D 直接落地）：Redis 限流/黑名单中间件。
 # REDIS_URL 为空 = 直通零副作用；配置后固定窗口限流 + 黑名单 403，Redis 停服降级放行。
 # 契约：docs/modules/D/缓存限流契约.md。
-app.add_middleware(RateLimitMiddleware)
+# 认证链路豁免限流/黑名单（2026-11-08 修复：跨环境共享 Redis 时，其他环境测试写入的
+# ratelimit:blacklist:{ip} 会把本环境用户挡在登录页（403→前端渲染「账号已停用」）——
+# 登录/登出/me 是认证动作，不参与业务限流；业务接口限流照常）
+from app.core.cache.ratelimit import DEFAULT_EXEMPT_PATHS  # noqa: E402
+
+app.add_middleware(RateLimitMiddleware, exempt_paths=(*DEFAULT_EXEMPT_PATHS, "/api/auth"))
 
 # T-02：四类全局异常处理器（BizError / HTTPException / RequestValidationError / Exception）
 # 口径见 docs/统一错误码与鉴权.md v1.2 §六；request_id 由下方中间件写入 request.state。
