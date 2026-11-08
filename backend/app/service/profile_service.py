@@ -33,6 +33,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.modules.talents.history import save_version
 from app.core import llm_client, milvus_store
 from app.core.normalize import (
     calc_work_years,
@@ -140,7 +141,7 @@ def build_profile(
     data = _as_mapping(structured if structured is not None else parsed.structured_json)
     values = build_scalar_fields(data)
 
-    profile = profile_dao.get(db, parsed.talent_profile_id) if parsed.talent_profile_id else None
+    profile = db.scalar(select(TalentProfile).where(TalentProfile.id == parsed.talent_profile_id).with_for_update().execution_options(populate_existing=True)) if parsed.talent_profile_id else None
     created = False
     if profile is None:
         # 建行与回填 parsed_resumes.talent_profile_id 必须同事务（T-13 幂等防护②）
@@ -150,6 +151,7 @@ def build_profile(
         created = True
         logger.info("简历 %s 新建画像 %s", parsed.resume_file_id, profile.id)
     else:
+        save_version(db, profile, "baseline")
         protected = set(profile.manual_edited_fields or [])
         allowed = {
             column: value
@@ -159,6 +161,7 @@ def build_profile(
         changed = profile_dao.apply_fields(db, profile, allowed)
         if changed:
             logger.info("简历 %s 复用画像 %s，更新字段 %s", parsed.resume_file_id, profile.id, changed)
+    save_version(db, profile, "reparse")
     db.commit()
     db.refresh(profile)
 
@@ -174,6 +177,11 @@ def build_profile(
             )
             raise ProfileError(f"缺 {missing} 且本次不允许调用 LLM（只补向量场景）")
         output = call_profile_llm(data)
+        # External calls run without a row lock. Re-read manual confirmations before applying output.
+        profile = db.scalar(select(TalentProfile).where(TalentProfile.id == profile.id).with_for_update().execution_options(populate_existing=True))
+        protected = set(profile.manual_edited_fields or [])
+        need_tags = not profile.tags_json and "tags" not in protected
+        need_ability = not profile.ability_scores_json and "ability_scores" not in protected
         llm_called = True
         if need_tags:
             pairs = normalize_tag_items(output.tags)
@@ -186,6 +194,7 @@ def build_profile(
         if need_ability:
             profile.ability_scores_json = clamp_ability(output.ability_scores)
             ability_written = True
+        save_version(db, profile, "reparse")
         db.commit()
         db.refresh(profile)
 

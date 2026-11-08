@@ -32,6 +32,7 @@ from typing import Any, Sequence
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.modules.talents.history import save_version, read_version
 from app.core.errors import BizError
 from app.core.normalize import DEGREE_VALUES, normalize_email, normalize_phone, normalize_skills, normalize_tag
 from app.dao import resume_files as resume_file_dao
@@ -195,7 +196,8 @@ def patch_profile(
     同一事务写字段 + `manual_edited_fields` + `updated_by` + 标签行重建 →
     commit 后按 hash 触发向量重算（失败不回滚，200 + failed）。
     """
-    profile = _require_profile(db, talent_id)
+    profile = _require_profile(db, talent_id, lock=True)
+    save_version(db, profile, "baseline")
     provided = payload.model_fields_set
     values = _build_patch_values(payload, provided)
 
@@ -229,6 +231,7 @@ def patch_profile(
             "vector_status": profile.vector_status,
             "profile_text_changed": False,
         }
+    save_version(db, profile, "manual_edit", changed_by=user_id)
     db.commit()
     db.refresh(profile)
 
@@ -246,8 +249,11 @@ def patch_profile(
     }
 
 
-def _require_profile(db: Session, talent_id: int, *, allow_deleted: bool = False) -> TalentProfile:
-    profile = profile_dao.get(db, talent_id)
+def _require_profile(db: Session, talent_id: int, *, allow_deleted: bool = False, lock: bool = False) -> TalentProfile:
+    if lock:
+        profile = db.scalar(select(TalentProfile).where(TalentProfile.id == talent_id).with_for_update().execution_options(populate_existing=True))
+    else:
+        profile = profile_dao.get(db, talent_id)
     if profile is None or (profile.deleted_at is not None and not allow_deleted):
         raise BizError(404, PROFILE_NOT_FOUND)
     return profile
@@ -497,11 +503,13 @@ def soft_delete(db: Session, talent_id: int, *, user_id: int) -> dict[str, Any]:
 
     重复删除 404（接口 §5）。关联 parsed_resumes / 原始文件 / 历史结果全部保留。
     """
-    profile = _require_profile(db, talent_id)
+    profile = _require_profile(db, talent_id, lock=True)
     if profile.deleted_at is not None:
         raise BizError(404, PROFILE_NOT_FOUND)
+    save_version(db, profile, "baseline")
     profile.deleted_at = datetime.now()
     profile.deleted_by = user_id
+    save_version(db, profile, "delete", changed_by=user_id)
     db.commit()
     vector_deleted = _delete_vector_quietly(talent_id)
     return {"deleted": True, "vector_deleted": vector_deleted}
@@ -513,12 +521,14 @@ def restore(db: Session, talent_id: int, *, user_id: int) -> dict[str, Any]:
     必须 force：软删时向量已从 Milvus 删除，而 `profile_text_hash` 与
     `vector_status` 均未变化——不 force 会被「hash 未变且 synced」短路，向量永远补不回来。
     """
-    profile = _require_profile(db, talent_id, allow_deleted=True)
+    profile = _require_profile(db, talent_id, allow_deleted=True, lock=True)
     if profile.deleted_at is None:
         raise BizError(400, "画像未被软删除，无需恢复")
+    save_version(db, profile, "baseline")
     profile.deleted_at = None
     profile.deleted_by = None
     profile.updated_by = user_id
+    save_version(db, profile, "restore", changed_by=user_id)
     db.commit()
     db.refresh(profile)
 
@@ -610,6 +620,8 @@ SNAPSHOT_MAX_LIMIT = 50
 EVIDENCE_MAX_BATCH = 50
 EVIDENCE_MAX_LIMIT = 50
 EVIDENCE_FIELD_PATHS = (
+    "basic.name", "basic.phone", "basic.email", "basic.gender", "basic.birth_year", "basic.city",
+    "profile.degree", "profile.work_years", "profile.current_title", "profile.expected_title",
     "profile",
     "basic",
     "skills",
@@ -656,6 +668,13 @@ class AccountScope:
 
 
 def _normalize_scope(scope: AccountScope | Mapping[str, Any] | None) -> AccountScope:
+    from app.core.auth.scope import AccountScope as SharedScope
+    if isinstance(scope, SharedScope):
+        if scope.can_view_all_persons:
+            return AccountScope(role="system")
+        if scope.person_id is None:
+            raise SnapshotScopeError("无权访问该资源")
+        return AccountScope(role="personal", person_id=scope.person_id)
     if scope is None:
         return AccountScope()
     if isinstance(scope, Mapping):
@@ -986,6 +1005,14 @@ def get_person_snapshot(
     parsed_row = parsed.get(person_id)
     file_row = files.get(parsed_row.resume_file_id) if parsed_row is not None else None
     task_row = tasks.get(parsed_row.resume_file_id) if parsed_row is not None else None
+    if profile is not None and profile.deleted_at is None:
+        persisted = read_version(db, person_id, version)
+        if persisted is not None:
+            if version is None:
+                persisted["profile"]["vector_status"] = profile.vector_status
+                persisted["parse_status"] = task_row.status if task_row is not None else None
+                persisted["parse_stage"] = task_row.stage if task_row is not None else None
+            return persisted
     return _build_snapshot(
         person_id=person_id,
         profile=profile,
@@ -1017,25 +1044,7 @@ def get_person_snapshots(
     if last_id is not None:
         ordered = [person_id for person_id in ordered if person_id > last_id]
     page_ids = ordered[:limit]
-    profiles, tags, parsed, files, tasks = _load_snapshot_bundle(db, page_ids)
-    snapshot_at = datetime.now().astimezone().isoformat(timespec="seconds")
-    items = []
-    for person_id in page_ids:
-        parsed_row = parsed.get(person_id)
-        file_row = files.get(parsed_row.resume_file_id) if parsed_row is not None else None
-        task_row = tasks.get(parsed_row.resume_file_id) if parsed_row is not None else None
-        items.append(
-            _build_snapshot(
-                person_id=person_id,
-                profile=profiles.get(person_id),
-                tag_rows=tags.get(person_id, []),
-                parsed=parsed_row,
-                resume_file=file_row,
-                parse_task=task_row,
-                requested_version=version,
-                snapshot_at=snapshot_at,
-            )
-        )
+    items = [get_person_snapshot(db, pid, version=version, scope=normalized_scope) for pid in page_ids]
     has_more = len(ordered) > len(page_ids)
     return {
         "items": items,
@@ -1071,34 +1080,15 @@ def get_person_evidence(
         ordered = [person_id for person_id in ordered if person_id > last_id]
     page_ids = ordered[:limit]
 
-    profiles: dict[int, TalentProfile] = {}
-    if page_ids:
-        profiles = {
-            row.id: row
-            for row in db.execute(
-                select(TalentProfile).where(TalentProfile.id.in_(page_ids))
-            ).scalars()
-        }
     items = []
     for person_id in page_ids:
-        profile = profiles.get(person_id)
-        if version not in (None, SNAPSHOT_BASELINE_VERSION):
-            status = "version_not_found"
-        elif profile is None:
-            status = "not_found"
-        elif profile.deleted_at is not None:
-            status = "deleted"
-        else:
-            status = "ready"
-        items.append(
-            {
-                "person_id": person_id,
-                "version": SNAPSHOT_BASELINE_VERSION,
-                "status": status,
-                "evidence_status": "unavailable",
-                "evidence": [],
-            }
-        )
+        snapshot = get_person_snapshot(db, person_id, version=version, scope=normalized_scope)
+        evidence = snapshot.get("evidence", [])
+        if field_paths is not None:
+            evidence = [entry for entry in evidence if entry["field_path"] in field_paths]
+        items.append({"person_id": person_id, "version": snapshot.get("profile_version"),
+            "status": snapshot["status"], "evidence_status": "available" if evidence else "unavailable",
+            "evidence": evidence})
     has_more = len(ordered) > len(page_ids)
     return {
         "items": items,

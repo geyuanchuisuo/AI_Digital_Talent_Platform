@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import CHAR, Index, String, Text, UniqueConstraint
+from sqlalchemy import CHAR, Index, String, Text, UniqueConstraint, Integer, DECIMAL
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -100,3 +100,25 @@ class ParsedResume(PKMixin, CreatedAtMixin, Base):
     structured_json: Mapped[dict] = mapped_column(JSONDict, nullable=False)
     raw_text: Mapped[str] = mapped_column(MEDIUMTEXT_TYPE, nullable=False)
     llm_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+
+class ResumePage(PKMixin, CreatedAtMixin, Base):
+    __tablename__ = "resume_pages"
+    __table_args__ = (UniqueConstraint("resume_file_id", "page_no", name="uk_page_file_no"), MYSQL_TABLE_OPTIONS)
+    resume_file_id: Mapped[int] = mapped_column(PK_TYPE, nullable=False)
+    page_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    text_content: Mapped[str] = mapped_column(Text, nullable=False)
+    ocr_engine: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    confidence: Mapped[float | None] = mapped_column(DECIMAL(4, 3), nullable=True)
+
+
+class ParseAttempt(PKMixin, Base):
+    __tablename__ = "parse_attempts"
+    __table_args__ = (UniqueConstraint("parse_task_id", "attempt_no", name="uk_attempt_task_no"), MYSQL_TABLE_OPTIONS)
+    parse_task_id: Mapped[int] = mapped_column(PK_TYPE, nullable=False)
+    attempt_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    stage: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(nullable=True)

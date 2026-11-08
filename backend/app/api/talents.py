@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from app.api.deps import CurrentUser, PageParams, pagination
+from app.api.deps import CurrentUser, PageParams, pagination, AccountScopeDep
 from app.core.errors import HALF_WRITE_VECTOR_MESSAGE, BizError
 from app.core.normalize import DEGREE_VALUES
 from app.core.response import ok, paginated
@@ -42,13 +42,14 @@ from app.schemas.talent import (
     TalentSearchItem,
 )
 from app.service import dedup_service, talent_service
+from app.modules.talents.access import require_manager, require_profile_reader
 
 router = APIRouter(prefix="/api/talents", tags=["talents"])
 
 DUPLICATE_STATUSES = ("pending", "merged", "kept")
 
 
-@router.get("/duplicates", summary="查重待确认列表")
+@router.get("/duplicates", summary="查重待确认列表", dependencies=[Depends(require_manager)])
 def list_duplicates(
     user: CurrentUser,
     db: Annotated[Session, Depends(get_db)],
@@ -70,7 +71,7 @@ def list_duplicates(
     )
 
 
-@router.post("/duplicates/{duplicate_id}/resolve", summary="处理查重：合并或保留")
+@router.post("/duplicates/{duplicate_id}/resolve", summary="处理查重：合并或保留", dependencies=[Depends(require_manager)])
 def resolve_duplicate(
     duplicate_id: int,
     payload: DuplicateResolveRequest,
@@ -132,7 +133,7 @@ def resolve_duplicate(
 # =========================================================================== #
 # T-18 画像 CRUD（接口 §5）。⚠️ /search（T-19）加入时必须插在 GET /{talent_id} 之前
 # =========================================================================== #
-@router.get("", summary="画像列表（默认未删除视角，deleted=true 为回收站）")
+@router.get("", summary="画像列表（默认未删除视角，deleted=true 为回收站）", dependencies=[Depends(require_manager)])
 def list_talents(
     user: CurrentUser,
     db: Annotated[Session, Depends(get_db)],
@@ -172,7 +173,7 @@ def list_talents(
     )
 
 
-@router.get("/search", summary="语义检索（F2-5，T-19）")
+@router.get("/search", summary="语义检索（F2-5，T-19）", dependencies=[Depends(require_manager)])
 def search_talents(
     user: CurrentUser,
     db: Annotated[Session, Depends(get_db)],
@@ -188,7 +189,7 @@ def search_talents(
     return ok({"items": [TalentSearchItem.model_validate(item).model_dump() for item in items]})
 
 
-@router.get("/{talent_id}", summary="画像详情（经历类为聚合只读视图）")
+@router.get("/{talent_id}", summary="画像详情（经历类为聚合只读视图）", dependencies=[Depends(require_profile_reader)])
 def get_talent(
     talent_id: int,
     user: CurrentUser,
@@ -198,7 +199,7 @@ def get_talent(
     return ok(TalentDetailData.model_validate(data).model_dump())
 
 
-@router.patch("/{talent_id}", summary="人工修正画像（F2-6 字段级保护）")
+@router.patch("/{talent_id}", summary="人工修正画像（F2-6 字段级保护）", dependencies=[Depends(require_manager)])
 def patch_talent(
     talent_id: int,
     payload: TalentPatchRequest,
@@ -219,7 +220,7 @@ def patch_talent(
     return ok(body, message=HALF_WRITE_VECTOR_MESSAGE if failed else "success")
 
 
-@router.delete("/{talent_id}", summary="软删除画像（F2-7）")
+@router.delete("/{talent_id}", summary="软删除画像（F2-7）", dependencies=[Depends(require_manager)])
 def delete_talent(
     talent_id: int,
     user: CurrentUser,
@@ -230,7 +231,7 @@ def delete_talent(
     return ok(DeleteTalentData.model_validate(data).model_dump())
 
 
-@router.post("/{talent_id}/restore", summary="撤销软删除（D-H）")
+@router.post("/{talent_id}/restore", summary="撤销软删除（D-H）", dependencies=[Depends(require_manager)])
 def restore_talent(
     talent_id: int,
     user: CurrentUser,
@@ -243,7 +244,7 @@ def restore_talent(
     return ok(body, message=HALF_WRITE_VECTOR_MESSAGE if failed else "success")
 
 
-@router.post("/{talent_id}/revector", summary="强制重建向量（D-B 补偿）")
+@router.post("/{talent_id}/revector", summary="强制重建向量（D-B 补偿）", dependencies=[Depends(require_manager)])
 def revector_talent(
     talent_id: int,
     user: CurrentUser,
@@ -254,7 +255,7 @@ def revector_talent(
     return ok(RevectorTalentData.model_validate(data).model_dump())
 
 
-@router.get("/{talent_id}/resume-file", summary="下载画像关联的原始简历")
+@router.get("/{talent_id}/resume-file", summary="下载画像关联的原始简历", dependencies=[Depends(require_profile_reader)])
 def download_resume_file(
     talent_id: int,
     user: CurrentUser,
@@ -278,3 +279,15 @@ def download_resume_file(
         )
     }
     return FileResponse(path, media_type="application/octet-stream", headers=headers)
+
+
+@router.get("/{talent_id}/snapshot", dependencies=[Depends(require_profile_reader)])
+def get_snapshot(talent_id: int, scope: AccountScopeDep,
+                 db: Annotated[Session, Depends(get_db)], version: int | None = Query(None, ge=1)):
+    return ok(talent_service.get_person_snapshot(db, talent_id, version=version, scope=scope))
+
+
+@router.get("/{talent_id}/evidence", dependencies=[Depends(require_profile_reader)])
+def get_evidence(talent_id: int, scope: AccountScopeDep,
+                 db: Annotated[Session, Depends(get_db)], version: int | None = Query(None, ge=1)):
+    return ok(talent_service.get_person_evidence(db, [talent_id], version=version, scope=scope))

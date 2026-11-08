@@ -738,7 +738,7 @@ def test_detail_404(env, fakes, client, auth):
 # 5. 原文下载
 # --------------------------------------------------------------------------- #
 def test_download_resume_file(env, fakes, client, auth):
-    download_dir = Path(__file__).resolve().parent.parent / ".pytest_tmp" / "t18_dl"
+    download_dir = Path(__file__).resolve().parent.parent / f"test-runtime-t18-{uuid4().hex}"
     download_dir.mkdir(parents=True, exist_ok=True)
     file_path = download_dir / f"{uuid4().hex}.pdf"
     file_path.write_bytes(b"%PDF-1.4 t18 download")

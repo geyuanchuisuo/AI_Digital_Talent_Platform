@@ -59,6 +59,11 @@ C_DOMAIN_TABLES = frozenset(
 
 # 逐表期望列名（含 id / created_at / updated_at），来源：数据库设计 v1.2 §3~§6
 EXPECTED_COLUMNS: dict[str, set[str]] = {
+    "talent_profile_versions": {"id", "talent_profile_id", "version", "change_type", "profile_snapshot_json", "changed_by", "created_at"},
+    "talent_field_evidence": {"id", "talent_profile_id", "profile_version", "field_name", "resume_file_id", "source_page", "source_text", "source", "confidence", "review_status", "created_at"},
+    "talent_profile_edits": {"id", "talent_profile_id", "profile_version", "field_name", "old_value", "new_value", "edited_by", "created_at"},
+    "resume_pages": {"id", "resume_file_id", "page_no", "text_content", "ocr_engine", "confidence", "created_at"},
+    "parse_attempts": {"id", "parse_task_id", "attempt_no", "status", "stage", "error_message", "started_at", "finished_at"},
     "users": {
         "id", "username", "password_hash", "display_name", "role", "person_id",
         "is_active", "last_login_at", "created_at", "updated_at",
@@ -472,9 +477,9 @@ def ddl(model) -> str:
 
 
 def test_exactly_70_tables_and_no_phase2_table():
-    assert len(TABLE_NAMES) == 70
-    assert len(MODEL_CLASSES) == 70
-    assert len(Base.metadata.tables) == 70
+    assert len(TABLE_NAMES) == 75
+    assert len(MODEL_CLASSES) == 75
+    assert len(Base.metadata.tables) == 75
     assert set(TABLE_NAMES) == set(EXPECTED_COLUMNS)
     # D-7 缓办：一期不建 llm_score_cache
     assert "llm_score_cache" not in Base.metadata.tables
@@ -505,7 +510,7 @@ def test_primary_key_and_timestamps(model):
     assert pk[0].autoincrement is True
     text = ddl(model)
     assert "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT" in text, model.__tablename__
-    if model.__tablename__ in PURE_LINK_TABLES:
+    if model.__tablename__ in PURE_LINK_TABLES or model.__tablename__ == "parse_attempts":
         # 纯关联表无 created_at/updated_at（design §8.3 口径）
         assert "created_at" not in text, model.__tablename__
     else:

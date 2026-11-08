@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import CHAR, DECIMAL, Index, SmallInteger, String, UniqueConstraint
+from sqlalchemy import CHAR, DECIMAL, Index, SmallInteger, String, UniqueConstraint, Integer, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -116,3 +116,38 @@ class TalentDuplicate(PKMixin, CreatedAtMixin, Base):
     resolution_note: Mapped[str | None] = mapped_column(String(255), nullable=True)
     resolved_by: Mapped[int | None] = mapped_column(PK_TYPE, nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+class TalentProfileVersion(PKMixin, CreatedAtMixin, Base):
+    __tablename__ = "talent_profile_versions"
+    __table_args__ = (UniqueConstraint("talent_profile_id", "version", name="uk_profile_version"), MYSQL_TABLE_OPTIONS)
+    talent_profile_id: Mapped[int] = mapped_column(PK_TYPE, nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    change_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    profile_snapshot_json: Mapped[dict] = mapped_column(JSONDict, nullable=False)
+    changed_by: Mapped[int | None] = mapped_column(PK_TYPE, nullable=True)
+
+
+class TalentFieldEvidence(PKMixin, CreatedAtMixin, Base):
+    __tablename__ = "talent_field_evidence"
+    __table_args__ = (Index("idx_evidence_version", "talent_profile_id", "profile_version"), MYSQL_TABLE_OPTIONS)
+    talent_profile_id: Mapped[int] = mapped_column(PK_TYPE, nullable=False)
+    profile_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    field_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    resume_file_id: Mapped[int] = mapped_column(PK_TYPE, nullable=False)
+    source_page: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_text: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(String(20), nullable=False)
+    confidence: Mapped[Decimal | None] = mapped_column(DECIMAL(4, 3), nullable=True)
+    review_status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending_review")
+
+
+class TalentProfileEdit(PKMixin, CreatedAtMixin, Base):
+    __tablename__ = "talent_profile_edits"
+    __table_args__ = (Index("idx_edit_version", "talent_profile_id", "profile_version"), MYSQL_TABLE_OPTIONS)
+    talent_profile_id: Mapped[int] = mapped_column(PK_TYPE, nullable=False)
+    profile_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    field_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    edited_by: Mapped[int] = mapped_column(PK_TYPE, nullable=False)

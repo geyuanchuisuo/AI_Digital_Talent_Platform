@@ -25,7 +25,7 @@ ORM_TABLES = ("workflow_engine_runs",)
 
 def upgrade() -> None:
     from app.core.workflows.engine.saver import SQLAlchemyCheckpointSaver
-    from app.database import Base
+    from app.models import Base
 
     bind = op.get_bind()
     # 1) 引擎登记表（ORM 基线内）
@@ -39,7 +39,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     from app.core.workflows.engine.saver import _METADATA_TABLE, _WRITES_TABLE
-    from app.database import Base
+    from app.models import Base
 
     bind = op.get_bind()
     _METADATA_TABLE.metadata.drop_all(
