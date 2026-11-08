@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { message } from 'antd';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ScreenBatchPanel from './ScreenBatchPanel';
@@ -120,12 +121,14 @@ describe('ScreenBatchPanel（T-27）', () => {
   });
 
   it('发起筛选（all 范围）→ 202 后刷新批次并选中详情', async () => {
+    const success = vi.spyOn(message, 'success');
     render(<ScreenBatchPanel />);
     await waitFor(() => expect(fetchScreenBatchesMock).toHaveBeenCalled());
 
     fireEvent.click(screen.getByRole('button', { name: /发\s*起\s*筛\s*选/ }));
     await waitFor(() => expect(createMock).toHaveBeenCalledWith(1, { type: 'all' }));
-    await waitFor(() => expect(screen.getByText(/批次 #9 已创建/)).toBeTruthy());
+    await waitFor(() => expect(success).toHaveBeenCalledWith(expect.stringContaining('批次 #9 已创建')));
+    await waitFor(() => expect(fetchScreenBatchDetailMock).toHaveBeenCalledWith(9));
   });
 
   it('批次详情 + 结果表（有效结论/硬淘汰说明）+ 改判调用', async () => {

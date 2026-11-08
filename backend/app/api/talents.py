@@ -43,6 +43,7 @@ from app.schemas.talent import (
 )
 from app.service import dedup_service, talent_service
 from app.modules.talents.access import require_manager, require_profile_reader
+from app.core.auth.scope import get_account_scope
 
 router = APIRouter(prefix="/api/talents", tags=["talents"])
 
@@ -196,6 +197,8 @@ def get_talent(
     db: Annotated[Session, Depends(get_db)],
 ):
     data = talent_service.get_detail(db, talent_id)
+    if not get_account_scope(user).can_view_all_persons:
+        data = {**data, "screen_history": [], "match_history": []}
     return ok(TalentDetailData.model_validate(data).model_dump())
 
 

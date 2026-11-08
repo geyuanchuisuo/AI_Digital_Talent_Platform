@@ -24,6 +24,7 @@ const { Header, Content } = Layout;
 // 个人端导航（页面级入口；B/C 的新页面在此追加）
 const NAV_ITEMS = [
   { key: '/home', label: '首页' },
+  { key: '/my-profile', label: '我的档案' },
   { key: '/applications', label: '我的岗位申请' },
 ];
 
@@ -45,6 +46,7 @@ export default function PersonalShell({ children }: { children: React.ReactNode 
   return (
     <Layout style={{ minHeight: '100vh', background: '#f5f7fa' }}>
       <Header
+        className="personal-header"
         style={{
           background: '#fff',
           paddingInline: 24,

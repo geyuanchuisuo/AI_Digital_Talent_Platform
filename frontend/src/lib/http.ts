@@ -5,7 +5,7 @@
  * 职责固定为四件事，业务页面不得绕过它直接 `axios.get`：
  *   1. 注入 `Authorization: Bearer <token>`；
  *   2. `code !== 0` → 弹出后端中文 message 并 reject（前端按 code 分支，按 message 展示）；
- *   3. 401 → 清登录态 + 跳 `/login?redirect=...`；403 → 账号停用提示；
+ *   3. 401/明确停用 → 清登录态并跳登录；普通资源 403 提示拒绝访问并保留登录；
  *   4. blob 下载封装（先判"其实是 JSON 错误体"再落盘）。
  *
  * 注意：`GET /api/health` 不套统一返回体，因此只处理"长得像信封"的响应，
@@ -82,15 +82,18 @@ function redirectToLogin(code: number, reason: string): void {
   );
 }
 
-function notifyBizError(code: number, msg: string): void {
+function notifyBizError(code: number, msg: string, url = ''): void {
   const text = msg || '请求失败';
   if (code === 401) {
     redirectToLogin(code, text);
     return;
   }
   if (code === 403) {
-    // 停用账号：登录页只提示，业务页踢回登录
-    if (isLoginPage()) message.error(text);
+    // Only authentication endpoints establish that the session/account is disabled.
+    // Resource-level permission denials must not destroy a valid login.
+    const authEndpoint = /(?:^|\/)auth\/(?:me|login)(?:[?#]|$)/.test(url);
+    const disabledAccount = text === '账号已停用'; // Existing backend auth contract, also returned by protected resources.
+    if ((!authEndpoint && !disabledAccount) || isLoginPage()) message.error(text);
     else redirectToLogin(code, text);
     return;
   }
@@ -117,7 +120,7 @@ http.interceptors.response.use(
     const body: unknown = response.data;
     if (!isApiEnvelope(body)) return response; // health / blob 等非统一体
     if (body.code === 0) return response;
-    notifyBizError(body.code, body.message);
+    notifyBizError(body.code, body.message, response.config.url);
     throw new ApiError(body.code, body.message, { status: response.status, requestId: body.request_id });
   },
   (error: AxiosError<ApiResponse<null>>) => {
@@ -125,7 +128,7 @@ http.interceptors.response.use(
     const body = error.response?.data;
     const code = typeof body?.code === 'number' ? body.code : (status ?? 0);
     const text = body?.message || fallbackMessage(status ?? 0, error);
-    notifyBizError(code, text);
+    notifyBizError(code, text, error.config?.url);
     return Promise.reject(new ApiError(code, text, { status, requestId: body?.request_id }));
   },
 );
@@ -167,7 +170,7 @@ export async function downloadFile(url: string, fallbackName = 'download'): Prom
     } catch {
       /* 非 JSON 内容，按通用失败处理 */
     }
-    notifyBizError(code, msg);
+    notifyBizError(code, msg, url);
     throw new ApiError(code, msg, { status: response.status });
   }
 

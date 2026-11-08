@@ -4,9 +4,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import DetailView, { READONLY_EXPERIENCE_KEYS } from './DetailView';
 import { deleteTalent, downloadResumeFile, fetchDuplicates, getTalent, revectorTalent } from '../api';
 import type { TalentDetailData } from '../types';
+import {setAuth, clearAuth} from '@/lib/auth';
 
-const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: pushMock }) }));
+const { pushMock, replaceMock } = vi.hoisted(() => ({ pushMock: vi.fn(), replaceMock: vi.fn() }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: pushMock, replace: replaceMock }) }));
 
 vi.mock('../api', () => ({
   getTalent: vi.fn(),
@@ -73,12 +74,22 @@ const DETAIL: TalentDetailData = {
 
 describe('DetailView（T-21）', () => {
   beforeEach(() => {
+    clearAuth();
     vi.clearAllMocks();
     getTalentMock.mockResolvedValue(DETAIL);
     fetchDuplicatesMock.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 50 });
     revectorMock.mockResolvedValue({ vector_status: 'synced', vector_synced_at: '2026-11-06T11:00:00' });
     deleteMock.mockResolvedValue({ deleted: true, vector_deleted: true });
     downloadMock.mockResolvedValue(undefined);
+  });
+
+  it('personal accounts use the readonly route without management requests', async () => {
+    setAuth('test',{id:2,username:'personal',role:'personal',person_id:5});
+    render(<DetailView talentId={5} />);
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith('/my-profile'));
+    expect(getTalentMock).not.toHaveBeenCalled();
+    expect(fetchDuplicatesMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button',{name:/编辑|删除/})).toBeNull();
   });
 
   it('渲染信息卡、标签（type/source 提示）、经历时间线与人工修正标记；经历类无编辑入口', async () => {

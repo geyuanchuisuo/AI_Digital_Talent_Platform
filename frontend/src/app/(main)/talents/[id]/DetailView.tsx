@@ -39,6 +39,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 
 import { getErrorMessage } from '@/lib/http';
+import { getUser } from '@/lib/auth';
 
 import { deleteTalent, downloadResumeFile, fetchDuplicates, getTalent, revectorTalent } from '../api';
 import type { DuplicateItem, TalentDetailData } from '../types';
@@ -69,8 +70,15 @@ export default function DetailView({ talentId }: { talentId: number }) {
   const [editOpen, setEditOpen] = useState(false);
   const [tagEditOpen, setTagEditOpen] = useState(false);
   const [dupModalOpen, setDupModalOpen] = useState(false);
+  const [personalAccess, setPersonalAccess] = useState(false);
 
   const load = useCallback(async () => {
+    const user = getUser();
+    if (user?.role === 'personal') {
+      setPersonalAccess(true);
+      if (user.person_id === talentId) router.replace('/my-profile');
+      return;
+    }
     setLoading(true);
     try {
       const data = await getTalent(talentId);
@@ -131,6 +139,7 @@ export default function DetailView({ talentId }: { talentId: number }) {
     }
   };
 
+  if (personalAccess) return <Alert type="warning" message="请从个人端的我的档案入口查看本人资料，无权访问他人管理档案。" />;
   if (loading && !detail) {
     return (
       <div style={{ padding: 80, textAlign: 'center' }}>

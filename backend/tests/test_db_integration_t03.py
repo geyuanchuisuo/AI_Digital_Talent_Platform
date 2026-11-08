@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import sys
-import tempfile
 from pathlib import Path
 
 import bcrypt
@@ -58,12 +57,9 @@ def ensure_schema():
 
 
 @pytest.fixture
-def backup_dir():
-    """Windows 上系统 Temp 的 pytest-of-* 目录可能拒绝访问，改用项目内临时目录。"""
-    root = Path(__file__).resolve().parents[1] / ".pytest_tmp"
-    root.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=root) as directory:
-        yield Path(directory)
+def backup_dir(tmp_path):
+    """Respect pytest's configured --basetemp instead of a fixed shared directory."""
+    return tmp_path
 
 
 def _drop_restore_db():

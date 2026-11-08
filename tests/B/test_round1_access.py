@@ -56,3 +56,15 @@ def test_restricted_management_scope_cannot_read_arbitrary_person():
     scope = AccountScope('hr', None, False, 'admin', department_ids=(1,))
     with pytest.raises(talent_service.SnapshotScopeError):
         talent_service.get_person_snapshot(None, 11, scope=scope)
+
+
+def test_personal_detail_never_returns_internal_recruitment_history(client, monkeypatch):
+    monkeypatch.setattr(talent_service, 'get_detail', lambda *args: {
+        'profile': {'id': 10, 'name': 'Synthetic', 'vector_status': 'pending', 'created_at': '2026-11-08T00:00:00'},
+        'screen_history': [{'batch_id': 1, 'effective_verdict': 'reject', 'created_at': '2026-11-08T00:00:00'}],
+        'match_history': [{'batch_id': 1, 'score': 1, 'hard_fail': True, 'created_at': '2026-11-08T00:00:00'}],
+    })
+    response = client.get('/api/talents/10')
+    assert response.status_code == 200
+    assert response.json()['data']['screen_history'] == []
+    assert response.json()['data']['match_history'] == []

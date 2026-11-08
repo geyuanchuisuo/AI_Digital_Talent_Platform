@@ -60,8 +60,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
-      <Sider collapsible collapsed={collapsed} onCollapse={setCollapsed} theme="light" width={208}>
+    <Layout className="app-shell" style={{ minHeight: '100vh' }}>
+      <Sider collapsible collapsed={collapsed} onCollapse={setCollapsed} breakpoint="lg" onBreakpoint={setCollapsed} collapsedWidth={0} theme="light" width={208}>
         <div
           style={{
             height: 56,
@@ -87,7 +87,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         />
       </Sider>
 
-      <Layout>
+      <Layout style={{minWidth:0}}>
         <Header
           style={{
             background: '#fff',
@@ -120,7 +120,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </Dropdown>
         </Header>
 
-        <Content style={{ padding: 24 }}>{children}</Content>
+        <Content style={{ padding: 24, minWidth:0 }}>{children}</Content>
       </Layout>
     </Layout>
   );
