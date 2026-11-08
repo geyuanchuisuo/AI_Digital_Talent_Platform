@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import socket
+import uuid
 from urllib.parse import urlparse
 
 import pytest
@@ -126,12 +127,15 @@ def _redis_reachable(url: str) -> bool:
 
 @pytest.mark.skipif(not _redis_reachable(REDIS_TEST_URL), reason="测试 Redis 未运行（6399）")
 async def test_real_redis_roundtrip():
+    # 键带随机后缀：真实 Redis 常驻且跨 pytest 进程共享，固定键在 60s TTL 内
+    # 连跑两次套件会让 incr_window 拿到 >1（2026-11-09 全量套件实测），断言失去自包含性
+    suffix = uuid.uuid4().hex[:8]
     client = CacheClient(REDIS_TEST_URL)
     try:
-        await client.set("data", "real:1", {"ok": True}, ttl=60)
-        assert await client.get("data", "real:1") == {"ok": True}
-        assert await client.incr_window("ratelimit", "real:count", 60) == 1
-        assert await client.delete("data", "real:1") is True
+        await client.set("data", f"real:1:{suffix}", {"ok": True}, ttl=60)
+        assert await client.get("data", f"real:1:{suffix}") == {"ok": True}
+        assert await client.incr_window("ratelimit", f"real:count:{suffix}", 60) == 1
+        assert await client.delete("data", f"real:1:{suffix}") is True
     finally:
         await client.aclose()
 
@@ -141,11 +145,12 @@ def test_client_rebinds_across_event_loops():
     """跨事件循环回归（T-D01b 切片暴露）：redis.asyncio 客户端绑定创建时的 loop，
     脚本/测试里多次 asyncio.run 复用同一 CacheClient 会 "Event loop is closed"——
     修复后按运行循环自动重建连接，两次独立 loop 均可读写。"""
+    suffix = uuid.uuid4().hex[:8]  # 同上：键自包含，不依赖 Redis 初始为空
     client = CacheClient(REDIS_TEST_URL)
 
     async def one(i: int):
-        await client.set("data", "loop:switch", {"i": i}, ttl=30)
-        return await client.get("data", "loop:switch")
+        await client.set("data", f"loop:switch:{suffix}", {"i": i}, ttl=30)
+        return await client.get("data", f"loop:switch:{suffix}")
 
     try:
         assert asyncio.run(one(1)) == {"i": 1}
