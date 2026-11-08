@@ -23,12 +23,12 @@ vi.mock('@/lib/http', () => {
       this.status = extra?.status;
     }
   }
-  return { ApiError, get: vi.fn(), API_BASE: 'http://test', API_PREFIX: 'http://test/api' };
+  return { ApiError, get: vi.fn(), getWithHeaders: vi.fn(), API_BASE: 'http://test', API_PREFIX: 'http://test/api' };
 });
 
-import { ApiError, get } from '@/lib/http';
+import { ApiError, get, getWithHeaders } from '@/lib/http';
 
-const mockGet = vi.mocked(get);
+const mockGet = vi.mocked(getWithHeaders);
 
 /** 造三段式 token（守卫只解 payload 的 exp，不验签）。注意必须保持正好 3 段，多加 `.` 会被判为无效 */
 function makeToken(expSecondsFromNow: number): string {
@@ -71,7 +71,7 @@ describe('AuthGuard', () => {
 
     expect(await screen.findByText('受保护内容')).toBeTruthy();
     expect(replace).not.toHaveBeenCalled();
-    expect(mockGet).toHaveBeenCalledWith('/auth/me');
+    expect(mockGet).toHaveBeenCalledWith('/auth/me', { 'X-Auth-Probe': '1' });
   });
 
   it('本地 exp 未过期但服务端 401（token 被篡改）→ 不渲染内容、保持校验态', async () => {
