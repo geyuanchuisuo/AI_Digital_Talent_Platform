@@ -169,3 +169,8 @@ app.include_router(notifications_router)
 from app.modules.analytics.router import router as analytics_router  # noqa: E402
 
 app.include_router(analytics_router)
+
+# D 报告导出（T-D11）：/api/reports/snapshots/{id}/export 同快照 DOCX/PDF（2026-11-08 直接落地）
+from app.modules.reports.router import router as reports_router  # noqa: E402
+
+app.include_router(reports_router)
