@@ -2,7 +2,7 @@
 
 > 状态：**设计已定稿**（4 项设计决策已确认，见§七），待 V2.5 需求冻结后编码。  
 > 依据：tasks/B.md（T-B06/T-B07/T-B08/T-B12/T-B18、B-01~B-03）、A 开工指引、`backend/app/models/base.py` 公共 mixin。  
-> 迁移挂载点：`down_revision = "A_0004_merge_heads"`，命名 `B_0001_*`，**纯 ASCII**。
+> 迁移挂载点：`down_revision = "D_0006_analytics_feedback"`（2026-11-08 master 合并后链头，63 表基线），命名 `B_0001_*`，**纯 ASCII**。
 
 ## 通用约定（对齐现有代码）
 
@@ -201,8 +201,8 @@
 """B module 9 tables + resume_files.job_profile_id (T-B06/07/08/12, B-01/02/03).
 
 Revision ID: B_0001_b_module
-Revises: A_0004_merge_heads
-Create Date: 2026-11-07
+Revises: D_0006_analytics_feedback
+Create Date: 2026-11-08
 
 Creates 8 new B tables and adds job_profile_id to resume_files.
 Idempotent: inspector checks for tables/columns before creating.
@@ -215,7 +215,7 @@ from sqlalchemy.dialects import mysql
 from sqlalchemy.engine.reflection import Inspector
 
 revision = "B_0001_b_module"
-down_revision = "A_0004_merge_heads"
+down_revision = "D_0006_analytics_feedback"
 branch_labels = None
 depends_on = None
 
