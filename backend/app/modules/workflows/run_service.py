@@ -1,0 +1,274 @@
+"""工作流运行编排（T-D17）：手动触发 → 引擎执行 → 审批恢复 → 状态镜像。
+
+职责边界：
+- service.py（T-D14/T-D15）负责定义/版本/登记原语（start_run 钉版本、record_step
+  幂等落步骤、sync_run_status 镜像状态）；本模块把它们与引擎（T-D04）接线；
+- 触发面一期只暴露手动（管理侧）；业务事件触发/定时触发归 T-D18（定时默认关闭）；
+- 失败重试/取消/恢复编排归 T-D18；本模块把引擎 failed 如实镜像，可重试语义沿用引擎。
+
+审批恢复口校验（三道，全部先于引擎恢复）：
+①管理侧门禁（can_view_all_persons）；②四眼原则——发起人不可自行审批（403）；
+③审批负载 deadline 过期 → 409 需人工接管（定时催办扫描归 T-D18）。
+"""
+
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.core.errors import BizError
+from app.core.workflows.engine.runner import EngineRunResult, WorkflowEngine
+from app.core.workflows.engine.saver import make_saver
+from app.modules.workflows import service
+from app.modules.workflows.models import WorkflowRun, WorkflowRunStep
+from app.modules.workflows.nodes.graph_builder import build_version_graph, graph_name_for
+from app.modules.workflows.nodes.runtime import NodeContext
+
+_engine: WorkflowEngine | None = None
+_session_factory: Any = None  # 节点自开短会话的工厂；默认 SessionLocal（测试可替换）
+
+
+def get_session_factory() -> Any:
+    global _session_factory  # noqa: PLW0603
+    if _session_factory is None:
+        from app.database import SessionLocal  # noqa: PLC0415
+
+        _session_factory = SessionLocal
+    return _session_factory
+
+
+def set_session_factory(factory: Any) -> None:
+    global _session_factory  # noqa: PLW0603
+    _session_factory = factory
+
+
+def get_engine() -> WorkflowEngine:
+    """进程级引擎单例（检查点存主库；registry_factory 同源）。测试可替换 _engine。"""
+    global _engine  # noqa: PLW0603
+    if _engine is None:
+        from app.core.config import settings  # noqa: PLC0415
+        from app.database import SessionLocal  # noqa: PLC0415
+
+        _engine = WorkflowEngine(
+            make_saver(settings.database_url), registry_factory=SessionLocal
+        )
+    return _engine
+
+
+def set_engine(engine: WorkflowEngine | None) -> None:
+    global _engine  # noqa: PLW0603
+    _engine = engine
+
+
+def _make_context(run: WorkflowRun) -> NodeContext:
+    return NodeContext(
+        run_id=run.id,
+        thread_id=run.thread_id,
+        session_factory=get_session_factory(),
+        user_id=run.created_by,
+    )
+
+
+def _build(run: WorkflowRun, db: Session):
+    detail = service.get_version_detail(db, run.version_id)
+    ctx = _make_context(run)
+    return build_version_graph(detail, ctx)
+
+
+def _mirror(db: Session, run: WorkflowRun, result: EngineRunResult,
+            *, waiting_node: str | None = None) -> WorkflowRun:
+    """引擎结果 → 业务侧镜像：running→waiting/succeeded/failed；waiting 时步骤记 waiting。"""
+    if result.status == "succeeded":
+        run_status = "succeeded"
+    elif result.status == "waiting":
+        run_status = "waiting"
+    else:
+        run_status = "failed"
+    service.sync_run_status(db, run.id, status=run_status, error=result.error)
+    if run_status == "waiting" and waiting_node:
+        payload_node_type = _waiting_node_type(db, run, waiting_node)
+        service.record_step(
+            db, run.id, node_key=waiting_node, node_type=payload_node_type, status="waiting",
+            output={"interrupt": result.interrupt or {}},
+        )
+    db.refresh(run)
+    return run
+
+
+def _waiting_node_type(db: Session, run: WorkflowRun, node_key: str) -> str:
+    row = db.execute(
+        select(WorkflowRunStep.node_type).where(
+            WorkflowRunStep.run_id == run.id, WorkflowRunStep.node_key == node_key
+        )
+    ).first()
+    if row is not None:
+        return str(row[0])
+    from app.modules.workflows.models import WorkflowNode  # noqa: PLC0415
+
+    node = db.execute(
+        select(WorkflowNode).where(
+            WorkflowNode.version_id == run.version_id,
+            WorkflowNode.node_key == node_key,
+        )
+    ).scalar_one_or_none()
+    if node is None:
+        raise BizError(422, f"等待节点 {node_key!r} 不在版本节点集合中")
+    return node.node_type
+
+
+# ---- 手动触发 ----
+
+def start_manual_run(
+    db: Session,
+    *,
+    definition_id: int,
+    params: dict[str, Any] | None,
+    user,
+) -> dict[str, Any]:
+    """管理侧手动触发：登记运行（钉版本）→ 构建图 → 引擎启动 → 镜像状态。"""
+    service.require_management(user)
+    run = service.start_run(
+        db,
+        definition_id=definition_id,
+        thread_id=uuid.uuid4().hex,
+        params=params,
+        trigger_type="manual",
+        created_by=getattr(user, "id", None),
+    )
+    graph = _build(run, db)
+    result = get_engine().start(
+        graph_name_for(run.version_id, run.thread_id),
+        graph,
+        {"trigger": dict(params or {}), "form": {}, "vars": {}},
+        thread_id=run.thread_id,
+    )
+    waiting_node = None
+    if result.status == "waiting" and isinstance(result.interrupt, dict):
+        waiting_node = str(result.interrupt.get("node_key") or "") or None
+    _mirror(db, run, result, waiting_node=waiting_node)
+    return {"run": run, "result": result}
+
+
+# ---- 审批恢复 ----
+
+def resume_approval(
+    db: Session,
+    *,
+    thread_id: str,
+    approved: bool,
+    note: str | None,
+    user,
+) -> dict[str, Any]:
+    """审批动作：管理侧 + 四眼 + 超时校验 → 引擎恢复 → 镜像。"""
+    service.require_management(user)
+    run = db.execute(
+        select(WorkflowRun).where(WorkflowRun.thread_id == thread_id)
+    ).scalar_one_or_none()
+    if run is None:
+        raise BizError(404, "运行实例不存在")
+    if run.status != "waiting":
+        raise BizError(409, f"运行不在等待态，当前 {run.status}")
+    creator = run.created_by
+    if creator is not None and getattr(user, "id", None) == creator:
+        raise BizError(403, "四眼原则：流程发起人不可自行审批")
+
+    # 当前挂起节点的审批负载（deadline/待办信息）从步骤记录读
+    step = db.execute(
+        select(WorkflowRunStep)
+        .where(WorkflowRunStep.run_id == run.id, WorkflowRunStep.status == "waiting")
+        .order_by(WorkflowRunStep.id.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    deadline = ((step.output_json or {}).get("interrupt") or {}).get("deadline") if step else None
+    if deadline:
+        try:
+            if datetime.now() > datetime.fromisoformat(str(deadline)):
+                raise BizError(409, "审批已超时（deadline 已过），需人工接管后重试")
+        except ValueError as exc:
+            raise BizError(422, f"审批 deadline 非法：{deadline!r}") from exc
+
+    graph = _build(run, db)
+    result = get_engine().resume(
+        graph_name_for(run.version_id, run.thread_id),
+        graph,
+        thread_id,
+        {
+            "approved": bool(approved),
+            "note": note or "",
+            "by": getattr(user, "id", None),
+            "at": datetime.now().isoformat(),
+        },
+    )
+    _mirror(db, run, result)
+    return {"run": run, "result": result}
+
+
+# ---- 查询 ----
+
+def list_runs(db: Session, *, definition_id: int | None = None,
+              status: str | None = None) -> list[WorkflowRun]:
+    stmt = select(WorkflowRun).order_by(WorkflowRun.id.desc())
+    if definition_id is not None:
+        stmt = stmt.where(WorkflowRun.definition_id == definition_id)
+    if status:
+        if status not in ("running", "waiting", "succeeded", "failed", "cancelled"):
+            raise BizError(422, "运行状态非法")
+        stmt = stmt.where(WorkflowRun.status == status)
+    return list(db.scalars(stmt))
+
+
+def run_detail(db: Session, thread_id: str) -> dict[str, Any]:
+    run = db.execute(
+        select(WorkflowRun).where(WorkflowRun.thread_id == thread_id)
+    ).scalar_one_or_none()
+    if run is None:
+        raise BizError(404, "运行实例不存在")
+    steps = list(
+        db.scalars(
+            select(WorkflowRunStep)
+            .where(WorkflowRunStep.run_id == run.id)
+            .order_by(WorkflowRunStep.id.asc())
+        )
+    )
+    detail: dict[str, Any] = {
+        "run": {
+            "id": run.id,
+            "definition_id": run.definition_id,
+            "version_id": run.version_id,
+            "thread_id": run.thread_id,
+            "trigger_type": run.trigger_type,
+            "trigger_ref": run.trigger_ref,
+            "status": run.status,
+            "error": run.error,
+            "params": run.params_json,
+            "created_by": run.created_by,
+            "created_at": run.created_at,
+            "finished_at": run.finished_at,
+        },
+        "steps": [
+            {
+                "node_key": s.node_key,
+                "node_type": s.node_type,
+                "attempt": s.attempt,
+                "status": s.status,
+                "output": s.output_json,
+                "error": s.error,
+                "started_at": s.started_at,
+                "finished_at": s.finished_at,
+            }
+            for s in steps
+        ],
+    }
+    if run.status == "waiting":
+        try:
+            graph = _build(run, db)
+            detail["engine_state"] = get_engine().state(
+                graph_name_for(run.version_id, run.thread_id), graph, run.thread_id
+            )
+        except BizError:
+            detail["engine_state"] = None
+    return detail
