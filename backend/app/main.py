@@ -179,3 +179,8 @@ app.include_router(analytics_router)
 from app.modules.reports.router import router as reports_router  # noqa: E402
 
 app.include_router(reports_router)
+
+# D 工作流（T-D15）：/api/workflows 定义/版本受控生命周期——提交→审核发布/停用/回滚
+from app.modules.workflows.router import router as workflows_router  # noqa: E402
+
+app.include_router(workflows_router)

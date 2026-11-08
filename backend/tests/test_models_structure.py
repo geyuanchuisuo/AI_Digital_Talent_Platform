@@ -379,6 +379,7 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     },
     "workflow_definition_versions": {
         "id", "definition_id", "version", "status", "note", "created_by",
+        "submitted_by", "submitted_at", "review_note",
         "published_by", "published_at", "created_at", "updated_at",
     },
     "workflow_nodes": {
