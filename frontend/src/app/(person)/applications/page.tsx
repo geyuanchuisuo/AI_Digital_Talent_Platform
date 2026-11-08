@@ -46,8 +46,9 @@ export default function MyApplicationsPage() {
   useEffect(() => {
     if (!user?.person_id) return;
     setLoading(true);
+    // lib/http.ts 约定：路径不含 /api 前缀（框架自动拼接 API_PREFIX）
     get<{ items: ApplicationRow[]; total: number }>(
-      `/api/recruitment/applications?talent_profile_id=${user.person_id}&page_size=50`,
+      `/recruitment/applications?talent_profile_id=${user.person_id}&page_size=50`,
     )
       .then((data) => setRows(data.items))
       .catch(() => setError('申请记录加载失败，请稍后重试'))
