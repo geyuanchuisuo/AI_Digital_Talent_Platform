@@ -5,7 +5,9 @@
  * 职责固定为四件事，业务页面不得绕过它直接 `axios.get`：
  *   1. 注入 `Authorization: Bearer <token>`；
  *   2. `code !== 0` → 弹出后端中文 message 并 reject（前端按 code 分支，按 message 展示）；
- *   3. 401 → 清登录态 + 跳 `/login?redirect=...`；403 → 账号停用提示；
+ *   3. 401 → 清登录态 + 跳 `/login?redirect=...`；403 → 仅当「认证探针」
+ *      （X-Auth-Probe，来自 AuthGuard 的会话校验）或响应为账号停用语义时才踢登录页；
+ *      业务接口的授权 403（如「仅员工可查看本人计划」）只 reject 给页面处理，不杀会话；
  *   4. blob 下载封装（先判"其实是 JSON 错误体"再落盘）。
  *
  * 注意：`GET /api/health` 不套统一返回体，因此只处理"长得像信封"的响应，
@@ -58,6 +60,20 @@ function reasonOf(code: number): 'disabled' | 'expired' {
 }
 
 /**
+ * 业务 403 与认证 403 的区分（2026-11-08，验收缺陷修复）：
+ * - 后端对 403 只有一个码（H-A08 白名单），语义靠 message 区分——「账号已停用」
+ *   是账号级停用（踢登录），其余 403 是业务授权拒绝（页面内处理）。
+ * - AuthGuard 的会话探针带 X-Auth-Probe 头，其 403 视为会话失效（踢登录）。
+ */
+const ACCOUNT_DISABLED_MESSAGE = '账号已停用';
+
+function shouldKickSession(code: number, message: string, isAuthProbe: boolean): boolean {
+  if (code === 401) return true;
+  if (code !== 403) return false;
+  return isAuthProbe || message === ACCOUNT_DISABLED_MESSAGE;
+}
+
+/**
  * 401/403 的统一处置：清态 + 回登录页（带 redirect，登录后能回到原页）。
  *
  * 提示为什么落在登录页而不是这里的 message：跳转是整页 `location.replace`，
@@ -82,24 +98,21 @@ function redirectToLogin(code: number, reason: string): void {
   );
 }
 
-function notifyBizError(code: number, msg: string): void {
+function notifyBizError(code: number, msg: string, isAuthProbe = false): void {
   const text = msg || '请求失败';
-  if (code === 401) {
-    redirectToLogin(code, text);
-    return;
-  }
-  if (code === 403) {
-    // 停用账号：登录页只提示，业务页踢回登录
+  if (shouldKickSession(code, text, isAuthProbe)) {
     if (isLoginPage()) message.error(text);
     else redirectToLogin(code, text);
     return;
   }
+  // 业务授权 403：页面内提示，不清登录态、不踢登录页
   message.error(text);
 }
 
 http.interceptors.request.use((config) => {
   const token = getToken();
   if (token) config.headers.set('Authorization', `Bearer ${token}`);
+  if (config.headers.get('X-Auth-Probe')) config.headers.set('X-Auth-Probe', '1');
 
   // multipart 上传必须先删掉实例默认的 JSON 头。
   // axios 1.21 的 transformRequest 在 Content-Type 含 application/json 时，会把 FormData
@@ -117,7 +130,8 @@ http.interceptors.response.use(
     const body: unknown = response.data;
     if (!isApiEnvelope(body)) return response; // health / blob 等非统一体
     if (body.code === 0) return response;
-    notifyBizError(body.code, body.message);
+    const isAuthProbe = response.config.headers.get('X-Auth-Probe') === '1';
+    notifyBizError(body.code, body.message, isAuthProbe);
     throw new ApiError(body.code, body.message, { status: response.status, requestId: body.request_id });
   },
   (error: AxiosError<ApiResponse<null>>) => {
@@ -125,7 +139,8 @@ http.interceptors.response.use(
     const body = error.response?.data;
     const code = typeof body?.code === 'number' ? body.code : (status ?? 0);
     const text = body?.message || fallbackMessage(status ?? 0, error);
-    notifyBizError(code, text);
+    const isAuthProbe = error.config?.headers?.get?.('X-Auth-Probe') === '1';
+    notifyBizError(code, text, isAuthProbe);
     return Promise.reject(new ApiError(code, text, { status, requestId: body?.request_id }));
   },
 );
@@ -143,6 +158,10 @@ export async function request<T>(config: AxiosRequestConfig): Promise<T> {
 }
 
 export const get = <T>(url: string, config?: AxiosRequestConfig) => request<T>({ ...config, method: 'GET', url });
+
+/** 带 implcit 请求头的 GET（AuthGuard 会话探针用：403 才踢登录，业务 403 不踢） */
+export const getWithHeaders = <T>(url: string, headers: Record<string, string>, config?: AxiosRequestConfig) =>
+  request<T>({ ...config, method: 'GET', url, headers });
 export const post = <T>(url: string, data?: unknown, config?: AxiosRequestConfig) =>
   request<T>({ ...config, method: 'POST', url, data });
 export const patch = <T>(url: string, data?: unknown, config?: AxiosRequestConfig) =>

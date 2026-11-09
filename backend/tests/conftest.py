@@ -37,3 +37,19 @@ def _isolate_task_runner(request, monkeypatch):
 
     monkeypatch.setattr(runner_module.runner, "start", lambda: None, raising=False)
     monkeypatch.setattr(runner_module.runner, "stop", lambda *a, **kw: None, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _disable_rate_limiter(monkeypatch):
+    """测试进程统一关闭 Redis 限流器（T-D01b 回归修复，2026-11-08）。
+
+    本 suite 数百个请求共享同一个客户端身份（TestClient），真开 120/min 固定窗口
+    必然在字母序靠后的集成测试里全部 429 误伤（t18/t10 实证）。Redis 相关用例
+    （tests/D/test_cache.py 等）自建 CacheClient 显式注入 URL，不受本夹具影响。
+    """
+    monkeypatch.setattr("app.config.settings.redis_url", "")
+    from app.core.cache import reset_cache
+
+    reset_cache(None)
+    yield
+    reset_cache(None)

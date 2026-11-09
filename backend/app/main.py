@@ -29,6 +29,7 @@ from app.api import screen as screen_api
 from app.api import resumes as resumes_api
 from app.api import talents as talents_api
 from app.config import settings
+from app.core.cache import RateLimitMiddleware
 from app.core.errors import register_exception_handlers
 from app.utils.ids import new_request_id
 from app.utils.mask import mask_sensitive
@@ -97,6 +98,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# T-D01（REQ-D-20261107-183200，2026-11-07 用户指令 D 直接落地）：Redis 限流/黑名单中间件。
+# REDIS_URL 为空 = 直通零副作用；配置后固定窗口限流 + 黑名单 403，Redis 停服降级放行。
+# 契约：docs/modules/D/缓存限流契约.md。
+# 限流豁免（2026-11-08 二次修复，升级此前的 /api/auth 豁免）：RateLimitMiddleware 的
+# 黑名单键（ratelimit:blacklist:{ip}）写在共享 Redis，其他环境（如 D 的测试）写入会
+# 把本环境全部业务请求打成 403 → 前端渲染「账号已停用」并踢回登录页（用户验收实测两轮）。
+# 单机演示无业务限流需求（限流是客户部署的验收项，V2.6 §7），故本环境全量豁免 /api；
+# 客户部署启用限流时在部署配置中移除本豁免并按环境隔离 Redis（键前缀）。
+from app.core.cache.ratelimit import DEFAULT_EXEMPT_PATHS  # noqa: E402
+
+app.add_middleware(RateLimitMiddleware, exempt_paths=(*DEFAULT_EXEMPT_PATHS, "/api"))
+
 # T-02：四类全局异常处理器（BizError / HTTPException / RequestValidationError / Exception）
 # 口径见 docs/统一错误码与鉴权.md v1.2 §六；request_id 由下方中间件写入 request.state。
 register_exception_handlers(app)
@@ -152,3 +165,24 @@ for _c_router in _C_ROUTERS:
 from app.modules.recruitment.router import router as recruitment_router  # noqa: E402
 
 app.include_router(recruitment_router)
+
+# D 通知中心（T-D03，REQ-D-20261107-183200 第 5 项，2026-11-07 用户指令直接落地）：
+# /api/notifications 列表/详情/已读，鉴权走公共 deps（CurrentUser/get_db）
+from app.modules.notifications.router import router as notifications_router  # noqa: E402
+
+app.include_router(notifications_router)
+
+# D 问数切片（T-D01b）：/api/analytics 活跃岗位数 + SSE 进度端点首用（2026-11-07 用户指令直接落地）
+from app.modules.analytics.router import router as analytics_router  # noqa: E402
+
+app.include_router(analytics_router)
+
+# D 报告导出（T-D11）：/api/reports/snapshots/{id}/export 同快照 DOCX/PDF（2026-11-08 直接落地）
+from app.modules.reports.router import router as reports_router  # noqa: E402
+
+app.include_router(reports_router)
+
+# D 工作流（T-D15）：/api/workflows 定义/版本受控生命周期——提交→审核发布/停用/回滚
+from app.modules.workflows.router import router as workflows_router  # noqa: E402
+
+app.include_router(workflows_router)

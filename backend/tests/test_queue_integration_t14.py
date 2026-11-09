@@ -31,9 +31,16 @@ pytestmark = pytest.mark.integration
 @pytest.fixture(scope="module")
 def client():
     from app.main import app
+    from app.tasks.runner import runner
 
-    with TestClient(app) as test_client:
-        yield test_client
+    # Module fixtures run before the function-scoped autouse runner isolation.
+    # Keep this lifespan from consuming the pending rows under test.
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(runner, "start", lambda: None)
+        patcher.setattr(runner, "stop", lambda *args, **kwargs: None)
+        with TestClient(app) as test_client:
+            assert not runner.is_running
+            yield test_client
 
 
 @pytest.fixture(scope="module")
@@ -197,7 +204,14 @@ def test_retry_keeps_stage_and_only_failed(client, auth, user_id, batches):
     resp = client.post(f"/api/resumes/queue/{task_id}/retry", headers=auth)
     assert resp.status_code == 200, resp.text
     data = resp.json()["data"]
-    assert data == {"task_id": task_id, "status": "pending", "stage": "vector", "retries": 2}
+    # B 559c458 起动作响应带对外契约状态（waiting/running/completed/failed/cancelled）
+    assert data == {
+        "task_id": task_id,
+        "status": "pending",
+        "task_status": "waiting",
+        "stage": "vector",
+        "retries": 2,
+    }
 
     row = task_row(task_id)
     assert row.status == "pending"

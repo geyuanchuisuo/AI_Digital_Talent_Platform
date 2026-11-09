@@ -21,23 +21,28 @@ def test_four_required_keys_present():
     assert settings.jwt_secret
 
 
-def test_defaults_match_runtime_config_v13():
-    assert settings.llm_timeout == 120.0
-    assert settings.llm_concurrency == 2
-    assert settings.embedding_model == "text-embedding-v3"
-    assert settings.embedding_timeout == 10.0
+def test_defaults_match_runtime_config_v13(monkeypatch):
+    # Defaults must be measured without the developer's .env or process overrides.
+    for field in Settings.model_fields:
+        monkeypatch.delenv(field.upper(), raising=False)
+    cfg = Settings(_env_file=None, llm_base_url="http://127.0.0.1:9/v1",
+                   llm_api_key="unit-test", mysql_password="unit-test", jwt_secret="unit-test")
+    assert cfg.llm_timeout == 120.0
+    assert cfg.llm_concurrency == 2
+    assert cfg.embedding_model == "text-embedding-v3"
+    assert cfg.embedding_timeout == 10.0
     # H-14 / 裁决 C-01（2026-11-07）：冷连接 ~1.7s 会被 1.5 误判超时，运行时已改 5.0
-    assert settings.vector_sync_timeout == 5.0
-    assert settings.prompt_version == "v1.0"
-    assert settings.mysql_db == "ai_talent"
-    assert settings.milvus_collection == "talent_vectors"
-    assert settings.jwt_expire_hours == 24
-    assert settings.upload_max_mb == 20
-    assert settings.task_concurrency == 2
-    assert settings.runner_scan_interval == 2.0
-    assert settings.task_heartbeat_timeout == 600
-    assert settings.task_shutdown_timeout == 30
-    assert settings.embedding_dim == 1024
+    assert cfg.vector_sync_timeout == 5.0
+    assert cfg.prompt_version == "v1.0"
+    assert cfg.mysql_db == "ai_talent"
+    assert cfg.milvus_collection == "talent_vectors"
+    assert cfg.jwt_expire_hours == 24
+    assert cfg.upload_max_mb == 20
+    assert cfg.task_concurrency == 2
+    assert cfg.runner_scan_interval == 2.0
+    assert cfg.task_heartbeat_timeout == 600
+    assert cfg.task_shutdown_timeout == 30
+    assert cfg.embedding_dim == 1024
 
 
 def test_derived_properties():

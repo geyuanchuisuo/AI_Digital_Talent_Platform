@@ -77,9 +77,9 @@ export default function JobProfileFormModal({ open, editing, onClose, onSaved }:
   const weightsOk = weightTotal === 100;
 
   const submit = async () => {
-    const values = await form.validateFields();
-    setSaving(true);
     try {
+      const values = await form.validateFields();
+      setSaving(true);
       const payload: JobProfileWritePayload = {
         title: values.title,
         department: values.department || null,
@@ -104,7 +104,11 @@ export default function JobProfileFormModal({ open, editing, onClose, onSaved }:
       onSaved();
       onClose();
     } catch (error) {
-      message.error(getErrorMessage(error));
+      // Form validation already renders field-level errors. Consume its rejection
+      // without treating an incomplete form as a server failure.
+      if (!(error && typeof error === 'object' && 'errorFields' in error)) {
+        message.error(getErrorMessage(error));
+      }
     } finally {
       setSaving(false);
     }

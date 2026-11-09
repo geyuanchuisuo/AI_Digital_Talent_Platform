@@ -23,15 +23,25 @@ depends_on: Union[str, Sequence[str], None] = None
 TABLE_OPTIONS = {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
 
 
+def _add_column_if_missing(table, column):
+    if op.get_context().as_sql or column.name not in {item["name"] for item in sa.inspect(op.get_bind()).get_columns(table)}:
+        op.add_column(table, column)
+
+
+def _create_table_if_missing(name, *columns, **options):
+    if op.get_context().as_sql or not sa.inspect(op.get_bind()).has_table(name):
+        op.create_table(name, *columns, **options)
+
+
 def upgrade() -> None:
-    op.add_column(
+    _add_column_if_missing(
         "assessment_plans",
         sa.Column(
             "mode", sa.String(length=20), nullable=False, server_default=sa.text("'adaptive'")
         ),
     )
-    op.add_column("assessment_plans", sa.Column("strategy_json", sa.JSON(), nullable=True))
-    op.add_column("assessment_plans", sa.Column("bank_snapshot_json", sa.JSON(), nullable=True))
+    _add_column_if_missing("assessment_plans", sa.Column("strategy_json", sa.JSON(), nullable=True))
+    _add_column_if_missing("assessment_plans", sa.Column("bank_snapshot_json", sa.JSON(), nullable=True))
 
     op.alter_column(
         "assessment_assignments",
@@ -39,20 +49,20 @@ def upgrade() -> None:
         existing_type=sa.Integer(),
         nullable=True,
     )
-    op.add_column(
+    _add_column_if_missing(
         "assessment_assignments",
         sa.Column(
             "mode", sa.String(length=20), nullable=False, server_default=sa.text("'adaptive'")
         ),
     )
-    op.add_column(
+    _add_column_if_missing(
         "assessment_assignments", sa.Column("strategy_snapshot_json", sa.JSON(), nullable=True)
     )
-    op.add_column(
+    _add_column_if_missing(
         "assessment_assignments", sa.Column("target_question_count", sa.Integer(), nullable=True)
     )
 
-    op.create_table(
+    _create_table_if_missing(
         "assessment_selections",
         sa.Column("id", mysql.BIGINT(unsigned=True), autoincrement=True, nullable=False),
         sa.Column("assignment_id", sa.Integer(), nullable=False),
@@ -75,7 +85,7 @@ def upgrade() -> None:
         **TABLE_OPTIONS,
     )
 
-    op.add_column("assessment_results", sa.Column("ability_json", sa.JSON(), nullable=True))
+    _add_column_if_missing("assessment_results", sa.Column("ability_json", sa.JSON(), nullable=True))
 
 
 def downgrade() -> None:

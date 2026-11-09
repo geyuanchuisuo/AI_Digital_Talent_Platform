@@ -1,0 +1,27 @@
+# AI数字化人才平台 - PostgreSQL 只读分析副本（T-D02）
+# 用途：自由问数/报表/指标统计的只读查询库，由 scripts/D/etl_pgsql.py 从 MySQL 批同步。
+# 与 deploy/milvus 的业务 MySQL 隔离：独立 compose、独立卷；默认端口 5433（5432 常被本机占用）。
+# 启动：docker compose -f deploy/postgres/docker-compose.yml up -d
+# 停止：docker compose -f deploy/postgres/docker-compose.yml down（保留卷）
+# 环境变量可覆盖：ANALYTICS_PG_PORT / ANALYTICS_PG_DB / ANALYTICS_PG_PASSWORD / CONTAINER_PREFIX
+
+services:
+  pg-analytics:
+    container_name: ${CONTAINER_PREFIX:-aitalent-app}-pg-analytics
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${ANALYTICS_PG_DB:-ai_talent_analytics}
+      POSTGRES_PASSWORD: ${ANALYTICS_PG_PASSWORD:-aitalent_2026}
+      TZ: Asia/Shanghai
+    ports:
+      - "${ANALYTICS_PG_PORT:-5433}:5432"
+    volumes:
+      - aitalent-pg-analytics-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  aitalent-pg-analytics-data:

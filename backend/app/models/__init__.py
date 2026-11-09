@@ -31,8 +31,8 @@ from app.models.job import (
     ScreenBatch,
     ScreenResult,
 )
-from app.models.resume import ParseTask, ParsedResume, ResumeFile
-from app.models.talent import TalentDuplicate, TalentProfile, TalentTag
+from app.models.resume import ParseTask, ParsedResume, ResumeFile, ResumePage, ParseAttempt
+from app.models.talent import TalentDuplicate, TalentProfile, TalentTag, TalentProfileVersion, TalentFieldEvidence, TalentProfileEdit
 from app.models.user import SysSetting, User
 from app.modules.assessments.models import (
     AssessmentAnswer,
@@ -62,7 +62,32 @@ from app.modules.recruitment.models import (
     ProjectDemand,
     ProjectGroup,
 )
+from app.modules.notifications.models import Notification  # noqa: F401 (D T-D03)
+from app.core.workflows.engine.models import WorkflowEngineRun  # noqa: F401 (D T-D04)
+from app.modules.analytics.models import (  # noqa: F401 (D T-D01b/T-D08/T-D09/T-D12)
+    AnalyticsQuerySnapshot,
+    MetricFeedback,
+    MetricRegistry,
+    Nl2SqlAudit,
+)
+from app.modules.reports.models import SnapshotExportAudit  # noqa: F401 (D T-D11)
+from app.modules.workflows.models import (  # noqa: F401 (D T-D14)
+    WorkflowDefinition,
+    WorkflowDefinitionVersion,
+    WorkflowEdge,
+    WorkflowNode,
+    WorkflowRun,
+    WorkflowRunStep,
+)
 from app.modules.recruitment.scope_models import UserScopeGrant
+from app.modules.system.models import (
+    SysDepartment,
+    SysMenu,
+    SysOperationLog,
+    SysRole,
+    SysRolePermission,
+    SysUserRole,
+)
 from app.modules.inventory.models import (
     InventoryDevelopmentPlan,
     InventoryDispute,
@@ -86,6 +111,11 @@ from app.modules.training.models import (
 )
 
 MODEL_CLASSES: tuple[type[Base], ...] = (
+    TalentProfileVersion,
+    TalentFieldEvidence,
+    TalentProfileEdit,
+    ResumePage,
+    ParseAttempt,
     User,
     SysSetting,
     ResumeFile,
@@ -137,12 +167,31 @@ MODEL_CLASSES: tuple[type[Base], ...] = (
     JdPublication,
     Application,
     UserScopeGrant,
+    SysDepartment,
+    SysRole,
+    SysUserRole,
+    SysRolePermission,
+    SysMenu,
+    SysOperationLog,
+    Notification,
+    WorkflowEngineRun,
+    AnalyticsQuerySnapshot,
+    MetricRegistry,
+    Nl2SqlAudit,
+    MetricFeedback,
+    SnapshotExportAudit,
+    WorkflowDefinition,
+    WorkflowDefinitionVersion,
+    WorkflowNode,
+    WorkflowEdge,
+    WorkflowRun,
+    WorkflowRunStep,
 )
 
 TABLE_NAMES: tuple[str, ...] = tuple(model.__tablename__ for model in MODEL_CLASSES)  # type: ignore[attr-defined]
 
-assert len(TABLE_NAMES) == 51, f"一期固定 45 张表（13 公共 + 32 C），实际 {len(TABLE_NAMES)}"
-assert len(set(TABLE_NAMES)) == 51, "表名重复"
+assert len(TABLE_NAMES) == 75, f"一期 75 张表（70 + 5 B history），实际 {len(TABLE_NAMES)}"
+assert len(set(TABLE_NAMES)) == 75, "表名重复"
 assert "llm_score_cache" not in TABLE_NAMES, "llm_score_cache 是 D-7 缓办项，一期不建"
 assert "upload_batches" not in TABLE_NAMES, (
     "批次不是实体表（决策 D-M）：靠 resume_files.upload_batch_id 聚合，"

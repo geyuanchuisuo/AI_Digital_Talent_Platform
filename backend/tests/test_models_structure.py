@@ -37,6 +37,9 @@ DIALECT = mysql.dialect()
 
 # C 域表名前缀（测评 / 人工面试 / AI 面试间 / 培训 / 盘点）：updated_at 为应用层维护（CTimestampMixin），
 # 与公共 UpdatedAtMixin 的差异已发 docs/requests/A/ 请求 C 对齐。
+# 纯关联表（design §8.3：仅 id+外键列，无时间戳列）
+PURE_LINK_TABLES = frozenset({"sys_user_roles", "sys_role_permissions"})
+
 C_DOMAIN_TABLES = frozenset(
     t for t in (
         "assessment_questions", "assessment_plans", "assessment_papers",
@@ -56,6 +59,11 @@ C_DOMAIN_TABLES = frozenset(
 
 # 逐表期望列名（含 id / created_at / updated_at），来源：数据库设计 v1.2 §3~§6
 EXPECTED_COLUMNS: dict[str, set[str]] = {
+    "talent_profile_versions": {"id", "talent_profile_id", "version", "change_type", "profile_snapshot_json", "changed_by", "created_at"},
+    "talent_field_evidence": {"id", "talent_profile_id", "profile_version", "field_name", "resume_file_id", "source_page", "source_text", "source", "confidence", "review_status", "created_at"},
+    "talent_profile_edits": {"id", "talent_profile_id", "profile_version", "field_name", "old_value", "new_value", "edited_by", "created_at"},
+    "resume_pages": {"id", "resume_file_id", "page_no", "text_content", "ocr_engine", "confidence", "created_at"},
+    "parse_attempts": {"id", "parse_task_id", "attempt_no", "status", "stage", "error_message", "started_at", "finished_at"},
     "users": {
         "id", "username", "password_hash", "display_name", "role", "person_id",
         "is_active", "last_login_at", "created_at", "updated_at",
@@ -213,6 +221,27 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "reason", "valid_from", "valid_until", "revoked_at", "revoked_by",
         "created_at", "updated_at",
     },
+    # ---- 系统管理域 6 表（8b，design §8.3 冻结口径）----
+    "sys_departments": {
+        "id", "name", "parent_id", "leader", "phone", "sort", "status",
+        "created_at", "updated_at",
+    },
+    "sys_roles": {
+        "id", "code", "name", "description", "data_scope", "status",
+        "created_at", "updated_at",
+    },
+    "sys_user_roles": {"id", "user_id", "role_id"},
+    "sys_role_permissions": {
+        "id", "role_id", "menu_id", "action", "data_scope",
+    },
+    "sys_menus": {
+        "id", "parent_id", "name", "path", "icon", "permission_code",
+        "menu_type", "hidden", "sort", "status", "created_at", "updated_at",
+    },
+    "sys_operation_logs": {
+        "id", "user_id", "username", "module", "action", "method", "path",
+        "params", "ip", "status", "duration_ms", "created_at",
+    },
     # ---- 招聘域 5 表（M3-V2.6 功能 8a-1，冻结口径）----
     "project_groups": {
         "id", "name", "description", "status", "created_by",
@@ -314,6 +343,68 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "id", "review_id", "event_type", "operator_id", "note",
         "payload_json", "created_at", "updated_at",
     },
+    # ---- D 通知中心（T-D03，契约 docs/modules/D/通知契约.md §2）----
+    "notifications": {
+        "id", "event_type", "ref_type", "ref_id", "actor_user_id",
+        "recipient_user_id", "payload_json", "idempotency_key", "status",
+        "failure_reason", "created_at", "sent_at", "read_at",
+    },
+    # ---- D 工作流引擎（T-D04）----
+    "workflow_engine_runs": {
+        "id", "graph_name", "thread_id", "status", "error",
+        "finished_at", "created_at", "updated_at",
+    },
+    # ---- D 问数切片（T-D01b）----
+    "analytics_query_snapshots": {
+        "id", "metric_id", "params_json", "data_time", "result_json",
+        "source", "cache_hit", "created_by", "created_at",
+    },
+    # ---- D 问数服务（T-D08）----
+    "metric_registry": {
+        "id", "metric_id", "name", "domain", "status", "definition_ref",
+        "allowed_roles", "params_json", "cache_ttl", "note",
+        "created_at", "updated_at",
+    },
+    # ---- D 自由问数（T-D09）----
+    "nl2sql_audit": {
+        "id", "question", "generated_sql", "stage", "refused_reason",
+        "row_count", "duration_ms", "created_by", "created_at",
+    },
+    # ---- D 问数反馈（T-D12）----
+    "analytics_feedback": {
+        "id", "snapshot_id", "comment", "created_by", "created_at",
+    },
+    # ---- D 报告导出（T-D11）----
+    "snapshot_export_audit": {
+        "id", "snapshot_id", "format", "created_by", "created_at",
+    },
+    # ---- D 工作流数据模型（T-D14，契约 docs/modules/D/工作流数据模型契约.md）----
+    "workflow_definitions": {
+        "id", "code", "name", "description", "created_at", "updated_at",
+    },
+    "workflow_definition_versions": {
+        "id", "definition_id", "version", "status", "note", "created_by",
+        "submitted_by", "submitted_at", "review_note",
+        "published_by", "published_at", "created_at", "updated_at",
+    },
+    "workflow_nodes": {
+        "id", "version_id", "node_key", "name", "node_type", "position_json",
+        "config_json", "inputs_json", "outputs_json", "created_at", "updated_at",
+    },
+    "workflow_edges": {
+        "id", "version_id", "source_node_key", "target_node_key", "branch",
+        "condition_json", "created_at", "updated_at",
+    },
+    "workflow_runs": {
+        "id", "definition_id", "version_id", "thread_id", "trigger_type",
+        "trigger_ref", "params_json", "status", "error", "created_by",
+        "finished_at", "created_at", "updated_at",
+    },
+    "workflow_run_steps": {
+        "id", "run_id", "node_key", "node_type", "attempt", "status",
+        "output_json", "error", "started_at", "finished_at",
+        "created_at", "updated_at",
+    },
 }
 
 EXPECTED_UNIQUE: dict[str, set[str]] = {
@@ -332,6 +423,9 @@ EXPECTED_UNIQUE: dict[str, set[str]] = {
     "assessment_answers": {"uk_answer_assignment_question"},
     "assessment_results": {"uk_result_assignment_version"},
     "assessment_selections": {"uk_selection_question", "uk_selection_sequence"},
+    "sys_roles": {"uk_role_code"},
+    "sys_user_roles": {"uk_user_role"},
+    "sys_role_permissions": {"uk_role_menu_action"},
     "assessment_review_items": {"uk_review_assignment_question_user"},
     "interview_feedback": {"uk_feedback_round"},
     "ai_interview_questions": {"uk_ai_q_session_seq"},
@@ -343,6 +437,15 @@ EXPECTED_UNIQUE: dict[str, set[str]] = {
     "training_plan_versions": {"uk_plan_version"},
     "training_learning_records": {"uk_learning_item_employee"},
     "inventory_development_plans": {"uk_idp_review"},
+    "notifications": {"uk_notifications_idempotency"},
+    "workflow_engine_runs": {"uk_workflow_engine_runs_thread"},
+    # ---- D 工作流数据模型（T-D14）----
+    "workflow_definitions": {"uk_workflow_definitions_code"},
+    "workflow_definition_versions": {"uk_workflow_version"},
+    "workflow_nodes": {"uk_workflow_node_key"},
+    "workflow_edges": {"uk_workflow_edge"},
+    "workflow_runs": {"uk_workflow_runs_thread"},
+    "workflow_run_steps": {"uk_workflow_step_attempt"},
 }
 
 EXPECTED_INDEXES: dict[str, set[str]] = {
@@ -359,6 +462,14 @@ EXPECTED_INDEXES: dict[str, set[str]] = {
     "screen_results": {"idx_batch_verdict", "idx_screen_job_result", "idx_talent"},
     "match_batches": {"idx_match_job"},
     "match_results": {"idx_match_talent"},
+    "notifications": {"idx_notifications_recipient", "idx_notifications_ref"},
+    "workflow_engine_runs": {"idx_workflow_engine_runs_status"},
+    "analytics_query_snapshots": {"idx_aqs_metric_time", "idx_aqs_user"},
+    # ---- D 工作流数据模型（T-D14）----
+    "workflow_definition_versions": {"idx_wdv_definition_status"},
+    "workflow_nodes": {"idx_workflow_nodes_version"},
+    "workflow_edges": {"idx_workflow_edges_version"},
+    "workflow_runs": {"idx_workflow_runs_status", "idx_workflow_runs_definition"},
 }
 
 
@@ -366,10 +477,10 @@ def ddl(model) -> str:
     return str(CreateTable(model.__table__).compile(dialect=DIALECT))
 
 
-def test_exactly_51_tables_and_no_phase2_table():
-    assert len(TABLE_NAMES) == 51
-    assert len(MODEL_CLASSES) == 51
-    assert len(Base.metadata.tables) == 51
+def test_exactly_70_tables_and_no_phase2_table():
+    assert len(TABLE_NAMES) == 75
+    assert len(MODEL_CLASSES) == 75
+    assert len(Base.metadata.tables) == 75
     assert set(TABLE_NAMES) == set(EXPECTED_COLUMNS)
     # D-7 缓办：一期不建 llm_score_cache
     assert "llm_score_cache" not in Base.metadata.tables
@@ -400,7 +511,11 @@ def test_primary_key_and_timestamps(model):
     assert pk[0].autoincrement is True
     text = ddl(model)
     assert "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT" in text, model.__tablename__
-    assert "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP" in text
+    if model.__tablename__ in PURE_LINK_TABLES or model.__tablename__ == "parse_attempts":
+        # 纯关联表无 created_at/updated_at（design §8.3 口径）
+        assert "created_at" not in text, model.__tablename__
+    else:
+        assert "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP" in text
     if "updated_at" in EXPECTED_COLUMNS[model.__tablename__]:
         if model.__tablename__ in C_DOMAIN_TABLES:
             # C 域表：应用层维护 updated_at（CTimestampMixin），暂无 ON UPDATE
@@ -448,6 +563,9 @@ def test_unique_constraints_by_name():
     assert unique_cols("assessment_results", "uk_result_assignment_version") == ("assignment_id", "version")
     assert unique_cols("assessment_selections", "uk_selection_question") == ("assignment_id", "question_id")
     assert unique_cols("assessment_selections", "uk_selection_sequence") == ("assignment_id", "sequence_no")
+    assert unique_cols("sys_roles", "uk_role_code") == ("code",)
+    assert unique_cols("sys_user_roles", "uk_user_role") == ("user_id", "role_id")
+    assert unique_cols("sys_role_permissions", "uk_role_menu_action") == ("role_id", "menu_id", "action")
     assert unique_cols("assessment_review_items", "uk_review_assignment_question_user") == (
         "assignment_id", "question_id", "user_id",
     )

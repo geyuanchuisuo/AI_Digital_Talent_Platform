@@ -29,8 +29,9 @@ from app.core.response import ok, paginated
 from app.database import get_db
 from app.schemas.resume import BatchSummaryItem, QueueSettingsRequest
 from app.service import queue_service, upload_service
+from app.modules.talents.access import require_manager
 
-router = APIRouter(prefix="/api/resumes", tags=["resumes"])
+router = APIRouter(prefix="/api/resumes", tags=["resumes"], dependencies=[Depends(require_manager)])
 
 
 @router.post("/batch", summary="批量上传简历（PDF/DOCX）")

@@ -404,7 +404,10 @@ def test_manual_verdict_set_revoke_invalid_and_auth(env, fakes, client, auth):
     handle_match_batch(batch_id)
 
     with SessionLocal() as db:
-        row = db.query(MatchResult).filter(MatchResult.match_batch_id == batch_id).one()
+        row = db.query(MatchResult).filter(
+            MatchResult.match_batch_id == batch_id,
+            MatchResult.talent_profile_id == p1,
+        ).one()
     result_id = row.id
 
     # 无 token → 401（统一错误体，路由挂 CurrentUser）

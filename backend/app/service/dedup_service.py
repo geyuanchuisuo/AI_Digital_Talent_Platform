@@ -259,10 +259,12 @@ def _merge(
     if master_profile_id is not None and master_profile_id != duplicate.profile_a_id:
         raise BizError(400, "一期合并只支持 master_profile_id 等于 profile_a_id")
 
-    master = db.get(TalentProfile, duplicate.profile_a_id)
+    master = db.scalar(select(TalentProfile).where(TalentProfile.id == duplicate.profile_a_id).with_for_update().execution_options(populate_existing=True))
     if master is None or master.deleted_at is not None:
         raise BizError(400, "主画像不存在或已删除，无法合并")
 
+    from app.modules.talents.history import save_version
+    save_version(db, master, "baseline")
     data = _as_mapping(parsed.structured_json)
     values = profile_service.build_scalar_fields(data)
     protected = set(master.manual_edited_fields or [])
@@ -303,6 +305,7 @@ def _merge(
     task = _finish_task(db, parsed.resume_file_id, now)
 
     db.flush()
+    save_version(db, master, "merge", changed_by=user_id)
     db.commit()
     db.refresh(master)
     logger.info(

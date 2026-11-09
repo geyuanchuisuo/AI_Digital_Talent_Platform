@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -26,12 +25,9 @@ from app.service.extract_service import (
 
 
 @pytest.fixture()
-def sample_dir():
-    """项目内临时目录（H-7：系统 Temp 可能拒绝访问，不用 pytest 的 tmp_path）。"""
-    root = Path(__file__).resolve().parents[1] / ".pytest_tmp"
-    root.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=root) as directory:
-        yield Path(directory)
+def sample_dir(tmp_path):
+    """由 pytest 管理；受限环境可用 --basetemp 指向可写项目目录。"""
+    return tmp_path
 
 
 # ---------------------------------------------------------------- 合成样例

@@ -8,12 +8,12 @@
  */
 
 import { Card, Col, Descriptions, Row, Typography } from 'antd';
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
 import { getUser, type AuthUser } from '@/lib/auth';
 
 const PLACEHOLDERS = [
-  { key: 'profile', title: '我的档案', desc: '本人人才档案与原件查看（B 组件挂载点）' },
   { key: 'learning', title: '我的学习', desc: '必修课进度 / 培训计划（C 组件挂载点）' },
   { key: 'assessments', title: '我的测评', desc: '测评任务与结果查看（C 组件挂载点）' },
 ];
@@ -40,6 +40,16 @@ export default function PersonHomePage() {
         </Descriptions>
       </Card>
       <Row gutter={[16, 16]}>
+        <Col xs={24} md={8}>
+          <Link href="/my-profile"><Card title="我的档案" hoverable>查看本人档案与原始资料</Card></Link>
+        </Col>
+        <Col xs={24} md={8}>
+          <Link href="/applications">
+            <Card title="我的岗位申请" hoverable>
+              <Typography.Text>查看本人各申请的对外进度（已提交/筛选中/待面试/待决定/已结束）</Typography.Text>
+            </Card>
+          </Link>
+        </Col>
         {PLACEHOLDERS.map((item) => (
           <Col xs={24} md={8} key={item.key}>
             <Card title={item.title}>

@@ -25,7 +25,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 import { clearAuth, getToken, isTokenExpired, setAuth, AuthUser } from '@/lib/auth';
-import { ApiError, get } from '@/lib/http';
+import { ApiError, getWithHeaders } from '@/lib/http';
 
 /** 已通过服务端校验的 token（同一页面生命周期内只验一次） */
 let verifiedToken: string | null = null;
@@ -51,7 +51,7 @@ async function verifySession(token: string): Promise<boolean> {
   if (!inflight || inflight.token !== token) {
     inflight = {
       token,
-      promise: get<AuthUser>('/auth/me')
+      promise: getWithHeaders<AuthUser>('/auth/me', { 'X-Auth-Probe': '1' })
         .then((user) => {
           verifiedToken = token;
           // 顺手刷新本地用户信息（管理员改过显示名 / 角色时，页头不会一直显示旧值）

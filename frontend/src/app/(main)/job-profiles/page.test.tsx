@@ -90,4 +90,23 @@ describe('JobProfilesPage（T-26）', () => {
     await screen.findByText('岗位名称不能为空', {}, { timeout: 5000 });
     expect(createMock).not.toHaveBeenCalled();
   });
+
+  it('合法表单仍提交岗位信息，失败后保留表单可重试', async () => {
+    createMock.mockRejectedValueOnce(new Error('服务暂不可用'));
+    render(<JobProfilesPage />);
+    await screen.findByText('高级后端工程师');
+    fireEvent.click(screen.getByRole('button', { name: /新\s*建\s*岗\s*位/ }));
+    await screen.findByText('新建岗位条件');
+    fireEvent.change(screen.getByLabelText('岗位名称'), {target:{value:'合成测试岗位'}});
+    fireEvent.change(screen.getByLabelText('职责描述（JD）'), {target:{value:'合成职责描述'}});
+    fireEvent.change(screen.getByLabelText('任职要求'), {target:{value:'合成任职要求'}});
+    fireEvent.click(screen.getByRole('button', {name:/保\s*存/}));
+    await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
+    expect(createMock.mock.calls[0][0]).toMatchObject({title:'合成测试岗位',jd_text:'合成职责描述',requirements_text:'合成任职要求'});
+    expect(screen.getByText('新建岗位条件')).toBeTruthy();
+    createMock.mockResolvedValueOnce({} as never);
+    await waitFor(() => expect((screen.getByRole('button',{name:/保\s*存/}) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole('button',{name:/保\s*存/}));
+    await waitFor(() => expect(createMock).toHaveBeenCalledTimes(2));
+  });
 });

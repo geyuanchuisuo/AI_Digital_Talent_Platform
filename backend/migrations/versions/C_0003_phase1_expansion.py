@@ -23,31 +23,41 @@ depends_on: Union[str, Sequence[str], None] = None
 TABLE_OPTIONS = {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
 
 
+def _add_column_if_missing(table, column):
+    if op.get_context().as_sql or column.name not in {item["name"] for item in sa.inspect(op.get_bind()).get_columns(table)}:
+        op.add_column(table, column)
+
+
+def _create_table_if_missing(name, *columns, **options):
+    if op.get_context().as_sql or not sa.inspect(op.get_bind()).has_table(name):
+        op.create_table(name, *columns, **options)
+
+
 def upgrade() -> None:
     # 测评题目知识点
-    op.add_column("assessment_questions", sa.Column("knowledge_point", sa.String(length=200), nullable=True))
+    _add_column_if_missing("assessment_questions", sa.Column("knowledge_point", sa.String(length=200), nullable=True))
 
     # 面试轮次关联招聘申请
-    op.add_column("interview_rounds", sa.Column("application_id", sa.Integer(), nullable=True))
+    _add_column_if_missing("interview_rounds", sa.Column("application_id", sa.Integer(), nullable=True))
 
     # 成长事件来源类型
-    op.add_column(
+    _add_column_if_missing(
         "training_growth_events",
         sa.Column("source_type", sa.String(length=20), nullable=False, server_default="training"),
     )
 
     # 学习记录：正式完成与证据分
-    op.add_column(
+    _add_column_if_missing(
         "training_learning_records",
         sa.Column("formal_completed", sa.SmallInteger(), nullable=False, server_default="0"),
     )
-    op.add_column(
+    _add_column_if_missing(
         "training_learning_records",
         sa.Column("evidence_score", sa.Float(), nullable=False, server_default="0"),
     )
 
     # 培训报名
-    op.create_table(
+    _create_table_if_missing(
         "training_enrollments",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("course_id", sa.Integer(), nullable=False),
@@ -65,7 +75,7 @@ def upgrade() -> None:
     )
 
     # 学习证据
-    op.create_table(
+    _create_table_if_missing(
         "training_learning_evidence",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("learning_record_id", sa.Integer(), nullable=False),
@@ -80,7 +90,7 @@ def upgrade() -> None:
     )
 
     # F10 盘点
-    op.create_table(
+    _create_table_if_missing(
         "inventory_reviews",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("employee_user_id", sa.Integer(), nullable=False),
@@ -102,7 +112,7 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
         **TABLE_OPTIONS,
     )
-    op.create_table(
+    _create_table_if_missing(
         "inventory_talent_pools",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("employee_user_id", sa.Integer(), nullable=False),
@@ -116,7 +126,7 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
         **TABLE_OPTIONS,
     )
-    op.create_table(
+    _create_table_if_missing(
         "inventory_disputes",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("review_id", sa.Integer(), nullable=False),
@@ -129,7 +139,7 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
         **TABLE_OPTIONS,
     )
-    op.create_table(
+    _create_table_if_missing(
         "inventory_development_plans",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("review_id", sa.Integer(), nullable=False),
@@ -141,7 +151,7 @@ def upgrade() -> None:
         sa.UniqueConstraint("review_id", name="uk_idp_review"),
         **TABLE_OPTIONS,
     )
-    op.create_table(
+    _create_table_if_missing(
         "inventory_events",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("review_id", sa.Integer(), nullable=True),
@@ -155,7 +165,7 @@ def upgrade() -> None:
     )
 
     # AI 面试间
-    op.create_table(
+    _create_table_if_missing(
         "ai_interview_sessions",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("candidate_user_id", sa.Integer(), nullable=True),
@@ -172,7 +182,7 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
         **TABLE_OPTIONS,
     )
-    op.create_table(
+    _create_table_if_missing(
         "ai_interview_questions",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("session_id", sa.Integer(), nullable=False),
@@ -188,7 +198,7 @@ def upgrade() -> None:
         sa.UniqueConstraint("session_id", "sequence_no", name="uk_ai_q_session_seq"),
         **TABLE_OPTIONS,
     )
-    op.create_table(
+    _create_table_if_missing(
         "ai_interview_events",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("session_id", sa.Integer(), nullable=False),
