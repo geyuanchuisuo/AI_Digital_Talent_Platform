@@ -34,9 +34,14 @@ from app.modules.talents.access import require_manager
 router = APIRouter(prefix="/api/resumes", tags=["resumes"], dependencies=[Depends(require_manager)])
 
 
-@router.post("/batch", summary="批量上传简历（PDF/DOCX）")
+@router.get("/upload-options", summary="当前环境的简历上传格式与限制")
+def upload_options():
+    return ok(upload_service.upload_options())
+
+
+@router.post("/batch", summary="批量上传简历（文本、图片与扫描件）")
 def upload_batch(
-    files: Annotated[list[UploadFile], File(description="多份简历，单文件 ≤20MB，支持 pdf/docx")],
+    files: Annotated[list[UploadFile], File(description="多份简历，格式与大小上限以 upload-options 为准")],
     user: CurrentUser,
     db: Annotated[Session, Depends(get_db)],
 ):

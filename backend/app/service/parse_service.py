@@ -20,6 +20,8 @@
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import date
 from typing import Any
 
@@ -27,6 +29,17 @@ from app.core import llm_client
 from app.schemas.parse import ResumeSchema
 
 logger = logging.getLogger(__name__)
+
+_call_sink = ContextVar("parse_call_sink", default=None)
+
+
+@contextmanager
+def capture_calls(sink):
+    token = _call_sink.set(sink)
+    try:
+        yield
+    finally:
+        _call_sink.reset(token)
 
 #: T-30（2026-11-06）：Prompt A 原先不知道「今天几号」，遇到「至今」只能凭印象估年数，
 #: 实测会返回 None 或乱估。这里把基准日期作为一条**事实**拼进数据段（不是指令，
@@ -95,12 +108,16 @@ def to_dict(schema: ResumeSchema) -> dict[str, Any]:
 
 
 def _call(prompt: str) -> ResumeSchema:
+    sink = _call_sink.get()
     try:
-        output = llm_client.chat_json(prompt, ResumeSchema, prompt_name="parse")
+        kwargs = {"on_result":lambda event:sink({"kind":"raw", **event})} if sink is not None else {}
+        output = llm_client.chat_json(prompt, ResumeSchema, prompt_name="parse", **kwargs)
     except llm_client.LLMError as exc:
         # 适配层已重试过 1 次；这里不再重试，避免 4 次调用把单任务拖到 8 分钟
         raise ParseError(f"Prompt A 调用失败：{exc}") from exc
     assert isinstance(output, ResumeSchema)  # schema 已传，chat_json 保证类型
+    if sink is not None:
+        sink({"kind":"structured", "output":to_dict(output)})
     return output
 
 

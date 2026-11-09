@@ -1,36 +1,17 @@
-"""简历文本提取（T-11，需求 F1-1 / 架构 §6.1）。
+"""F02 逐页提取：PDF 文本层优先，图片与扫描页走本地 OCR。
 
-职责单一：**文件 → 纯文本**。不做 LLM 结构化（T-13）、不碰数据库、不改
-`parse_tasks.truncated`（由 T-13 拿到 `ExtractResult` 后落库），因此
-`tasks/parse_worker.py` 可以直接调用，单测也不需要 MySQL/Milvus。
-
-口径来源（改实现前先看这三处，不要另立一套）：
-- `docs/LLM提示词设计.md`：简历文本 ≤ **15000 字符**，超长在提取层截断，
-  LLM 不感知截断（截断部分忽略）。
-- `docs/架构设计.md` §8：大简历超上下文 → 截断并记录 `truncated`。
-- `docs/需求文档.md` F1-1 + todolist T-11：**空文本判失败**（扫描件/纯图片
-  PDF 不做 OCR）。
-
-实现要点：
-1. **PDF 用 pypdf，DOCX 用 python-docx**（架构 §3 选型，不引 OCR、不调外部服务）。
-2. **DOCX 取全**：正文段落 + 表格（含嵌套一层）+ 页眉页脚，正文按文档真实顺序
-   输出（`w:p` / `w:tbl` 交替），表格一行一条、单元格用制表符分隔——比"段落全
-   在前、表格全在后"更接近人读的顺序，LLM 提取经历时不容易错位。
-3. **统一归一化**：CRLF/CR → LF、NBSP → 空格、去 BOM、去行尾空白、连续空行
-   压成一个，最后 `strip()`。归一化后再判空、再截断——截断长度才是"喂给 LLM 的
-   字符数"，与 `truncated` 语义一致。
-4. **失败一律抛 `ExtractError`**（中文原因），由 T-13 捕获后落
-   `failed(stage=extract, error=str(e))`；不在这里写数据库，也不吞异常返回空串。
-5. **不猜编码、不做 OCR、不修 PDF 结构**：`pypdf` 抽不出文字就是空文本，明确失败，
-   比返回半截乱码更容易排查。
-6. **已知边界（不是缺陷）**：Word 的文本框（`w:txbxContent`）、SmartArt、图片内文字
-   不提取；PDF 只取文本层，扫描件不 OCR。简历正文/表格/页眉页脚已覆盖，遇到
-   "内容明明有却提不到"先确认是不是文本框或图片。
+完整原页文本/来源/质量供持久化证据使用；只有模型输入受 15000 字符限制。
+混合文件逐页处理，失败保留已处理页和错误，不能静默丢页冒称成功。
+DOCX 保留正文/表格/页眉页脚顺序，使用文档文本定位，不虚构物理分页。
+本层不访问数据库或大模型；OCR 受开关、页数、像素与进程超时限制。
 """
 
 from __future__ import annotations
 
 import logging
+from io import BytesIO
+import math
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
@@ -51,14 +32,28 @@ logger = logging.getLogger("app.extract")
 DEFAULT_TEXT_MAX_CHARS = 15000
 
 #: 与 `settings.upload_allowed_ext` 对齐（上传阶段已拦，这里再兜一层，防脏数据）
-SUPPORTED_EXTS: tuple[str, ...] = ("pdf", "docx")
+SUPPORTED_EXTS: tuple[str, ...] = ("pdf", "docx", "png", "jpg", "jpeg")
 
-EMPTY_TEXT_MESSAGE = "未能提取到文本：可能是扫描件/纯图片，或文件内容为空"
+EMPTY_TEXT_MESSAGE = "未能提取到文本：文件可能为空白、模糊或内容无法识别"
 ENCRYPTED_PDF_MESSAGE = "PDF 已加密，无法提取文本"
 
 
 class ExtractError(RuntimeError):
     """提取失败；`str(exc)` 直接作为 `parse_tasks.error` 落库。"""
+
+    def __init__(self, message: str, *, pages=()):
+        super().__init__(message)
+        self.pages = tuple(pages)
+
+
+@dataclass(frozen=True)
+class ExtractedPage:
+    page_no: int
+    text: str
+    source_type: str = "text"
+    confidence: float | None = None
+    quality_status: str = "ready"
+    error_message: str | None = None
 
 
 @dataclass(frozen=True)
@@ -68,6 +63,7 @@ class ExtractResult:
     text: str
     truncated: bool
     raw_length: int  # 截断前的字符数，仅用于日志/排查，不入库
+    pages: tuple[ExtractedPage, ...] = ()
 
 
 def extract_text(
@@ -90,17 +86,26 @@ def extract_text(
     if not file_path.is_file():
         raise ExtractError(f"简历文件不存在：{file_path}")
 
-    raw = _extract_pdf(file_path) if suffix == "pdf" else _extract_docx(file_path)
+    from app.config import settings
+    deadline = time.monotonic() + settings.ocr_timeout_seconds
+    page_truncated = False
+    if suffix == "pdf":
+        pages, page_truncated = _extract_pdf_pages(file_path, deadline)
+    elif suffix == "docx":
+        pages = [ExtractedPage(1, normalize_text(_extract_docx(file_path)), "document")]
+    else:
+        pages = [_image_page(file_path, deadline)]
+    raw = "\n\n".join(page.text for page in pages if page.text.strip())
     text = normalize_text(raw)
     if not text:
-        raise ExtractError(EMPTY_TEXT_MESSAGE)
+        raise ExtractError(EMPTY_TEXT_MESSAGE, pages=pages)
 
     if len(text) > max_chars:
         logger.info(
             "resume_text_truncated path=%s raw=%d limit=%d", file_path.name, len(text), max_chars
         )
-        return ExtractResult(text=text[:max_chars], truncated=True, raw_length=len(text))
-    return ExtractResult(text=text, truncated=False, raw_length=len(text))
+        return ExtractResult(text=text[:max_chars], truncated=True, raw_length=len(text), pages=tuple(pages))
+    return ExtractResult(text=text, truncated=page_truncated, raw_length=len(text), pages=tuple(pages))
 
 
 # ---------------------------------------------------------------- 归一化
@@ -123,7 +128,88 @@ def normalize_text(raw: str) -> str:
 # ---------------------------------------------------------------- PDF
 
 
-def _extract_pdf(path: Path) -> str:
+def _ocr_image(image: bytes, timeout: float) -> tuple[str, float | None]:
+    from app.config import BASE_DIR, settings
+    from app.modules.files.ocr import OCRFailure, recognize
+    directory = Path(settings.ocr_model_dir)
+    if not directory.is_absolute():
+        directory = BASE_DIR / directory
+    try:
+        return recognize(image, timeout=timeout, directory=directory)
+    except (OCRFailure, ImportError) as exc:
+        raise ExtractError(str(exc)) from exc
+
+
+def _recognized_page(image: bytes, number: int, deadline: float) -> ExtractedPage:
+    from app.config import settings
+    if not settings.ocr_enabled:
+        raise ExtractError("图片或扫描页需要 OCR，但当前环境未启用 OCR")
+    text, confidence = _ocr_image(image, deadline - time.monotonic())
+    text = normalize_text(text)
+    if not text:
+        from PIL import Image
+        with Image.open(BytesIO(image)) as original:
+            blank = original.convert("L").getextrema()[0] >= 250
+        if not blank:
+            raise ExtractError("OCR 未识别出该页有效文字，请核对或上传更清晰的资料")
+        return ExtractedPage(number, "", "blank", quality_status="empty")
+    if confidence is not None and (not math.isfinite(confidence) or not 0 <= confidence <= 1):
+        confidence = None
+    quality = "empty" if not text else ("low_confidence" if confidence is None or confidence < 0.8 else "ready")
+    return ExtractedPage(number, text, "ocr", confidence, quality)
+
+
+def _image_page(path: Path, deadline: float) -> ExtractedPage:
+    from app.config import settings
+    from PIL import Image, ImageOps, UnidentifiedImageError
+    try:
+        with Image.open(path) as image:
+            if image.width * image.height > 40_000_000:
+                raise ExtractError("图片像素超过安全上限（4000 万）")
+            image = ImageOps.exif_transpose(image).convert("RGB")
+            max_pixels = max(1, settings.ocr_max_page_pixels)
+            scale = min(1, math.sqrt(max_pixels / (image.width * image.height)))
+            image.thumbnail((max(1, int(image.width * scale)), max(1, int(image.height * scale))))
+            output = BytesIO()
+            image.save(output, format="PNG")
+        return _recognized_page(output.getvalue(), 1, deadline)
+    except (ExtractError, UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
+        error = str(exc) if isinstance(exc, ExtractError) else f"图片解析失败：{exc}"
+        raise ExtractError(error, pages=[ExtractedPage(1, "", "ocr", quality_status="failed", error_message=error)]) from exc
+
+
+def _render_page(path: Path, index: int) -> bytes:
+    from app.config import settings
+    try:
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            import fitz
+    except ImportError as exc:
+        raise ExtractError("PDF 页渲染依赖缺失，请安装仓库声明的 PyMuPDF") from exc
+    with fitz.open(path) as document:
+        page = document[index]
+        area = max(1, page.rect.width * page.rect.height)
+        scale = min(150 / 72, math.sqrt(max(1, settings.ocr_max_page_pixels) / area))
+        return page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False).tobytes("png")
+
+
+def _has_scan_body(path: Path, index: int) -> bool:
+    """A dominant scanned image must not be hidden by a searchable watermark."""
+    try:
+        import pymupdf as fitz
+    except ImportError:
+        import fitz
+    with fitz.open(path) as document:
+        page = document[index]
+        area = max(1, page.rect.get_area())
+        return any((fitz.Rect(item["bbox"]) & page.rect).get_area() / area >= 0.35
+                   for item in page.get_image_info())
+
+
+def _extract_pdf_pages(path: Path, deadline: float) -> tuple[list[ExtractedPage], bool]:
+    from app.config import settings
+    pages: list[ExtractedPage] = []
     try:
         reader = PdfReader(str(path))
         if reader.is_encrypted:
@@ -135,19 +221,31 @@ def _extract_pdf(path: Path) -> str:
             if not unlocked:
                 raise ExtractError(ENCRYPTED_PDF_MESSAGE)
 
-        pages: list[str] = []
-        for index, page in enumerate(reader.pages):
+        limit = max(1, settings.ocr_max_pages)
+        truncated = len(reader.pages) > limit
+        for index, page in enumerate(reader.pages[:limit]):
             try:
-                pages.append(page.extract_text() or "")
-            except Exception:  # noqa: BLE001 - 单页坏不影响其他页，最后按空文本判定
-                logger.warning("pdf_page_extract_failed file=%s page=%d", path.name, index + 1, exc_info=True)
-                pages.append("")
+                text = normalize_text(page.extract_text() or "")
+                has_images = bool(page.images)
+                scan_body = has_images and _has_scan_body(path, index)
+                if text and not scan_body and (not has_images or len(text) >= 20):
+                    pages.append(ExtractedPage(index + 1, text))
+                elif not text and not has_images and not settings.ocr_enabled:
+                    pages.append(ExtractedPage(index + 1, "", quality_status="empty"))
+                else:
+                    if not settings.ocr_enabled:
+                        raise ExtractError("扫描页需要 OCR，但当前环境未启用 OCR")
+                    pages.append(_recognized_page(_render_page(path, index), index + 1, deadline))
+            except Exception as exc:
+                error = f"第 {index + 1} 页处理失败：{exc}"
+                pages.append(ExtractedPage(index + 1, "", "ocr", quality_status="failed", error_message=error))
+                raise ExtractError(error, pages=pages) from exc
     except ExtractError:
         raise
     except (PdfReadError, OSError, ValueError) as exc:
         raise ExtractError(f"PDF 解析失败：{exc}") from exc
 
-    return "\n\n".join(page for page in pages if page.strip())
+    return pages, truncated
 
 
 # ---------------------------------------------------------------- DOCX

@@ -4,6 +4,7 @@ import {useEffect, useState} from 'react';
 import {getUser} from '@/lib/auth';
 import {get, downloadFile, getErrorMessage} from '@/lib/http';
 import type {TalentDetailData} from '@/app/(main)/talents/types';
+import SourceEvidence from './SourceEvidence';
 
 export default function PersonalProfile() {
   const [detail, setDetail] = useState<TalentDetailData | null>(null);
@@ -53,6 +54,7 @@ export default function PersonalProfile() {
         <List dataSource={detail[key] || []} locale={{emptyText:'资料中未提供'}} renderItem={entry =>
           <List.Item><div style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{Object.values(entry).filter(v => v != null && v !== '').join(' · ')}</div></List.Item>} />
       </Card>)}
+    {personId != null && <SourceEvidence personId={personId} />}
     <Card title="原始资料">
       <List dataSource={detail.resume_files || []} locale={{emptyText:'暂无原始资料'}} renderItem={file =>
         <List.Item><Space wrap><span style={{overflowWrap:'anywhere'}}>{file.filename}</span>

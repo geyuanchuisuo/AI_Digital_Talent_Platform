@@ -48,6 +48,7 @@ from app.service.extract_service import ExtractError, extract_text
 from app.service.parse_service import ParseError
 from app.service.profile_service import ProfileError
 from app.service.upload_service import resolve_stored_path
+from app.modules.files.processing import begin_attempt, finish_attempt, store_pages, trace_attempt, append_model_call, attempt_scope
 
 logger = logging.getLogger("app.parse_worker")
 
@@ -97,8 +98,10 @@ def handle_parse(task_id: int) -> None:
             logger.warning("解析任务 %s 状态为 %s（非 running），跳过", task_id, task.status)
             return
 
+        attempt = begin_attempt(db, task)
         try:
-            run_task(db, task)
+            with attempt_scope(attempt.id):
+                run_task(db, task)
         except (ParseError, ProfileError) as exc:
             _fail(db, task, getattr(exc, "stage", None) or STAGE_EXTRACT, str(exc))
         except BizError as exc:
@@ -106,6 +109,9 @@ def handle_parse(task_id: int) -> None:
         except Exception as exc:  # noqa: BLE001 - 不能把任务永远留在 running
             logger.exception("解析任务 %s 未预期异常", task_id)
             _fail(db, task, task.stage or STAGE_EXTRACT, f"{type(exc).__name__}: {exc}")
+        finally:
+            current = db.get(ParseTask, task.id)
+            finish_attempt(db, attempt, status=current.status, stage=current.stage, error=current.error)
 
 
 def run_task(db: Session, task: ParseTask) -> None:
@@ -153,11 +159,17 @@ def _run_extract(
     try:
         result = extract_text(path, ext=file_row.file_ext)
     except ExtractError as exc:
-        # 扫描件/加密 PDF/文件缺失：都不重试，直接失败（重新上传才是解法）
+        store_pages(db, file_row.id, exc.pages)
+        db.commit()
         raise ParseError(str(exc), stage=STAGE_EXTRACT) from exc
 
+    store_pages(db, file_row.id, result.pages)
+    task.truncated = 1 if result.truncated else 0
+    trace_attempt(db, task.id, parse_input=result.text)
     _beat(db, task)  # 提取可能较慢，先刷一次心跳再进 LLM
-    structured = parse_service.extract_structured(result.text)
+    with parse_service.capture_calls(lambda event: append_model_call(db, task.id, event)):
+        structured = parse_service.extract_structured(result.text)
+    trace_attempt(db, task.id, parse_output=structured)
 
     parsed = parsed_dao.upsert(
         db,

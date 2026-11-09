@@ -62,8 +62,8 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     "talent_profile_versions": {"id", "talent_profile_id", "version", "change_type", "profile_snapshot_json", "changed_by", "created_at"},
     "talent_field_evidence": {"id", "talent_profile_id", "profile_version", "field_name", "resume_file_id", "source_page", "source_text", "source", "confidence", "review_status", "created_at"},
     "talent_profile_edits": {"id", "talent_profile_id", "profile_version", "field_name", "old_value", "new_value", "edited_by", "created_at"},
-    "resume_pages": {"id", "resume_file_id", "page_no", "text_content", "ocr_engine", "confidence", "created_at"},
-    "parse_attempts": {"id", "parse_task_id", "attempt_no", "status", "stage", "error_message", "started_at", "finished_at"},
+    "resume_pages": {"id", "resume_file_id", "page_no", "text_content", "ocr_engine", "confidence", "source_type", "quality_status", "error_message", "created_at"},
+    "parse_attempts": {"id", "parse_task_id", "attempt_no", "status", "stage", "error_message", "started_at", "finished_at", "trace_json"},
     "users": {
         "id", "username", "password_hash", "display_name", "role", "person_id",
         "is_active", "last_login_at", "created_at", "updated_at",

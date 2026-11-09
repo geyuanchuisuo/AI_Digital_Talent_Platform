@@ -19,7 +19,7 @@ import logging
 import re
 import threading
 import time
-from typing import Any, Protocol, TypeVar
+from typing import Any, Callable, Protocol, TypeVar
 
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 from pydantic import BaseModel, ValidationError
@@ -224,6 +224,7 @@ class LLMClient:
         prompt_name: str | None = None,
         retry: int = 1,
         max_tokens: int | None = None,
+        on_result: Callable[[dict[str, Any]], None] | None = None,
     ) -> T | dict:
         """结构化调用：JSON 修复 → Pydantic 校验 → 失败自动重试 `retry` 次。
 
@@ -240,14 +241,20 @@ class LLMClient:
 
         for attempt in range(attempts):
             # D-7 缓办：评分缓存钩子接入点（get/set），一期不查询、不写入、不建表
+            raw = ""
             try:
                 raw = self._chat_raw(messages, tokens, want_json=True)
                 data = repair_json(raw)
-                if schema is None:
-                    return data
-                return schema.model_validate(data)
+                result = data if schema is None else schema.model_validate(data)
+                if on_result is not None:
+                    on_result({"attempt":attempt + 1, "status":"validated", "raw_text":raw[:16000],
+                               "raw_truncated":len(raw) > 16000})
+                return result
             except (LLMJsonError, ValidationError, LLMError) as exc:
                 last_error = exc
+                if on_result is not None:
+                    on_result({"attempt":attempt + 1, "status":"failed", "raw_text":raw[:16000],
+                               "raw_truncated":len(raw) > 16000, "error":str(exc)[:2000]})
                 if attempt < attempts - 1:
                     logger.warning("LLM 结构化输出第 %d 次失败，重试：%s", attempt + 1, exc)
                     continue

@@ -15,7 +15,7 @@ it('shows only the signed-in persons profile and supports its source download', 
     screen_history:[{effective_verdict:'INTERNAL ONLY'}]});
   render(<PersonalProfile />);
   expect(await screen.findByText('Synthetic Person')).toBeTruthy();
-  expect(api.get.mock.calls.map(c => c[0])).toEqual(['/talents/129']);
+  await waitFor(() => expect(api.get.mock.calls.map(c => c[0])).toEqual(['/talents/129','/talents/129/evidence']));
   expect(screen.queryByText('INTERNAL ONLY')).toBeNull();
   expect(screen.queryByRole('button',{name:/删除|编辑|查重/})).toBeNull();
   fireEvent.click(screen.getByRole('button',{name:/下载原件/}));

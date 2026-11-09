@@ -107,9 +107,12 @@ class ResumePage(PKMixin, CreatedAtMixin, Base):
     __table_args__ = (UniqueConstraint("resume_file_id", "page_no", name="uk_page_file_no"), MYSQL_TABLE_OPTIONS)
     resume_file_id: Mapped[int] = mapped_column(PK_TYPE, nullable=False)
     page_no: Mapped[int] = mapped_column(Integer, nullable=False)
-    text_content: Mapped[str] = mapped_column(Text, nullable=False)
+    text_content: Mapped[str] = mapped_column(MEDIUMTEXT_TYPE.with_variant(Text(), "sqlite"), nullable=False)
     ocr_engine: Mapped[str | None] = mapped_column(String(50), nullable=True)
     confidence: Mapped[float | None] = mapped_column(DECIMAL(4, 3), nullable=True)
+    source_type: Mapped[str] = mapped_column(String(20), nullable=False, default="text", server_default="text")
+    quality_status: Mapped[str] = mapped_column(String(20), nullable=False, default="ready", server_default="ready")
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class ParseAttempt(PKMixin, Base):
@@ -122,3 +125,4 @@ class ParseAttempt(PKMixin, Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime] = mapped_column(nullable=False)
     finished_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    trace_json: Mapped[dict | None] = mapped_column(JSONDict, nullable=True)

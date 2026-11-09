@@ -40,6 +40,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { getErrorMessage } from '@/lib/http';
 import { getUser } from '@/lib/auth';
+import SourceEvidence from '@/features/talents/SourceEvidence';
 
 import { deleteTalent, downloadResumeFile, fetchDuplicates, getTalent, revectorTalent } from '../api';
 import type { DuplicateItem, TalentDetailData } from '../types';
@@ -394,7 +395,12 @@ export default function DetailView({ talentId }: { talentId: number }) {
 
       <Card title="经历与历史（经历类由解析结果聚合，只读）">
         <Tabs
+          defaultActiveKey="experience"
           items={[
+            {
+              key:'evidence', label:'原文依据',
+              children:<SourceEvidence personId={talentId} refreshKey={detail.profile.updated_at || ''} />,
+            },
             {
               key: 'experience',
               label: '经历',
