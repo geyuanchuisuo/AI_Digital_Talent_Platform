@@ -3,7 +3,7 @@
 确定性要求：同一 version_id 构建出的图必须逐字节一致——引擎按 thread_id 恢复时
 以同一构建器重建图（检查点续跑依赖节点集合/连线不变；发布版本本身不可变，T-D15）。
 
-图名约定：wf_v{version_id}（引擎按名缓存编译图，名字含版本避免跨版本串图）。
+图名按版本与 thread_id 摘要区分运行（编译节点闭包携带本次运行身份，且登记列限 128 字符）。
 
 一期路由语义（受控子集，与 T-D14 落库校验对齐）：
 - 人工审批节点出边必须恰为 approve/reject 两支 → 条件路由 vars[key].decision；
@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+from hashlib import sha256
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
@@ -27,9 +28,9 @@ APPROVAL_ROUTER_KEY = "decision"
 
 
 def graph_name_for(version_id: int, thread_id: str) -> str:
-    """图名含 thread_id：引擎按名缓存编译图，节点闭包持有本次运行的
-    run_id/user_id 上下文——同版本第二个运行绝不能命中首个运行的缓存图。"""
-    return f"wf_v{version_id}_{thread_id}"
+    """图名按运行隔离编译缓存；哈希确保不超过引擎登记的 128 字符列。"""
+    digest = sha256(thread_id.encode("utf-8")).hexdigest()
+    return f"wf_v{version_id}_{digest}"
 
 
 def _index(detail: dict[str, Any]) -> tuple[dict[str, dict], list[dict]]:
@@ -73,10 +74,7 @@ def _edge_router(node_key: str, edges: list[dict], nodes: dict[str, dict],
         if not condition:
             continue
         expected = condition.get("equals")
-        try:
-            actual = resolve_ref(state, condition.get("from"))
-        except BizError:
-            actual = None
+        actual = resolve_ref(state, condition.get("from"))
         if actual == expected:
             return edge["target"]
     # 全不命中：走无 condition 的缺省边（若有），否则如实失败

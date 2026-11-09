@@ -51,7 +51,8 @@ from app.modules.workflows.nodes.business import (
     profile_parse,
     training_suggestion,
 )
-from app.modules.workflows.nodes.runtime import NodeContext
+from app.modules.workflows.nodes.graph_builder import graph_name_for
+from app.modules.workflows.nodes.runtime import NodeContext, resolve_inputs
 
 U_CREATOR = SimpleNamespace(id=1, role="hr", person_id=None)   # 发起运行（管理侧）
 U_APPROVER = SimpleNamespace(id=2, role="hr", person_id=None)  # 审批人（管理侧，非发起人）
@@ -381,6 +382,20 @@ def test_two_runs_same_version_do_not_share_compiled_graph(env):
     assert set(steps2) == {"da1", "da_end"}  # 串图时这里会是空（步骤落到 first 行）
     assert steps2["da1"].status == "succeeded"
     assert steps_of(env, first.id)["da1"].status == "succeeded"
+
+
+def test_runtime_resolves_persisted_input_reference_schema():
+    node = {"node_key": "match_1", "inputs": [
+        {"as": "payload", "from": {"kind": "trigger"}},
+        {"as": "profile_id", "from": {"kind": "node_output", "node_key": "parse_1", "field": "profile_id"}},
+    ]}
+    state = {"trigger": {"job_profile_id": 9}, "vars": {"parse_1": {"profile_id": 5}}}
+    assert resolve_inputs(node, state) == {"payload": {"job_profile_id": 9}, "profile_id": 5}
+
+
+def test_graph_name_fits_engine_registry_column():
+    assert len(graph_name_for(123, "x" * 191)) <= 128
+    assert graph_name_for(123, "run_a") != graph_name_for(123, "run_b")
 
 
 # ---- 四类业务节点：服务边界 mock 验证映射（真实调用见文件头说明） ----
