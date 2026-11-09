@@ -186,3 +186,7 @@ app.include_router(reports_router)
 from app.modules.workflows.router import router as workflows_router  # noqa: E402
 
 app.include_router(workflows_router)
+
+from app.core.tasks.events import router as task_events_router  # noqa: E402
+
+app.include_router(task_events_router)
