@@ -54,6 +54,7 @@ import {
   markAttendance,
   refreshFeedbackThemes,
   revisePlan,
+  scanTrainingReminders,
   submitFeedback,
   updateCourse,
   updateFeedback,
@@ -862,6 +863,22 @@ function PlanAdmin() {
   const [draftForm] = Form.useForm();
   const [extendForm] = Form.useForm();
   const [extendTarget, setExtendTarget] = useState<TrainingPlanItem | null>(null);
+  const [scanning, setScanning] = useState(false);
+
+  const scanReminders = async () => {
+    setScanning(true);
+    try {
+      const res = await scanTrainingReminders();
+      message.success(
+        `到期扫描 ${res.due.scanned} 条、投递 ${res.due.emitted} 条；逾期扫描 ${res.overdue.scanned} 条、投递 ${res.overdue.emitted} 条`,
+      );
+      void load();
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    } finally {
+      setScanning(false);
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1041,6 +1058,7 @@ function PlanAdmin() {
       title="培训计划"
       extra={
         <Space>
+          <Button loading={scanning} onClick={() => void scanReminders()}>扫描到期提醒</Button>
           <Button onClick={() => setDraftOpen(true)}>AI 生成草稿</Button>
           <Button
             type="primary"

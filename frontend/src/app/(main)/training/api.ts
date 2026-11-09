@@ -228,3 +228,12 @@ export function extendPlanItem(
 ) {
   return post<{ id: number; due_date: string | null }>(`/training/plan-items/${itemId}/extension`, payload);
 }
+
+/** 管理员手动触发必修到期/逾期扫描（每日定时由 D 的调度器负责） */
+export function scanTrainingReminders(payload: { today?: string; days_ahead?: number } = {}) {
+  return post<{
+    today: string;
+    due: { scanned: number; emitted: number };
+    overdue: { scanned: number; emitted: number };
+  }>('/training/reminders/scan', payload);
+}
