@@ -78,8 +78,8 @@ export function createFeedback(
 }
 
 export function fetchFeedback(): Promise<MetricFeedbackItem[]> {
-  return get<MetricFeedbackItem[]>('/analytics/feedback').then(
-    (resp) => resp ?? [],
+  return get<{ items: MetricFeedbackItem[] }>('/analytics/feedback').then(
+    (resp) => resp.items,
   );
 }
 

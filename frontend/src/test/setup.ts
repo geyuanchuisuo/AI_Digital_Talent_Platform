@@ -6,7 +6,9 @@ import { cleanup, configure } from '@testing-library/react';
 
 // Ant Design 的表格/弹窗在 Windows jsdom 中可能超过默认 1s；仅调整等待上限，
 // 条件满足即返回，不增加固定延时，也不忽略未处理异常或失败断言。
-configure({ asyncUtilTimeout: 5000 });
+// 8000ms：master 曾落 5000ms（A），T-D15 工作流重表格页实测单次渲染可达数秒（D），
+// 两者意图相同取更宽上限（2026-11-09 rebase 合并）。
+configure({ asyncUtilTimeout: 8000 });
 
 // jsdom 缺这两个浏览器 API，antd 的响应式组件（Menu/Sider/Grid）会直接报错
 if (!window.matchMedia) {

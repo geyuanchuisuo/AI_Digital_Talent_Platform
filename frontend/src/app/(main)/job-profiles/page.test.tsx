@@ -89,7 +89,7 @@ describe('JobProfilesPage（T-26）', () => {
     fireEvent.click(saveButtons()[0]);
     await screen.findByText('岗位名称不能为空', {}, { timeout: 5000 });
     expect(createMock).not.toHaveBeenCalled();
-  });
+  }, 60_000);
 
   it('合法表单仍提交岗位信息，失败后保留表单可重试', async () => {
     createMock.mockRejectedValueOnce(new Error('服务暂不可用'));
@@ -108,5 +108,5 @@ describe('JobProfilesPage（T-26）', () => {
     await waitFor(() => expect((screen.getByRole('button',{name:/保\s*存/}) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole('button',{name:/保\s*存/}));
     await waitFor(() => expect(createMock).toHaveBeenCalledTimes(2));
-  });
+  }, 60_000);
 });
