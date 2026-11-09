@@ -87,6 +87,7 @@ export interface TrainingPlanItem {
   };
   dimension_name: string | null;
   reason: string | null;
+  due_date: string | null;
   sort_order: number;
   learning: {
     record_id?: number | null;

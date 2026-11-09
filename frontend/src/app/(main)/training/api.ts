@@ -41,6 +41,7 @@ export interface PlanItemPayload {
   course_id: number;
   dimension_name?: string | null;
   reason?: string | null;
+  due_date?: string | null;
 }
 
 export function fetchPlans(params: { employee_user_id?: number; status?: string; page: number; page_size: number }) {
@@ -214,4 +215,11 @@ export function confirmFormalCompletion(recordId: number) {
 
 export function fetchLearningEvidence(recordId: number) {
   return get<LearningEvidence[]>(`/training/learning-records/${recordId}/evidence`);
+}
+
+export function extendPlanItem(
+  itemId: number,
+  payload: { new_due_date: string; reason: string; manager_user_id?: number | null },
+) {
+  return post<{ id: number; due_date: string | null }>(`/training/plan-items/${itemId}/extension`, payload);
 }
