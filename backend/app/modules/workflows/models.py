@@ -75,6 +75,77 @@ REF_KINDS: tuple[str, ...] = ("trigger", "form_field", "node_output", "literal")
 
 NODE_KEY_MAX = 64
 
+# Skills 组件库（T-D19，PRD §2.7 / 需求 D-35）：组件 schema 四件套 =
+# 提示词模板 + 参数 JSON Schema + 工具绑定 + 输出解析器。
+# 生命周期与流程定义版本同构：draft →(submit)→ pending_review
+# →(审核通过)→ published →(停用)→ deprecated；发布版本内容不可变（版本锁定），
+# 编排节点引用 published 版本，运行实例不受后续新版本/停用影响。
+SKILL_VERSION_STATUSES: tuple[str, ...] = VERSION_STATUSES
+
+# 工具绑定白名单（一期内部库；工具执行面归各域授权服务，组件库只登记声明）。
+SKILL_TOOLS: tuple[str, ...] = (
+    "none",                # 纯提示词组件
+    "analytics_query",     # 白名单指标查询（D analytics registry）
+    "workflow_run_query",  # 流程运行查询（D run_service）
+    "profile_query",       # 档案查询（B 域服务，执行经其授权）
+)
+
+# 输出解析器白名单：组件输出 → 节点输出 vars 的解析方式。
+SKILL_OUTPUT_PARSERS: tuple[str, ...] = (
+    "raw_text",     # 原样文本 {text}
+    "json_object",  # 严格 JSON 对象解析（失败如实报错不猜测）
+    "markdown_sections",  # markdown 二级标题分段 {sections: {title: body}}
+)
+
+
+class WorkflowSkill(PKMixin, UpdatedAtMixin, Base):
+    """Skills 组件定义（`workflow_skills`，一期内部库）。"""
+
+    __tablename__ = "workflow_skills"
+    __table_args__ = (
+        UniqueConstraint("code", name="uk_workflow_skills_code"),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # 四件套之一：工具绑定（白名单外 422 拒绝入库）
+    tool: Mapped[str] = mapped_column(String(32), nullable=False, default="none")
+    # 四件套之一：输出解析器（白名单外 422 拒绝入库）
+    output_parser: Mapped[str] = mapped_column(String(32), nullable=False, default="raw_text")
+
+
+class WorkflowSkillVersion(PKMixin, UpdatedAtMixin, Base):
+    """Skills 组件版本（`workflow_skill_versions`）。
+
+    四件套之二/之三随版本落库快照：prompt_template + params_json_schema。
+    发布后内容不可变；版本号同 definition 内唯一；审核四眼与流程版本同口径。
+    """
+
+    __tablename__ = "workflow_skill_versions"
+    __table_args__ = (
+        UniqueConstraint("skill_id", "version", name="uk_workflow_skill_version"),
+        Index("idx_wsv_skill_status", "skill_id", "status"),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    skill_id: Mapped[int] = mapped_column(nullable=False)
+    version: Mapped[int] = mapped_column(nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="draft")
+    # 提示词模板；{{param}} 占位由执行面渲染（组件库只存原文）
+    prompt_template: Mapped[str] = mapped_column(String(8000), nullable=False)
+    # 参数 JSON Schema（{"type":"object","properties":{...},"required":[...]}）
+    params_json_schema: Mapped[dict | None] = mapped_column(JSONDict, nullable=True)
+    note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_by: Mapped[int | None] = mapped_column(nullable=True)
+    # T-D15 同款受控生命周期（四眼原则——提交人不可自行审核发布）
+    submitted_by: Mapped[int | None] = mapped_column(nullable=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    review_note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    published_by: Mapped[int | None] = mapped_column(nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
 
 class WorkflowDefinition(PKMixin, UpdatedAtMixin, Base):
     """流程定义（`workflow_definitions`）。"""

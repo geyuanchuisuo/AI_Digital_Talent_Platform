@@ -405,6 +405,16 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "output_json", "error", "started_at", "finished_at",
         "created_at", "updated_at",
     },
+    "workflow_skills": {
+        "id", "code", "name", "description", "tool", "output_parser",
+        "created_at", "updated_at",
+    },
+    "workflow_skill_versions": {
+        "id", "skill_id", "version", "status", "prompt_template",
+        "params_json_schema", "note", "created_by",
+        "submitted_by", "submitted_at", "review_note",
+        "published_by", "published_at", "created_at", "updated_at",
+    },
 }
 
 EXPECTED_UNIQUE: dict[str, set[str]] = {
@@ -446,6 +456,8 @@ EXPECTED_UNIQUE: dict[str, set[str]] = {
     "workflow_edges": {"uk_workflow_edge"},
     "workflow_runs": {"uk_workflow_runs_thread"},
     "workflow_run_steps": {"uk_workflow_step_attempt"},
+    "workflow_skills": {"uk_workflow_skills_code"},
+    "workflow_skill_versions": {"uk_workflow_skill_version"},
 }
 
 EXPECTED_INDEXES: dict[str, set[str]] = {
@@ -470,6 +482,7 @@ EXPECTED_INDEXES: dict[str, set[str]] = {
     "workflow_nodes": {"idx_workflow_nodes_version"},
     "workflow_edges": {"idx_workflow_edges_version"},
     "workflow_runs": {"idx_workflow_runs_status", "idx_workflow_runs_definition"},
+    "workflow_skill_versions": {"idx_wsv_skill_status"},
 }
 
 
@@ -478,9 +491,9 @@ def ddl(model) -> str:
 
 
 def test_exactly_70_tables_and_no_phase2_table():
-    assert len(TABLE_NAMES) == 75
-    assert len(MODEL_CLASSES) == 75
-    assert len(Base.metadata.tables) == 75
+    assert len(TABLE_NAMES) == 77
+    assert len(MODEL_CLASSES) == 77
+    assert len(Base.metadata.tables) == 77
     assert set(TABLE_NAMES) == set(EXPECTED_COLUMNS)
     # D-7 缓办：一期不建 llm_score_cache
     assert "llm_score_cache" not in Base.metadata.tables

@@ -191,6 +191,11 @@ from app.modules.workflows.router import router as workflows_router  # noqa: E40
 
 app.include_router(workflows_router)
 
+# D Skills 组件库（T-D19）：/api/workflows/skills 组件受控生命周期——创建→审核→发布→引用
+from app.modules.workflows.skills_router import router as skills_router  # noqa: E402
+
+app.include_router(skills_router)
+
 from app.core.tasks.events import router as task_events_router  # noqa: E402
 
 app.include_router(task_events_router)
