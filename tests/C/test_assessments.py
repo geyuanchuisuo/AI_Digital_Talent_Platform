@@ -126,6 +126,33 @@ class AssessmentFlowTest(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("权重", response.json()["message"])
 
+    def test_retest_creates_new_attempt_record(self):
+        for dimension, dtype in (("专业", "professional"), ("通用", "general")):
+            for _ in range(2):
+                self._create_question(dimension, dimension_type=dtype)
+        plan_id = self._create_plan().json()["data"]["id"]
+        publish = self._post(f"/api/assessments/plans/{plan_id}/publish", {})
+        self.assertEqual(publish.status_code, 200, publish.text)
+        first_id = self._assign(plan_id, self.candidate)
+        retest = self._post(
+            "/api/assessments/assignments",
+            {
+                "plan_id": plan_id,
+                "user_id": self.candidate.id,
+                "attempt_no": 2,
+                "idempotency_key": f"retest-{self.candidate.id}-{plan_id}-2",
+            },
+        )
+        self.assertEqual(retest.status_code, 200, retest.text)
+        self.assertNotEqual(retest.json()["data"]["id"], first_id)
+        self.assertEqual(retest.json()["data"]["attempt_no"], 2)
+        listing = self.client.get(
+            f"/api/assessments/assignments?plan_id={plan_id}",
+            headers=self.harness.headers(self.admin),
+        )
+        rows = listing.json()["data"]["items"]
+        self.assertEqual(sorted(row["id"] for row in rows), sorted([first_id, retest.json()["data"]["id"]]))
+
     def test_recruitment_flow_publish_open_answers_and_revision(self):
         for dimension, dtype in (("专业", "professional"), ("通用", "general")):
             for _ in range(2):
