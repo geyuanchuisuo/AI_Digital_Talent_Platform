@@ -35,7 +35,7 @@ export default function MeDashboardCard() {
     void load();
   }, [load]);
 
-  const items: Array<{ key: keyof MeOverview; title: string }> = [
+  const items: Array<{ key: 'pending_assignments' | 'pending_training' | 'recent_results'; title: string }> = [
     { key: 'pending_assignments', title: '待测评' },
     { key: 'pending_training', title: '培训计划' },
     { key: 'recent_results', title: '已公布结果' },

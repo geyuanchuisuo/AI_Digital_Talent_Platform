@@ -19,6 +19,7 @@ import {
   ReadOutlined,
   SolutionOutlined,
   TeamOutlined,
+  SettingOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 import { Avatar, Dropdown, Layout, Menu, Space, Typography } from 'antd';
@@ -38,8 +39,9 @@ const MENU_ITEMS = [
   { key: '/assessments', icon: <AuditOutlined />, label: '岗位测评' },
   { key: '/interviews', icon: <SolutionOutlined />, label: '人工面试' },
   { key: '/training', icon: <ReadOutlined />, label: '培训成长' },
-  // D 模块（T-D22 管理员工作台 + T-D24 通知中心）
+  // D 模块（T-D20 AI 中台 + T-D22 管理员工作台 + T-D24 通知中心）
   { key: '/dashboard', icon: <DashboardOutlined />, label: '工作台' },
+  { key: '/ai-platform', icon: <SettingOutlined />, label: 'AI 中台' },
   { key: '/notifications', icon: <BellOutlined />, label: '通知中心' },
 ];
 
