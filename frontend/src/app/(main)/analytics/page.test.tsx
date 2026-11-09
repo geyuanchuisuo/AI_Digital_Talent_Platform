@@ -200,4 +200,31 @@ describe('AnalyticsPage（T-D01b 切片 + T-D10 多维分析 + T-D12 反馈）',
       expect(btn.disabled).toBeTruthy();
     });
   });
+
+  // ---- 错误态防御（T-A02 缺陷修复：错误响应不喂给下游 antd 组件） ----
+
+  it('查询失败时渲染错误态而非崩溃（不把错误响应当数组 spread）', async () => {
+    fetchMock.mockRejectedValue(new Error('未登记的指标（白名单外不支持）'));
+    render(<AnalyticsPage />);
+    await waitFor(() => expect(screen.getByText('查询失败')).toBeTruthy());
+    expect(screen.getByText('未登记的指标（白名单外不支持）')).toBeTruthy();
+    // 错误态下不应出现数值卡内容（value 为 null 时 Statistic 显示 '-'，但来源/缓存 Tag 不应出现）
+    expect(screen.queryByText('来源：PgSQL 副本')).toBeNull();
+    // List 不应被错误响应喂成非数组（无崩溃即通过；这里断言解读区不出现）
+    expect(screen.queryByText('事实')).toBeNull();
+  });
+
+  it('查询失败后重试按钮可再次触发查询', async () => {
+    // 先排好 mock 队列：首次（mount 时 useEffect 触发）拒绝，二次（点重试）成功
+    fetchMock
+      .mockRejectedValueOnce(new Error('网络错误'))
+      .mockResolvedValueOnce(data({ value: 7 }));
+    const { container } = render(<AnalyticsPage />);
+    await waitFor(() => expect(screen.getByText('查询失败')).toBeTruthy());
+    // antd Button 会把两字中文拆成两个 span（'重 试'），用锚定正则匹配
+    fireEvent.click(screen.getByRole('button', { name: /^重\s*试$/ }));
+    await waitFor(() =>
+      expect(container.querySelector('.ant-statistic-content-value')?.textContent).toBe('7'),
+    );
+  });
 });

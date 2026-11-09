@@ -12,6 +12,7 @@
 import { FlagOutlined, ReloadOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { Bar } from '@ant-design/charts';
 import {
+  Alert,
   Button,
   Card,
   Empty,
@@ -55,6 +56,7 @@ const SEGMENT_TAG: Record<InterpretationSegment['kind'], { color: string; text: 
 
 export default function AnalyticsPage() {
   const [data, setData] = useState<ActiveJobsData | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [groupBy, setGroupBy] = useState(false);
   const [sseStage, setSseStage] = useState<SseStage | null>(null);
@@ -67,11 +69,16 @@ export default function AnalyticsPage() {
 
   const load = useCallback(async (gb: boolean) => {
     setLoading(true);
+    setError(null);
     try {
       setData(await fetchActiveJobs(gb ? 'department' : undefined));
     } catch (e) {
-      // 403（个人角色无此指标）/网络错误由 http 统一提示；这里只兜底文案
-      console.error(getErrorMessage(e));
+      // 403（个人角色无此指标）/ 422（指标未登记）/ 网络错误：http 已统一提示，
+      // 此处只把文案落到页面（不再静默 console），避免把错误响应喂给下游组件。
+      const msg = getErrorMessage(e);
+      setError(msg);
+      console.error(msg);
+      setData(null);
     } finally {
       setLoading(false);
     }
@@ -142,6 +149,20 @@ export default function AnalyticsPage() {
       style={{ maxWidth: 640 }}
     >
       <Statistic title="活跃岗位数" value={data?.value ?? '-'} loading={loading} />
+      {error && (
+        <Alert
+          style={{ marginTop: 16 }}
+          type="error"
+          showIcon
+          message="查询失败"
+          description={error}
+          action={
+            <Button size="small" onClick={() => void load(groupBy)}>
+              重试
+            </Button>
+          }
+        />
+      )}
       {data && (
         <Space size={4} wrap style={{ marginTop: 12 }}>
           <Tag color={data.source === 'replica' ? 'green' : 'orange'}>来源：{SOURCE_TEXT[data.source]}</Tag>
