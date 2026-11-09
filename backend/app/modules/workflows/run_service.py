@@ -22,10 +22,10 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import BizError
 from app.core.workflows.engine.runner import EngineRunResult, WorkflowEngine
-from app.models import WorkflowEngineRun
+from app.models import AssessmentAssignment, AssessmentResult, WorkflowEngineRun
 from app.core.workflows.engine.saver import make_saver
 from app.modules.workflows import service
-from app.modules.workflows.models import WorkflowRun, WorkflowRunStep
+from app.modules.workflows.models import WorkflowDefinition, WorkflowRun, WorkflowRunStep
 from app.modules.workflows.nodes.graph_builder import build_version_graph, graph_name_for
 from app.modules.workflows.nodes.runtime import NodeContext
 
@@ -191,6 +191,35 @@ def start_event_run(
         waiting_node = str(result.interrupt.get("node_key") or "") or None
     _mirror(db, run, result, waiting_node=waiting_node)
     return {"run": run, "result": result, "duplicate": False}
+
+
+def start_employee_assessment_run(
+    db: Session, *, definition_id: int, assignment_id: int, result_id: int, actor,
+) -> dict[str, Any]:
+    """仅在员工测评结果已落库且评分完成时触发流程。"""
+    service.require_management(actor)
+    assignment = db.get(AssessmentAssignment, assignment_id)
+    result = db.get(AssessmentResult, result_id)
+    if assignment is None or result is None or result.assignment_id != assignment_id:
+        raise BizError(404, "员工测评结果不存在")
+    if assignment.purpose != "employee" or assignment.status != "completed":
+        raise BizError(422, "仅已完成的员工测评可触发培训流程")
+    if not isinstance(definition_id, int) or definition_id <= 0:
+        raise BizError(422, "流程定义 ID 非法")
+    if db.get(WorkflowDefinition, definition_id) is None:
+        raise BizError(404, "流程定义不存在")
+    if assignment.created_by != actor.id:
+        raise BizError(403, "仅测评分配人可触发该员工的培训流程")
+    return start_event_run(
+        db, definition_id=definition_id, event_type="assessment.completed",
+        event_id=f"{assignment.id}:v{result.version}",
+        params={
+            "assignment_id": assignment.id,
+            "result_id": result.id,
+            "employee_user_id": assignment.user_id,
+        },
+        actor=actor,
+    )
 
 
 # ---- 审批恢复 ----
