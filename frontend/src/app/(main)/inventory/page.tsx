@@ -6,7 +6,7 @@
 
 'use client';
 
-import { PlusOutlined } from '@ant-design/icons';
+import { DownloadOutlined, PlusOutlined } from '@ant-design/icons';
 import {
   Button,
   Card,
@@ -33,6 +33,7 @@ import {
   confirmReview,
   createDispute,
   createReview,
+  downloadSummary,
   fetchPools,
   fetchReviews,
   fetchSummary,
@@ -479,6 +480,8 @@ function PoolAdmin() {
 
 function SummaryPanel() {
   const [data, setData] = useState<InventorySummary | null>(null);
+  const [cycle, setCycle] = useState('');
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     fetchSummary()
@@ -486,10 +489,37 @@ function SummaryPanel() {
       .catch((error) => message.error(getErrorMessage(error)));
   }, []);
 
+  const submitExport = async () => {
+    setExporting(true);
+    try {
+      await downloadSummary(cycle.trim() || undefined);
+      message.success('导出已开始');
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    } finally {
+      setExporting(false);
+    }
+  };
+
   if (!data) return <Card loading />;
 
   return (
-    <Card>
+    <Card
+      extra={
+        <Space size={8}>
+          <Input
+            allowClear
+            placeholder="按周期过滤（留空为全部）"
+            value={cycle}
+            onChange={(event) => setCycle(event.target.value)}
+            style={{ width: 220 }}
+          />
+          <Button icon={<DownloadOutlined />} loading={exporting} onClick={() => void submitExport()}>
+            导出 CSV
+          </Button>
+        </Space>
+      }
+    >
       <Typography.Paragraph type="secondary">
         仅统计已确认复核；单格少于 5 人并入“其他”，永不展示个人身份。
       </Typography.Paragraph>

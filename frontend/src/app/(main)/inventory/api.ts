@@ -1,6 +1,6 @@
 /** F10 人才盘点接口封装。 */
 
-import { get, patch, post, request } from '@/lib/http';
+import { downloadFile, get, patch, post, request } from '@/lib/http';
 
 import type { InventoryReview, InventorySummary, TalentPoolItem } from './types';
 
@@ -44,6 +44,12 @@ export function confirmReview(id: number) {
 
 export function fetchSummary() {
   return get<InventorySummary>('/inventory/summary');
+}
+
+/** 管理员导出匿名汇总 CSV（backend 写 summary_exported 审计）；cycle_name 可选过滤 */
+export function downloadSummary(cycleName?: string) {
+  const query = cycleName ? `?cycle_name=${encodeURIComponent(cycleName)}` : '';
+  return downloadFile(`/inventory/summary/export${query}`, 'inventory-summary.csv');
 }
 
 export function fetchPools() {
