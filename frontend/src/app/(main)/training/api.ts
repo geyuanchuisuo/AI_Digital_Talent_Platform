@@ -202,14 +202,25 @@ export function releaseExpiredEnrollments() {
   return post<{ scanned: number; released: number; promoted: number }>('/training/enrollments/release-expired');
 }
 
-/** 有效学习证据与正式完成认定 */
+/** 有效学习证据与正式完成认定：分数与验证人由服务端按可信来源计算，前端不可传 */
+export type LearningEvidenceType = 'attendance' | 'assessment' | 'study_session';
+
 export function submitLearningEvidence(payload: {
   learning_record_id: number;
-  evidence_type: string;
-  payload: Record<string, unknown>;
-  score?: number;
+  evidence_type: LearningEvidenceType;
+  payload?: Record<string, unknown>;
 }) {
-  return post<{ id: number; score: number }>('/training/learning-evidence', payload);
+  return post<{ id: number; evidence_type: string; score: number; verified_by: string | null }>(
+    '/training/learning-evidence',
+    payload,
+  );
+}
+
+/** 员工领取服务端签名的一次性学习会话凭证（study_session 证据前置） */
+export function startLearningSession(recordId: number) {
+  return post<{ learning_record_id: number; session_token: string; expires_at: string }>(
+    `/training/learning-records/${recordId}/study-sessions`,
+  );
 }
 
 export function confirmFormalCompletion(recordId: number) {

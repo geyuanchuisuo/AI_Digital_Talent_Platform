@@ -310,7 +310,7 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "created_at", "updated_at",
     },
     "training_learning_evidence": {
-        "id", "learning_record_id", "employee_user_id", "evidence_type",
+        "id", "learning_record_id", "employee_user_id", "evidence_type", "evidence_key",
         "payload_json", "score", "verified_by", "created_at", "updated_at",
     },
     "training_enrollments": {
@@ -437,6 +437,7 @@ EXPECTED_UNIQUE: dict[str, set[str]] = {
     "training_plan_items": {"uk_plan_version_course"},
     "training_plan_versions": {"uk_plan_version"},
     "training_learning_records": {"uk_learning_item_employee"},
+    "training_learning_evidence": {"uk_evidence_record_key"},
     "inventory_development_plans": {"uk_idp_review"},
     "notifications": {"uk_notifications_idempotency"},
     "workflow_engine_runs": {"uk_workflow_engine_runs_thread"},

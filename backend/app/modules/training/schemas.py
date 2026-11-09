@@ -101,11 +101,17 @@ class EnrollmentDecideRequest(_StrictModel):
 
 
 class EvidenceSubmitRequest(_StrictModel):
+    """员工提交学习证据；分数与验证人由服务端可信来源计算，客户端不可指定。
+
+    evidence_type 仅接受服务端可校验的来源：
+    - `attendance`：本人该课程的真实出勤记录；
+    - `assessment`：本人已通过的员工测评结果；
+    - `study_session`：先用 `study-sessions` 领取服务端签发的会话凭证，凭凭证结算时长。
+    """
+
     learning_record_id: int
-    evidence_type: str = Field(min_length=1, max_length=30)
+    evidence_type: Literal["attendance", "assessment", "study_session"]
     payload: dict = Field(default_factory=dict)
-    score: float = Field(default=0.0, ge=0, le=100)
-    verified_by: str | None = Field(default=None, max_length=30)
 
 
 class ExtensionDecideRequest(_StrictModel):

@@ -9,8 +9,15 @@ def test_integrated_b_and_d_have_one_migration_head():
     script = ScriptDirectory.from_config(config)
     assert len(script.get_heads()) == 1
     head = script.get_revision(script.get_current_head())
-    assert head.revision == 'B_0006_profile_questions'
-    qa_head = head
+    assert head.revision == 'B_0007_merge_learning_evidence'
+    integrated_head = head
+    qa_head = script.get_revision('B_0006_profile_questions')
+    assert set(integrated_head.down_revision) == {qa_head.revision,'C_0007_learning_evidence_key'}
+    assert {s.revision.revision for s in script._upgrade_revs(integrated_head.revision,qa_head.revision)} == {
+        integrated_head.revision,'C_0007_learning_evidence_key'}
+    assert {s.revision.revision for s in script._upgrade_revs(integrated_head.revision,'C_0007_learning_evidence_key')} == {
+        integrated_head.revision,qa_head.revision,'B_0005_merge_c_capacity',
+        'B_0003_ocr_page_quality','B_0004_parse_attempt_trace'}
     head = script.get_revision('B_0005_merge_c_capacity')
     assert qa_head.down_revision == head.revision
     trace = script.get_revision('B_0004_parse_attempt_trace')

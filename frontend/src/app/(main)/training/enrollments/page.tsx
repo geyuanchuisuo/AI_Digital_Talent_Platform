@@ -34,6 +34,7 @@ import {
   fetchEnrollments,
   fetchLearningEvidence,
   releaseExpiredEnrollments,
+  startLearningSession,
   submitLearningEvidence,
 } from '../api';
 import type { LearningEvidence, TrainingCourse, TrainingEnrollment } from '../types';
@@ -225,8 +226,24 @@ function EvidencePanel({ isAdmin }: { isAdmin: boolean }) {
     try {
       await submitLearningEvidence({ ...values, payload });
       message.success('证据已提交');
-      form.resetFields(['evidence_type', 'payload', 'score']);
+      form.resetFields(['evidence_type', 'payload']);
       if (recordId) void load(recordId);
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    }
+  };
+
+  const startSession = async () => {
+    const id = form.getFieldValue('learning_record_id') as number | undefined;
+    if (!id) {
+      message.warning('请先填写学习记录 ID');
+      return;
+    }
+    try {
+      const res = await startLearningSession(id);
+      form.setFieldValue('evidence_type', 'study_session');
+      form.setFieldValue('payload', JSON.stringify({ session_token: res.session_token }));
+      message.success(`已领取学习会话凭证，${res.expires_at} 前结算，需有效学习满 5 分钟`);
     } catch (error) {
       message.error(getErrorMessage(error));
     }
@@ -254,7 +271,7 @@ function EvidencePanel({ isAdmin }: { isAdmin: boolean }) {
         type="info"
         showIcon
         style={{ marginBottom: 12 }}
-        message="正式完成必须有有效证据，无证据时后端拒绝认定；个人手动勾选仅算自报，不当作学时证明。"
+        message="正式完成必须有服务端校验的学习证据：出勤/已通过的员工测评/有效学习会话；分数与验证人由后端计算，前端不能自报。无证据或未达阈值时后端拒绝认定。"
       />
       <Form form={form} layout="vertical">
         <Space size={8} wrap>
@@ -266,20 +283,18 @@ function EvidencePanel({ isAdmin }: { isAdmin: boolean }) {
           </Form.Item>
           <Form.Item name="evidence_type" label="证据类型" rules={[{ required: true }]}>
             <Select
-              style={{ width: 150 }}
+              style={{ width: 180 }}
               options={[
-                { value: 'video_heartbeat', label: '视频心跳' },
-                { value: 'quiz', label: '测验成绩' },
-                { value: 'attendance', label: '出勤' },
+                { value: 'attendance', label: '线下出勤' },
+                { value: 'assessment', label: '已通过测评' },
+                { value: 'study_session', label: '学习会话' },
               ]}
             />
           </Form.Item>
-          <Form.Item name="score" label="得分（0–100）" initialValue={0}>
-            <InputNumber min={0} max={100} />
-          </Form.Item>
+          <Button onClick={() => void startSession()}>领取学习会话凭证</Button>
         </Space>
-        <Form.Item name="payload" label="证据内容（JSON，可选）">
-          <Input.TextArea rows={2} placeholder='{"quiz_score": 85}' />
+        <Form.Item name="payload" label="证据内容（仅学习会话需填写 session_token）">
+          <Input.TextArea rows={2} placeholder='{"session_token": "…"}' />
         </Form.Item>
         <Space>
           <Button type="primary" onClick={() => void submit()}>
