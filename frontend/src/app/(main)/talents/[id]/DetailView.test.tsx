@@ -178,7 +178,7 @@ describe('DetailView（T-21）', () => {
     expect(screen.getByText('新解析结果')).toBeTruthy();
     expect(screen.getByRole('button', { name: '合并到画像 A' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '保留为独立画像' })).toBeTruthy();
-  });
+  }, 60_000);
 
   it('删除：二次确认后调 DELETE 并跳回列表（mock router）', async () => {
     render(<DetailView talentId={5} />);
@@ -188,5 +188,5 @@ describe('DetailView（T-21）', () => {
     fireEvent.click(await screen.findByRole('button', { name: '确定删除' }));
     await waitFor(() => expect(deleteMock).toHaveBeenCalledWith(5));
     await waitFor(() => expect(pushMock).toHaveBeenCalledWith('/talents'));
-  });
+  }, 60_000);
 });

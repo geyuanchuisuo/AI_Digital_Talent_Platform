@@ -10,6 +10,7 @@ import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import {
   Button,
   Card,
+  DatePicker,
   Descriptions,
   Divider,
   Drawer,
@@ -29,6 +30,7 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import type { Dayjs } from 'dayjs';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { getUser } from '@/lib/auth';
@@ -40,6 +42,7 @@ import {
   createPlan,
   createSession,
   draftPlan,
+  extendPlanItem,
   fetchAttendance,
   fetchCourses,
   fetchFeedbackSummary,
@@ -51,6 +54,7 @@ import {
   markAttendance,
   refreshFeedbackThemes,
   revisePlan,
+  scanTrainingReminders,
   submitFeedback,
   updateCourse,
   updateFeedback,
@@ -234,13 +238,22 @@ function MyTraining() {
     },
     { title: '对应维度', dataIndex: 'dimension_name', width: 120, render: (v) => v ?? '—' },
     { title: '推荐理由', dataIndex: 'reason', render: (v) => v ?? '—' },
+    { title: '到期日', dataIndex: 'due_date', width: 120, render: (v) => v ?? '—' },
     {
       title: '学习状态',
       key: 'learning',
-      width: 160,
+      width: 200,
       render: (_, row) => (
         <Space direction="vertical" size={4}>
-          {learningStatusTag(row.learning.status)}
+          <Space size={4} wrap>
+            {learningStatusTag(row.learning.status)}
+            {row.learning.formal_completed ? <Tag color="gold">已认定</Tag> : null}
+          </Space>
+          {row.learning.record_id ? (
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              记录 #{row.learning.record_id}
+            </Typography.Text>
+          ) : null}
           <Select
             size="small"
             value={row.learning.status}
@@ -688,6 +701,7 @@ function CourseAdmin() {
       material_url: row.material_url,
       dimension_names: row.dimension_names,
       status: row.status,
+      capacity: row.capacity,
     });
     setModalOpen(true);
   };
@@ -737,6 +751,7 @@ function CourseAdmin() {
       render: (v: string[]) => (v?.length ? v.map((name) => <Tag key={name}>{name}</Tag>) : '—'),
     },
     { title: '状态', dataIndex: 'status', width: 90, render: courseStatusTag },
+    { title: '名额', dataIndex: 'capacity', width: 80, render: (v) => v ?? '不限' },
     { title: '版本', dataIndex: 'version', width: 70, render: (v) => `v${v}` },
     {
       title: '操作',
@@ -814,6 +829,9 @@ function CourseAdmin() {
           <Form.Item name="dimension_names" label="对应能力维度（可多个）">
             <Select mode="tags" tokenSeparators={[',', '，']} placeholder="输入维度名后回车" />
           </Form.Item>
+          <Form.Item name="capacity" label="报名名额上限（留空不限）">
+            <InputNumber min={1} max={10000} style={{ width: '100%' }} placeholder="留空表示不限" />
+          </Form.Item>
           <Form.Item name="status" label="状态">
             <Select
               options={[
@@ -843,6 +861,24 @@ function PlanAdmin() {
   const [courses, setCourses] = useState<TrainingCourse[]>([]);
   const [form] = Form.useForm();
   const [draftForm] = Form.useForm();
+  const [extendForm] = Form.useForm();
+  const [extendTarget, setExtendTarget] = useState<TrainingPlanItem | null>(null);
+  const [scanning, setScanning] = useState(false);
+
+  const scanReminders = async () => {
+    setScanning(true);
+    try {
+      const res = await scanTrainingReminders();
+      message.success(
+        `到期扫描 ${res.due.scanned} 条、投递 ${res.due.emitted} 条；逾期扫描 ${res.overdue.scanned} 条、投递 ${res.overdue.emitted} 条`,
+      );
+      void load();
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    } finally {
+      setScanning(false);
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -886,6 +922,25 @@ function PlanAdmin() {
     }
   };
 
+  const submitExtend = async () => {
+    if (!extendTarget) return;
+    try {
+      const values = await extendForm.validateFields();
+      await extendPlanItem(extendTarget.id, {
+        new_due_date: values.new_due_date.format('YYYY-MM-DD'),
+        reason: values.reason,
+      });
+      message.success('已延长期限并通知员工');
+      const planId = extendTarget.plan_id;
+      setExtendTarget(null);
+      const data = await getPlan(planId);
+      setDetail(data);
+      void load();
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    }
+  };
+
   const submitManual = async () => {
     const values = await form.validateFields();
     try {
@@ -894,11 +949,14 @@ function PlanAdmin() {
         talent_profile_id: values.talent_profile_id ?? null,
         target_job_title: values.target_job_title ?? null,
         gap_summary: values.gap_summary ?? null,
-        items: (values.items ?? []).map((item: { course_id: number; dimension_name?: string; reason?: string }) => ({
-          course_id: item.course_id,
-          dimension_name: item.dimension_name ?? null,
-          reason: item.reason ?? null,
-        })),
+        items: (values.items ?? []).map(
+          (item: { course_id: number; dimension_name?: string; reason?: string; due_date?: Dayjs }) => ({
+            course_id: item.course_id,
+            dimension_name: item.dimension_name ?? null,
+            reason: item.reason ?? null,
+            due_date: item.due_date ? item.due_date.format('YYYY-MM-DD') : null,
+          }),
+        ),
       });
       message.success('培训草稿已创建');
       setModalOpen(false);
@@ -975,6 +1033,23 @@ function PlanAdmin() {
     { title: '课程', key: 'course', render: (_, row) => row.course_snapshot?.title || `课程 #${row.course_id}` },
     { title: '对应维度', dataIndex: 'dimension_name', width: 120, render: (v) => v ?? '—' },
     { title: '理由', dataIndex: 'reason', render: (v) => v ?? '—' },
+    { title: '到期日', dataIndex: 'due_date', width: 120, render: (v) => v ?? '—' },
+    {
+      title: '操作',
+      key: 'op',
+      width: 90,
+      render: (_, row) =>
+        detail?.status === 'assigned' ? (
+          <a
+            onClick={() => {
+              extendForm.resetFields();
+              setExtendTarget(row);
+            }}
+          >
+            延期
+          </a>
+        ) : null,
+    },
     { title: '学习状态', key: 'learning', width: 100, render: (_, row) => learningStatusTag(row.learning.status) },
   ];
 
@@ -983,6 +1058,7 @@ function PlanAdmin() {
       title="培训计划"
       extra={
         <Space>
+          <Button loading={scanning} onClick={() => void scanReminders()}>扫描到期提醒</Button>
           <Button onClick={() => setDraftOpen(true)}>AI 生成草稿</Button>
           <Button
             type="primary"
@@ -1041,6 +1117,9 @@ function PlanAdmin() {
                     <Form.Item name={[field.name, 'reason']} style={{ flex: 2, marginBottom: 8 }}>
                       <Input placeholder="推荐理由" />
                     </Form.Item>
+                    <Form.Item name={[field.name, 'due_date']} style={{ width: 150, marginBottom: 8 }}>
+                      <DatePicker placeholder="到期日" style={{ width: '100%' }} />
+                    </Form.Item>
                     <a onClick={() => remove(field.name)}>删除</a>
                   </Space>
                 ))}
@@ -1050,6 +1129,23 @@ function PlanAdmin() {
               </Space>
             )}
           </Form.List>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="延长必修期限"
+        open={!!extendTarget}
+        onOk={() => void submitExtend()}
+        onCancel={() => setExtendTarget(null)}
+        destroyOnClose
+      >
+        <Form form={extendForm} layout="vertical">
+          <Form.Item name="new_due_date" label="新到期日" rules={[{ required: true, message: '请选择日期' }]}>
+            <DatePicker style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="reason" label="延期原因（必填）" rules={[{ required: true, message: '请填写原因' }]}>
+            <Input.TextArea rows={3} maxLength={500} showCount />
+          </Form.Item>
         </Form>
       </Modal>
 

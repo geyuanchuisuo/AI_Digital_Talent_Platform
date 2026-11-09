@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser
@@ -54,6 +54,20 @@ def get_review(review_id: int, user: CurrentUser, db: Session = Depends(get_db))
 @router.get("/summary")
 def department_summary(user: CurrentUser, db: Session = Depends(get_db)):
     return ok(service.department_summary(db, user))
+
+
+@router.get("/summary/export", summary="导出匿名汇总 CSV（管理员，写审计）")
+def export_summary(
+    user: CurrentUser,
+    db: Session = Depends(get_db),
+    cycle_name: str | None = Query(default=None),
+):
+    text, summary = service.export_summary(db, user=user, cycle_name=cycle_name)
+    return Response(
+        content=text,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="inventory-summary.csv"'},
+    )
 
 
 @router.post("/pools")

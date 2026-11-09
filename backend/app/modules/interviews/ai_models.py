@@ -8,22 +8,24 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
-from app.models.base import JSONDict, MYSQL_TABLE_OPTIONS, PKMixin, str_default
-from app.modules.assessments.models import CTimestampMixin
+from app.models.base import CrossDbUpdatedAtMixin, JSONDict, MYSQL_TABLE_OPTIONS, PK_TYPE, PKMixin, str_default
 
 
-class AiInterviewSession(PKMixin, CTimestampMixin, Base):
+class AiInterviewSession(PKMixin, CrossDbUpdatedAtMixin, Base):
     __tablename__ = "ai_interview_sessions"
     __table_args__ = MYSQL_TABLE_OPTIONS
 
     candidate_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     talent_profile_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     job_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    application_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 关联 A 的招聘申请（applications.id）；RESTRICT 防误删申请丢面试记录
+    application_id: Mapped[int | None] = mapped_column(
+        PK_TYPE, ForeignKey("applications.id"), nullable=True
+    )
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="pending", server_default=str_default("pending")
     )
@@ -34,7 +36,7 @@ class AiInterviewSession(PKMixin, CTimestampMixin, Base):
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
-class AiInterviewQuestion(PKMixin, CTimestampMixin, Base):
+class AiInterviewQuestion(PKMixin, CrossDbUpdatedAtMixin, Base):
     __tablename__ = "ai_interview_questions"
     __table_args__ = (
         UniqueConstraint("session_id", "sequence_no", name="uk_ai_q_session_seq"),
@@ -55,7 +57,7 @@ class AiInterviewQuestion(PKMixin, CTimestampMixin, Base):
     )
 
 
-class AiInterviewEvent(PKMixin, CTimestampMixin, Base):
+class AiInterviewEvent(PKMixin, CrossDbUpdatedAtMixin, Base):
     __tablename__ = "ai_interview_events"
     __table_args__ = MYSQL_TABLE_OPTIONS
 

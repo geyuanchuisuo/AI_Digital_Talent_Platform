@@ -35,7 +35,7 @@ AI 面试间：`ai_interview_sessions`、`ai_interview_questions`、`ai_intervie
 - 结果：版本化，保存维度百分制分、总分（DECIMAL(6,2) 展示，比较使用未舍入值）、是否通过、`ability_json`（雷达数据、维度档位、强项/短板与评级）；`assessment_reviews` 保存人工修分审计。
 - 面试轮次：候选人/岗位、轮次名、时间、方式、地点或链接、面试人列表、状态（pending/completed/cancelled）、内部备注、客户端幂等键 `client_request_id`（唯一、可空）、版本；变更写 `interview_round_events`。
 - 面试反馈：每轮一条，评价/事实依据/优势/不足/推进建议（advance/hold/reject），作者与版本；**无面试总分字段**。
-- 课程：标题、介绍、真实材料链接、适用维度、有效状态、版本、统一改进说明（`feedback_note`，不随版本回写历史计划）。
+- 课程：标题、介绍、真实材料链接、适用维度、有效状态、名额上限（`capacity`，空为不限）、版本、统一改进说明（`feedback_note`，不随版本回写历史计划）。
 - 期次：课程、讲师、开始/结束时间；反馈窗口从该期次结束时间起 7 天。
 - 出勤：期次 + 员工唯一，仅登记过的员工具备该课程评价资格。
 - 评价：课程 + 员工唯一（跨期合并为一份），课程/讲师 1–5 分、可选匿名文字、状态 submitted/withdrawn、来源期次与时间。
@@ -71,7 +71,7 @@ AI 面试间：`ai_interview_sessions`、`ai_interview_questions`、`ai_intervie
 
 - `POST /questions`、`GET /questions`、`PATCH /questions/{id}`、`POST /questions/{id}/approve`、`POST /questions/generate-draft`（管理员；模型生成待审核题目）
 - `POST /plans`、`GET /plans`、`GET /plans/{id}`、`PATCH /plans/{id}`、`POST /plans/{id}/publish`（管理员；自适应发布返回策略与题库快照，不返回试卷）
-- `POST /assignments`（管理员分配；`idempotency_key` 幂等）
+- `POST /assignments`（管理员分配；`idempotency_key` 幂等；`attempt_no` 递增形成复测新记录，不覆盖旧结果）
 - `GET /assignments`（管理员列表）、`GET /my/assignments`（本人）
 - `GET /assignments/{id}`（本人/管理员，按答案开放裁剪；自适应返回已出题目）
 - `POST /assignments/{id}/next-question`（本人；自适应逐题出题，幂等）、`GET /assignments/{id}/selections`（管理员始终可见，本人答案开放后可见）
@@ -100,9 +100,12 @@ AI 面试间：`ai_interview_sessions`、`ai_interview_questions`、`ai_intervie
 - `POST /courses/{id}/sessions`、`GET /courses/{id}/sessions`、`POST /sessions/{id}/attendance`、`GET /sessions/{id}/attendance`（管理员：期次与实际出勤）
 - `GET /courses/{id}/feedback/mine`（员工本人状态）、`POST /courses/{id}/feedback`、`PATCH /courses/{id}/feedback`、`POST /courses/{id}/feedback/withdraw`（员工本人，窗口内）
 - `GET /courses/{id}/feedback/summary`、`POST /courses/{id}/feedback-themes/refresh`、`PUT /courses/{id}/feedback-note`（管理员：匿名汇总、主题归纳、统一改进说明）
-- `POST /enrollments`、`GET /enrollments`、`POST /enrollments/{id}/decide`（员工报名必修/选修，管理员审批/候补，24h 未确认超时释放）
+- `POST /enrollments`、`GET /enrollments`、`POST /enrollments/{id}/decide`（员工报名必修/选修；管理员审批/候补；有 `capacity` 时按 pending 占位、approved 占用计数，满额直接进入 waitlisted；approved 可取消并递补最早候补）
+- `POST /enrollments/release-expired`（管理员/外部调度：把超时未决定的 pending 置为 `expired` 释放占位，并按课程递补候补；有期次时投递 `course.waitlist_promoted`）
 - `POST /learning-evidence`、`GET /learning-records/{id}/evidence`（员工提交学习证据：视频心跳/测验/出勤等；列表本人或管理员可见）
 - `POST /learning-records/{id}/confirm-completion`（管理员依据有效证据认定正式完成，无证据返回 400）
+- `POST /plan-items/{id}/extension`（管理员延期必修期限，`new_due_date` + `reason` 必填；留 `training_due_extended` 事件并通知）
+- `POST /reminders/scan`（管理员/外部调度：按 `today`、`days_ahead` 扫描到期与逾期，经 D 通知中心投递，幂等）
 
 AI 面试间 `/api/ai-interviews`：
 
@@ -118,6 +121,7 @@ AI 面试间 `/api/ai-interviews`：
 - `POST /reviews/{id}/disputes`、`POST /disputes/{id}/respond`（员工异议、HR 回复）
 - `PUT /reviews/{id}/idp`（个人发展计划，review 唯一）
 - `GET /summary`（管理员部门匿名汇总；单格 <5 条隐藏到 `_under_threshold`）
+- `GET /summary/export`（管理员导出匿名汇总 CSV，按 `cycle_name` 可选过滤；写 `summary_exported` 审计事件，文件不含个人身份）
 - 可见性：员工本人查看不返回 `grid_cell` 与内部评分；非管理员查看汇总 403。
 
 ## 5. 后端执行与依赖边界
@@ -148,10 +152,14 @@ AI 面试间 `/api/ai-interviews`：
 6. 改进说明：管理员依据汇总发布统一 `feedback_note`，不改课程版本；员工在本人评价状态中可见。
 7. 角色边界：一期无讲师/部门经理角色，匿名汇总暂由管理员持有；后续开放需 A 提供角色与授权映射，C 不放宽现有权限。
 
-## 8. 本轮实现与验证状态（2026-11-07）
+## 8. 本轮实现与验证状态（2026-11-09 更新）
 
-- 已实现：`backend/app/modules/assessments`（模型/自适应策略与选题/评分/服务/路由/registry/模型出题）、`interviews`（人工面试 + AI 面试间）、`training`（课程/计划/评价 + 报名审批/候补 + 学习证据）、`inventory`（F10 九宫格/人才池/异议/IDP）四域与 32 张表；前端 `frontend/src/app/(main)/{assessments,interviews,target,training}` 页面、类型与接口封装，含自适应逐题答题与能力雷达（盘点/AI 面试间/报名审批前端页待补）。
-- 已验证：`$env:PYTHONPATH="backend"; python -m unittest discover -s tests/C -p "test_*.py" -v` 运行 49 项全部通过（SQLite 内存库 + FastAPI TestClient + 注入式评分/出题/草稿/主题替身，覆盖固定组卷、自适应策略校验、覆盖优先与难度升降、任务种子分散与不重复、题量/维度结束规则、发布题库快照与不足拒绝、逐题幂等出题、单选即时评分、选题留痕权限、能力雷达/评级、模型出题 503 不写入、交卷幂等、评分失败重试、结果版本/公开、答案开放、面试可见性裁剪、培训分配/修订/自报/成长事件、评价资格/7 天窗口/跨期合并/撤回/5 份门槛/主题支持、培训报名审批/24h 超时、学习证据与正式完成门槛、盘点九宫格计算与可见性/异议/IDP/人才池、AI 面试间会话/题目/作答/评分/重试/总分）。
-- 已验证：`npm run typecheck` 与 `npm run build`（frontend）均通过（Next.js 静态页 `/assessments` 正常产出）。
-- 未验证：MySQL/Alembic 实际迁移（C_0003 依赖 A 的 C_0001/C_0002 链，本地无链文件与 MySQL 环境）、真实 LLM 评分/出题/主题归纳/AI 面试评分、真实 JWT 与账号权限、真实浏览器页面（自适应答题与雷达图未实机查看）、A 的 `main.py`/`models/__init__.py`/`AppShell` 集成。上述未验证项不得表述为验收通过。
-- 接入方式：A 可 `from app.modules.assessments.registry import ALL_MODELS, ALL_ROUTERS`，在 `models/__init__.py` 导入模型（或 `init_db` 显式导入）并在 `main.py` 逐个 `include_router`；具体请求见 `docs/requests/C/20261106-A-公共集成接入请求.md`。
+- 已实现：`backend/app/modules/assessments`（模型/自适应策略与选题/评分/服务/路由/registry/模型出题）、`interviews`（人工面试 + AI 面试间）、`training`（课程/计划/评价 + 报名审批/候补/名额上限/超时释放 + 学习证据 + 到期/逾期/延期）、`inventory`（F10 九宫格/人才池/异议/IDP/匿名汇总/导出审计）四域与 32 张表；前端 `frontend/src/app/(main)/{assessments,interviews,target,training,inventory}` 页面、类型与接口封装，含自适应逐题答题、能力雷达、员工评价、管理员期次/反馈汇总、`/inventory`（盘点/人才池/汇总/异议/IDP）、`/interviews/ai`（会话/题目/逐题作答）、`/training/enrollments`（报名审批/候补/超时释放/学习证据）、培训计划到期日录入与管理员延期、课程名额维护与盘点 CSV 导出入口。
+- 时间列：C 域 32 张表统一使用公共 `CrossDbUpdatedAtMixin`（2026-11-09 收敛，删除自建 `CTimestampMixin`；列结构与 DDL 等价，无需迁移）。
+- application_id 契约（2026-11-07 对接 A 的 M3）：`interview_rounds.application_id` 与 `ai_interview_sessions.application_id` 已对齐 A 的 `applications.id`（`PK_TYPE`，MySQL 下 BIGINT UNSIGNED）并加数据库级外键（RESTRICT，申请不物理删除），迁移 `C_0004_application_fk`。语义：`applications` 为同人多岗位独立申请，C 侧仅引用其主键，不复制其状态机。**2026-11-09 改挂**：`C_0004` 的 `down_revision` 由 `A_0007_scope_grants` 改为 `B_0002_merge_workflow_review`（master 合入 A_0008/B_0001/B_0002/D_0001~D_0009 后原挂点会造成双 head；迁移从未在任何库执行，改挂安全）。新增 `C_0005_plan_item_due_date`（`training_plan_items.due_date DATE NULL`）与 `C_0006_course_capacity`（`training_courses.capacity INT NULL`，报名名额上限），当前单头 `C_0006_course_capacity`。
+- 通知接入（2026-11-09，只读调用 D 通知中心）：`course.assigned`（计划指派）、`course.enrollment_reviewed`（报名审批）、`course.waitlist_promoted`（候补递补，课程存在未结束期次时以该期次为 ref，否则跳过）、`training.due_reminder` / `training.overdue`（到期/逾期扫描）、`training.extension_decided`（延期）六类事件按 D 契约 ref 与幂等键投递。
+- 员工测评完成事件（2026-11-09，响应 `REQ-D-20261109-103009`；同日按用户决定改为采用 D 已发布的桥接）：`purpose=employee` 的测评在 `submit_assignment`、`retry_grading` 首次进入 `completed` 时，调用 D 的 `run_service.start_employee_assessment_run(db, assignment_id=..., result_id=..., actor=当前登录人)`；事件码 `employee_assessment_completed`、事件 ID `{assignment_id}:v{result_version}` 由 D 侧生成并按其 `WorkflowDefinition.code` 解析 published 版本；招聘测评不触发；重复交卷/补评不重复触发（D 侧 UUIDv5 thread_id 幂等）；触发失败（含流程未发布返回 `None`）不回滚已提交的测评结果，返回值仅新增内部字段 `workflow_event`（不进入 HTTP 响应体）。触发人校验为“测评本人或该测评分配人”，不使用全权管理员账号代发。
+- 已验证：`$env:PYTHONPATH="backend"; python -m unittest discover -s tests/C -p "test_*.py"` 运行 **60 项全部通过**（SQLite 内存库 + FastAPI TestClient + 注入式评分/出题/草稿/主题/评委替身；在原 58 项基础上新增：员工测评完成发一次业务事件且补评不重复、招聘测评不触发，事件入口用替身隔离）。
+- 已验证：`npm run typecheck` 与 `npm run build`（frontend）均通过；构建路由清单含 `/inventory`、`/interviews/ai`、`/training/enrollments`；application_id 外键的 MySQL DDL 编译验证（`BIGINT UNSIGNED` + `REFERENCES applications(id)`，类型与 A 的 PK_TYPE 匹配）。
+- 未验证：MySQL/Alembic 实际迁移（`C_0004`/`C_0005`/`C_0006` 依赖 A 的集成链，本地无 MySQL）、真实 LLM 评分/出题/主题归纳/AI 面试评分、真实 JWT 与账号权限、真实浏览器页面、A 的 `AppShell` 菜单集成（新增三页仍缺入口）、通知的真实投递与每日定时触发。上述未验证项不得表述为验收通过。
+- 接入方式：`main.py` 已循环 `from app.modules.assessments.registry import ALL_ROUTERS` 注册全部 C 路由；`app/models/__init__.py` 已由 A 整合为 75 表（含 C 全部 32 表）；新增前端菜单入口待 A 在 `AppShell` 添加，见 `docs/requests/C/20261107-A-一期扩表集成与申请契约.md` 第 6 项。

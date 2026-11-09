@@ -269,7 +269,7 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     },
     "training_courses": {
         "id", "title", "description", "material_url", "dimension_names_json",
-        "status", "version", "feedback_note", "feedback_note_at",
+        "status", "version", "feedback_note", "feedback_note_at", "capacity",
         "created_by", "updated_by", "created_at", "updated_at",
     },
     "training_sessions": {
@@ -297,7 +297,7 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     },
     "training_plan_items": {
         "id", "plan_id", "plan_version", "course_id", "course_snapshot_json",
-        "dimension_name", "reason", "sort_order", "created_at", "updated_at",
+        "dimension_name", "reason", "sort_order", "created_at", "updated_at", "due_date",
     },
     "training_plan_versions": {
         "id", "plan_id", "version", "status", "snapshot_json", "note",
@@ -692,6 +692,13 @@ def test_json_columns_are_mutable():
 
 
 def test_no_physical_foreign_keys():
-    """§1：不建物理外键，一致性由 service 层同事务保证。"""
-    for table in Base.metadata.tables.values():
-        assert not table.foreign_keys, f"{table.name} 不应有物理外键"
+    """仅允许 C_0004 明确接入的申请外键，其他一致性仍由 service 保证。"""
+    actual = {
+        (table.name, key.parent.name, key.target_fullname)
+        for table in Base.metadata.tables.values()
+        for key in table.foreign_keys
+    }
+    assert actual == {
+        ('interview_rounds', 'application_id', 'applications.id'),
+        ('ai_interview_sessions', 'application_id', 'applications.id'),
+    }

@@ -12,11 +12,10 @@ from sqlalchemy import DateTime, Float, Integer, SmallInteger, String, Text, Uni
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
-from app.models.base import JSONDict, MYSQL_TABLE_OPTIONS, PKMixin, str_default
-from app.modules.assessments.models import CTimestampMixin
+from app.models.base import CrossDbUpdatedAtMixin, JSONDict, MYSQL_TABLE_OPTIONS, PKMixin, str_default
 
 
-class InventoryReview(PKMixin, CTimestampMixin, Base):
+class InventoryReview(PKMixin, CrossDbUpdatedAtMixin, Base):
     """一次盘点复核：绩效/潜力→九宫格。"""
 
     __tablename__ = "inventory_reviews"
@@ -45,7 +44,7 @@ class InventoryReview(PKMixin, CTimestampMixin, Base):
     payload_json: Mapped[dict] = mapped_column(JSONDict, nullable=False, default=dict)
 
 
-class InventoryTalentPool(PKMixin, CTimestampMixin, Base):
+class InventoryTalentPool(PKMixin, CrossDbUpdatedAtMixin, Base):
     """人才池进出审批。"""
 
     __tablename__ = "inventory_talent_pools"
@@ -62,7 +61,7 @@ class InventoryTalentPool(PKMixin, CTimestampMixin, Base):
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
-class InventoryDispute(PKMixin, CTimestampMixin, Base):
+class InventoryDispute(PKMixin, CrossDbUpdatedAtMixin, Base):
     """员工对盘点结果的异议。"""
 
     __tablename__ = "inventory_disputes"
@@ -78,7 +77,7 @@ class InventoryDispute(PKMixin, CTimestampMixin, Base):
     responded_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
-class InventoryDevelopmentPlan(PKMixin, CTimestampMixin, Base):
+class InventoryDevelopmentPlan(PKMixin, CrossDbUpdatedAtMixin, Base):
     """个人发展计划（IDP）。"""
 
     __tablename__ = "inventory_development_plans"
@@ -95,7 +94,7 @@ class InventoryDevelopmentPlan(PKMixin, CTimestampMixin, Base):
     )
 
 
-class InventoryEvent(PKMixin, CTimestampMixin, Base):
+class InventoryEvent(PKMixin, CrossDbUpdatedAtMixin, Base):
     """盘点操作审计。"""
 
     __tablename__ = "inventory_events"

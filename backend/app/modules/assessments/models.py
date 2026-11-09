@@ -1,7 +1,7 @@
 """C 测评域 ORM（`docs/modules/C/C模块接口与数据契约.md` §2/§3）。
 
 9 张表：题库、方案、试卷（固定模式）、分配、逐题选题留痕、答案、结果、复核、复习事项。
-- 时间列使用 C 自有可移植 Mixin（`CURRENT_TIMESTAMP` 默认 + 应用层 onupdate），
+- 时间列统一使用公共 `CrossDbUpdatedAtMixin`（`CURRENT_TIMESTAMP` 默认 + 应用层 onupdate），
   不使用公共 `UpdatedAtMixin` 的 `ON UPDATE` DDL，保证 SQLite 测试可直接建表。
 - 表间不建外键，沿用一期 BIGINT 列风格；一致性由 service 层保证。
 - JSON 一律 `JSONDict`/`JSONList`，可整体赋值与原地修改。
@@ -16,6 +16,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
 from app.models.base import (
+    CrossDbUpdatedAtMixin,
     JSONDict,
     JSONList,
     MYSQL_TABLE_OPTIONS,
@@ -24,22 +25,7 @@ from app.models.base import (
 )
 
 
-class CTimestampMixin:
-    """C 域统一时间列：MySQL/SQLite 均可建表，updated_at 由应用层维护。"""
-
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP"), default=datetime.now
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        nullable=False,
-        server_default=text("CURRENT_TIMESTAMP"),
-        default=datetime.now,
-        onupdate=datetime.now,
-    )
-
-
-class AssessmentQuestion(PKMixin, CTimestampMixin, Base):
+class AssessmentQuestion(PKMixin, CrossDbUpdatedAtMixin, Base):
     """题库题目；`approved` 才可被组卷。"""
 
     __tablename__ = "assessment_questions"
@@ -71,7 +57,7 @@ class AssessmentQuestion(PKMixin, CTimestampMixin, Base):
     updated_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
-class AssessmentPlan(PKMixin, CTimestampMixin, Base):
+class AssessmentPlan(PKMixin, CrossDbUpdatedAtMixin, Base):
     """测评方案（按用途 + 岗位），发布时冻结试卷。"""
 
     __tablename__ = "assessment_plans"
@@ -101,7 +87,7 @@ class AssessmentPlan(PKMixin, CTimestampMixin, Base):
     updated_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
-class AssessmentPaper(PKMixin, CTimestampMixin, Base):
+class AssessmentPaper(PKMixin, CrossDbUpdatedAtMixin, Base):
     """发布时的固定试卷快照；同一方案版本只有一套。"""
 
     __tablename__ = "assessment_papers"
@@ -124,7 +110,7 @@ class AssessmentPaper(PKMixin, CTimestampMixin, Base):
     created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
-class AssessmentAssignment(PKMixin, CTimestampMixin, Base):
+class AssessmentAssignment(PKMixin, CrossDbUpdatedAtMixin, Base):
     """答题任务；`published_result_version` 绑定具体结果版本。"""
 
     __tablename__ = "assessment_assignments"
@@ -163,7 +149,7 @@ class AssessmentAssignment(PKMixin, CTimestampMixin, Base):
     created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
-class AssessmentSelection(PKMixin, CTimestampMixin, Base):
+class AssessmentSelection(PKMixin, CrossDbUpdatedAtMixin, Base):
     """自适应逐题选题留痕；按出题顺序记录题目快照、选题理由与策略上下文。"""
 
     __tablename__ = "assessment_selections"
@@ -183,7 +169,7 @@ class AssessmentSelection(PKMixin, CTimestampMixin, Base):
     strategy_snapshot_json: Mapped[dict] = mapped_column(JSONDict, nullable=False)
 
 
-class AssessmentAnswer(PKMixin, CTimestampMixin, Base):
+class AssessmentAnswer(PKMixin, CrossDbUpdatedAtMixin, Base):
     """逐题答案与评分状态；交卷幂等以 (assignment_id, question_id) 为单位。"""
 
     __tablename__ = "assessment_answers"
@@ -207,7 +193,7 @@ class AssessmentAnswer(PKMixin, CTimestampMixin, Base):
     graded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
-class AssessmentResult(PKMixin, CTimestampMixin, Base):
+class AssessmentResult(PKMixin, CrossDbUpdatedAtMixin, Base):
     """版本化结果；修分后新增版本，旧版本保留。"""
 
     __tablename__ = "assessment_results"
@@ -228,7 +214,7 @@ class AssessmentResult(PKMixin, CTimestampMixin, Base):
     created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
-class AssessmentReview(PKMixin, CTimestampMixin, Base):
+class AssessmentReview(PKMixin, CrossDbUpdatedAtMixin, Base):
     """人工修分审计：保留原分、理由、修改人与前后快照。"""
 
     __tablename__ = "assessment_reviews"
@@ -242,7 +228,7 @@ class AssessmentReview(PKMixin, CTimestampMixin, Base):
     after_json: Mapped[dict] = mapped_column(JSONDict, nullable=False)
 
 
-class AssessmentReviewItem(PKMixin, CTimestampMixin, Base):
+class AssessmentReviewItem(PKMixin, CrossDbUpdatedAtMixin, Base):
     """复习事项：关联原答题/题目快照，可标记完成。"""
 
     __tablename__ = "assessment_review_items"

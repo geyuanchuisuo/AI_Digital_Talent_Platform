@@ -5,8 +5,10 @@ import type { PageData } from '@/lib/types';
 
 import type {
   GrowthEvent,
+  LearningEvidence,
   TrainingAttendance,
   TrainingCourse,
+  TrainingEnrollment,
   TrainingFeedbackState,
   TrainingFeedbackSummary,
   TrainingLearningRecord,
@@ -39,6 +41,7 @@ export interface PlanItemPayload {
   course_id: number;
   dimension_name?: string | null;
   reason?: string | null;
+  due_date?: string | null;
 }
 
 export function fetchPlans(params: { employee_user_id?: number; status?: string; page: number; page_size: number }) {
@@ -176,4 +179,61 @@ export function updateFeedbackNote(courseId: number, note: string) {
     url: `/training/courses/${courseId}/feedback-note`,
     data: { note },
   });
+}
+
+/** 报名审批/候补（24h 未审批自动释放由后端处理） */
+export function applyEnrollment(payload: { course_id: number; priority: 'required' | 'elective' }) {
+  return post<{ id: number; status: string; expires_at: string | null }>('/training/enrollments', payload);
+}
+
+export function decideEnrollment(
+  enrollmentId: number,
+  payload: { status: 'approved' | 'rejected' | 'cancelled'; note?: string | null },
+) {
+  return post<{ id: number; status: string }>(`/training/enrollments/${enrollmentId}/decide`, payload);
+}
+
+export function fetchEnrollments(params?: { course_id?: number }) {
+  return get<TrainingEnrollment[]>('/training/enrollments', { params });
+}
+
+/** 释放超时未决定的报名占位并递补候补（管理员） */
+export function releaseExpiredEnrollments() {
+  return post<{ scanned: number; released: number; promoted: number }>('/training/enrollments/release-expired');
+}
+
+/** 有效学习证据与正式完成认定 */
+export function submitLearningEvidence(payload: {
+  learning_record_id: number;
+  evidence_type: string;
+  payload: Record<string, unknown>;
+  score?: number;
+}) {
+  return post<{ id: number; score: number }>('/training/learning-evidence', payload);
+}
+
+export function confirmFormalCompletion(recordId: number) {
+  return post<{ id: number; formal_completed: boolean }>(
+    `/training/learning-records/${recordId}/confirm-completion`,
+  );
+}
+
+export function fetchLearningEvidence(recordId: number) {
+  return get<LearningEvidence[]>(`/training/learning-records/${recordId}/evidence`);
+}
+
+export function extendPlanItem(
+  itemId: number,
+  payload: { new_due_date: string; reason: string; manager_user_id?: number | null },
+) {
+  return post<{ id: number; due_date: string | null }>(`/training/plan-items/${itemId}/extension`, payload);
+}
+
+/** 管理员手动触发必修到期/逾期扫描（每日定时由 D 的调度器负责） */
+export function scanTrainingReminders(payload: { today?: string; days_ahead?: number } = {}) {
+  return post<{
+    today: string;
+    due: { scanned: number; emitted: number };
+    overdue: { scanned: number; emitted: number };
+  }>('/training/reminders/scan', payload);
 }

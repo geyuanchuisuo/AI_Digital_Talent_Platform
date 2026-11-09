@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -21,6 +21,7 @@ class CourseCreateRequest(_StrictModel):
     material_url: str = Field(min_length=1, max_length=500)
     dimension_names: list[str] = Field(default_factory=list, max_length=20)
     status: CourseStatus = "active"
+    capacity: int | None = Field(default=None, ge=1, le=10000)
 
 
 class CourseUpdateRequest(_StrictModel):
@@ -29,12 +30,14 @@ class CourseUpdateRequest(_StrictModel):
     material_url: str | None = Field(default=None, min_length=1, max_length=500)
     dimension_names: list[str] | None = Field(default=None, max_length=20)
     status: CourseStatus | None = None
+    capacity: int | None = Field(default=None, ge=1, le=10000)
 
 
 class PlanItemIn(_StrictModel):
     course_id: int
     dimension_name: str | None = Field(default=None, max_length=100)
     reason: str | None = None
+    due_date: date | None = None
 
 
 class DraftRequest(_StrictModel):
@@ -103,3 +106,18 @@ class EvidenceSubmitRequest(_StrictModel):
     payload: dict = Field(default_factory=dict)
     score: float = Field(default=0.0, ge=0, le=100)
     verified_by: str | None = Field(default=None, max_length=30)
+
+
+class ExtensionDecideRequest(_StrictModel):
+    """管理员延期必修课期限（F09：必须填写原因）。"""
+
+    new_due_date: date
+    reason: str = Field(min_length=1, max_length=500)
+    manager_user_id: int | None = None
+
+
+class ReminderScanRequest(_StrictModel):
+    """到期提醒/逾期扫描入口；today 缺省取服务器当天。"""
+
+    today: date | None = None
+    days_ahead: int = Field(default=3, ge=0, le=30)

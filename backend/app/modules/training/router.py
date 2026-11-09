@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
@@ -29,11 +30,13 @@ from app.modules.training.schemas import (
     EnrollmentDecideRequest,
     EnrollmentRequest,
     EvidenceSubmitRequest,
+    ExtensionDecideRequest,
     FeedbackNoteRequest,
     FeedbackSubmitRequest,
     PlanCreateRequest,
     PlanUpdateRequest,
     ProgressUpdateRequest,
+    ReminderScanRequest,
     SessionCreateRequest,
 )
 
@@ -47,6 +50,7 @@ def _course_out(row: TrainingCourse) -> dict[str, Any]:
         "description": row.description,
         "material_url": row.material_url,
         "dimension_names": list(row.dimension_names_json or []),
+        "capacity": row.capacity,
         "status": row.status,
         "version": row.version,
         "feedback_note": row.feedback_note,
@@ -350,6 +354,14 @@ def get_enrollments(
     ])
 
 
+@router.post("/enrollments/release-expired", summary="释放超时未决定的报名占位并递补候补（管理员）")
+def post_enrollment_release_expired(
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    return ok(service.release_expired_enrollments(db, actor=user))
+
+
 # ---------------------------------------------------------------- 防挂机/有效学习证据
 
 
@@ -385,6 +397,35 @@ def get_evidence(
          "verified_by": r.verified_by, "payload": r.payload_json}
         for r in rows
     ])
+
+
+# ---------------------------------------------------------------- 必修到期/逾期/延期（F09）
+
+
+@router.post("/plan-items/{item_id}/extension", summary="管理员延期必修期限（须填原因）")
+def post_extension(
+    item_id: int,
+    payload: ExtensionDecideRequest,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    item = service.decide_extension(db, item_id, payload, admin=user)
+    return ok({
+        "id": item.id,
+        "due_date": item.due_date.isoformat() if item.due_date else None,
+    })
+
+
+@router.post("/reminders/scan", summary="扫描必修到期/逾期并投递通知（管理员）")
+def post_reminder_scan(
+    payload: ReminderScanRequest,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    today = payload.today or datetime.now().date()
+    due = service.emit_due_reminders(db, today=today, days_ahead=payload.days_ahead, admin=user)
+    overdue = service.emit_overdue(db, today=today, admin=user)
+    return ok({"today": today.isoformat(), "due": due, "overdue": overdue})
 
 
 # ---------------------------------------------------------------- 草稿（静态路径需先注册）

@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Callable
 from urllib.parse import urlparse
 
@@ -19,6 +19,7 @@ from app.core.errors import BizError
 from app.models import User
 from app.modules.assessments.models import AssessmentAssignment, AssessmentResult
 from app.modules.assessments.service import is_admin, require_admin
+from app.modules.notifications import producers as notify
 from app.modules.training import drafting, feedback_themes
 from app.modules.training.models import (
     TrainingAttendance,
@@ -42,6 +43,7 @@ from app.modules.training.schemas import (
     EnrollmentDecideRequest,
     EnrollmentRequest,
     EvidenceSubmitRequest,
+    ExtensionDecideRequest,
     FeedbackNoteRequest,
     FeedbackSubmitRequest,
     PlanCreateRequest,
@@ -91,6 +93,8 @@ def _course_columns(payload: CourseCreateRequest | CourseUpdateRequest) -> dict[
         columns["dimension_names_json"] = [str(item).strip() for item in data["dimension_names"] or [] if str(item).strip()]
     if "status" in data:
         columns["status"] = data["status"]
+    if "capacity" in data:
+        columns["capacity"] = data["capacity"]
     return columns
 
 
@@ -149,6 +153,7 @@ def _course_snapshot(course: TrainingCourse) -> dict[str, Any]:
         "description": course.description,
         "material_url": course.material_url,
         "dimension_names": list(course.dimension_names_json or []),
+        "capacity": course.capacity,
         "version": course.version,
         "snapshot_at": datetime.now().isoformat(timespec="seconds"),
     }
@@ -173,6 +178,7 @@ def _build_items(
                 dimension_name=item.dimension_name,
                 reason=item.reason,
                 sort_order=order,
+                due_date=item.due_date,
             )
         )
     return rows
@@ -448,6 +454,17 @@ def assign_plan(db: Session, plan_id: int, *, admin: User) -> TrainingPlan:
     )
     db.commit()
     db.refresh(plan)
+    # 通知 D 域：课程指派（ref_type=training_plan_item，幂等键按计划项）
+    for item in items:
+        notify.course_assigned(
+            db,
+            plan_item_id=item.id,
+            recipient_user_id=plan.employee_user_id,
+            course_name=(item.course_snapshot_json or {}).get("title") or f"课程 {item.course_id}",
+            due_date=item.due_date.isoformat() if item.due_date else None,
+            actor_user_id=admin.id,
+        )
+    db.commit()
     return plan
 
 
@@ -1039,8 +1056,64 @@ def update_feedback_note(
 ENROLLMENT_TTL_HOURS = 24
 
 
+def _occupying_count(db: Session, course_id: int, *, exclude_id: int | None = None) -> int:
+    """占用名额的报名数：pending 占位、approved 占用；排除指定行用于审批计算。"""
+    stmt = select(func.count()).select_from(TrainingEnrollment).where(
+        TrainingEnrollment.course_id == course_id,
+        TrainingEnrollment.status.in_(("pending", "approved")),
+    )
+    if exclude_id is not None:
+        stmt = stmt.where(TrainingEnrollment.id != exclude_id)
+    return int(db.scalar(stmt) or 0)
+
+
+def _next_session_id(db: Session, course_id: int, *, now: datetime) -> int | None:
+    """候补递补通知需要期次引用；取最近未结束期次，没有则跳过通知。"""
+    return db.scalar(
+        select(TrainingSession.id)
+        .where(TrainingSession.course_id == course_id, TrainingSession.ends_at >= now)
+        .order_by(TrainingSession.starts_at.asc())
+    )
+
+
+def _promote_waitlist(db: Session, course_id: int, *, now: datetime, actor_user_id: int | None = None) -> TrainingEnrollment | None:
+    """名额释放后把最早候补转为 pending 占位，并通知本人（无期次引用则跳过通知）。"""
+    course = db.get(TrainingCourse, course_id)
+    if not course or not course.capacity:
+        return None
+    if _occupying_count(db, course_id) >= course.capacity:
+        return None
+    row = db.scalar(
+        select(TrainingEnrollment)
+        .where(TrainingEnrollment.course_id == course_id, TrainingEnrollment.status == "waitlisted")
+        .order_by(TrainingEnrollment.id.asc())
+    )
+    if not row:
+        return None
+    row.status = "pending"
+    row.expires_at = now + timedelta(hours=ENROLLMENT_TTL_HOURS)
+    row.decided_by = None
+    row.decided_at = None
+    db.flush()
+    session_id = _next_session_id(db, course_id, now=now)
+    if session_id is not None:
+        try:
+            with db.begin_nested():
+                notify.course_waitlist_promoted(
+                    db,
+                    session_id=session_id,
+                    recipient_user_id=row.employee_user_id,
+                    seq=row.id,
+                    deadline=row.expires_at.isoformat(),
+                    actor_user_id=actor_user_id,
+                )
+        except Exception:  # noqa: BLE001 - 通知失败仅回滚 savepoint，不影响递补状态
+            pass
+    return row
+
+
 def apply_enrollment(db: Session, payload: EnrollmentRequest, *, user: User) -> TrainingEnrollment:
-    """员工自主报名；pending 占位，24h 未决定则超时释放。"""
+    """员工自主报名；有名额时 pending 占位 24h，无名额直接进入候补队列。"""
     _require_employee_caller(user)
     course = _require_course(db, payload.course_id)
     if course.status != "active":
@@ -1053,12 +1126,13 @@ def apply_enrollment(db: Session, payload: EnrollmentRequest, *, user: User) -> 
     )
     if existing:
         return existing
+    full = bool(course.capacity) and _occupying_count(db, payload.course_id) >= int(course.capacity)
     row = TrainingEnrollment(
         course_id=payload.course_id,
         employee_user_id=user.id,
         priority=payload.priority,
-        status="pending",
-        expires_at=datetime.now() + timedelta(hours=ENROLLMENT_TTL_HOURS),
+        status="waitlisted" if full else "pending",
+        expires_at=None if full else datetime.now() + timedelta(hours=ENROLLMENT_TTL_HOURS),
     )
     db.add(row)
     db.commit()
@@ -1073,18 +1147,79 @@ def decide_enrollment(
     row = db.get(TrainingEnrollment, enrollment_id)
     if not row:
         raise BizError(404, "报名记录不存在")
-    if row.status not in ("pending", "waitlisted"):
+    if row.status not in ("pending", "waitlisted") and not (
+        row.status == "approved" and payload.status == "cancelled"
+    ):
         raise BizError(400, "该报名已处理")
-    if row.expires_at and row.expires_at < datetime.now() and payload.status == "approved":
-        raise BizError(400, "报名已超时，需员工重新申请")
+    now = datetime.now()
+    if row.status == "pending" and row.expires_at and row.expires_at < now:
+        # 超时占位释放：不再占用名额，员工需重新报名
+        row.status = "expired"
+        db.commit()
+        _promote_waitlist(db, row.course_id, now=now, actor_user_id=admin.id)
+        db.commit()
+        raise BizError(400, "报名已超时释放，需员工重新申请")
+    if payload.status == "approved":
+        course = _require_course(db, row.course_id)
+        if course.capacity and row.status == "waitlisted":
+            if _occupying_count(db, row.course_id, exclude_id=row.id) >= int(course.capacity):
+                raise BizError(400, "名额已满，无法通过该候补报名")
     row.status = payload.status
     row.decided_by = admin.id
-    row.decided_at = datetime.now()
+    row.decided_at = now
     if payload.note is not None:
         row.note = payload.note
+    if row.status == "approved":
+        row.expires_at = None
+    db.commit()
+    db.refresh(row)
+    notified = True
+    try:
+        # 通知 D 域：报名审批结果（rejected/cancelled 也告知，幂等键含结果）
+        notify.course_enrollment_reviewed(
+            db,
+            enrollment_id=row.id,
+            recipient_user_id=row.employee_user_id,
+            result=row.status,
+            actor_user_id=admin.id,
+        )
+    except Exception:  # noqa: BLE001 - 通知失败不回滚已生效的业务状态
+        notified = False
+        db.rollback()
+    if row.status in ("rejected", "cancelled"):
+        # 释放名额后递补最早候补
+        if not notified:
+            db.refresh(row)
+        _promote_waitlist(db, row.course_id, now=now, actor_user_id=admin.id)
     db.commit()
     db.refresh(row)
     return row
+
+
+def release_expired_enrollments(db: Session, *, now: datetime | None = None, actor: User | None = None) -> dict[str, int]:
+    """扫描超时未决定的 pending 占位并释放，随后对每个受影响课程递补候补。"""
+    if actor is not None:
+        require_admin(actor)
+    moment = now or datetime.now()
+    rows = list(
+        db.scalars(
+            select(TrainingEnrollment).where(
+                TrainingEnrollment.status == "pending",
+                TrainingEnrollment.expires_at.is_not(None),
+                TrainingEnrollment.expires_at < moment,
+            )
+        )
+    )
+    course_ids = {row.course_id for row in rows}
+    for row in rows:
+        row.status = "expired"
+    db.flush()
+    promoted = 0
+    for course_id in course_ids:
+        if _promote_waitlist(db, course_id, now=moment, actor_user_id=actor.id if actor else None) is not None:
+            promoted += 1
+    db.commit()
+    return {"scanned": len(rows), "released": len(rows), "promoted": promoted}
 
 
 def list_enrollments(db: Session, *, course_id: int | None = None, user: User) -> list[TrainingEnrollment]:
@@ -1156,3 +1291,121 @@ def list_evidence(db: Session, learning_record_id: int, *, user: User) -> list[T
             .order_by(TrainingLearningEvidence.id.asc())
         )
     )
+
+
+# ---------------------------------------------------------------- 必修到期/逾期/延期（F09）
+
+def _ensure_learning_record(db: Session, item: TrainingPlanItem, employee_user_id: int) -> TrainingLearningRecord:
+    """到期扫描需要学习记录做通知引用；缺失时建系统占位记录（非员工自报）。"""
+    record = db.scalar(
+        select(TrainingLearningRecord).where(
+            TrainingLearningRecord.plan_item_id == item.id,
+            TrainingLearningRecord.employee_user_id == employee_user_id,
+        )
+    )
+    if record is None:
+        record = TrainingLearningRecord(
+            plan_item_id=item.id, employee_user_id=employee_user_id,
+            status="not_started", is_self_reported=0,
+        )
+        db.add(record)
+        db.flush()
+    return record
+
+
+def decide_extension(
+    db: Session, item_id: int, payload: ExtensionDecideRequest, *, admin: User
+) -> TrainingPlanItem:
+    """管理员延长期限：必须填写原因，保留旧期限到事件，通知员工（及可选经理）。"""
+    require_admin(admin)
+    item = db.get(TrainingPlanItem, item_id)
+    if item is None:
+        raise BizError(404, "培训计划项不存在")
+    plan = _require_plan(db, item.plan_id)
+    if plan.status != "assigned":
+        raise BizError(400, "只有已分配计划可延长期限")
+    old_due = item.due_date
+    item.due_date = payload.new_due_date
+    record = _ensure_learning_record(db, item, plan.employee_user_id)
+    recipients = [plan.employee_user_id]
+    if payload.manager_user_id:
+        recipients.append(payload.manager_user_id)
+    db.add(
+        TrainingGrowthEvent(
+            employee_user_id=plan.employee_user_id,
+            talent_profile_id=plan.talent_profile_id,
+            event_type="training_due_extended",
+            ref_type="training_plan_item",
+            ref_id=item.id,
+            summary=f"必修期限 {old_due or '未设置'} → {payload.new_due_date}",
+            payload_json={
+                "old_due_date": old_due.isoformat() if old_due else None,
+                "new_due_date": payload.new_due_date.isoformat(),
+                "reason": payload.reason,
+            },
+        )
+    )
+    db.commit()
+    db.refresh(item)
+    notify.training_extension_decided(
+        db,
+        record_id=record.id,
+        recipients=recipients,
+        new_due_date=payload.new_due_date.isoformat(),
+        reason=payload.reason,
+        actor_user_id=admin.id,
+    )
+    db.commit()
+    return item
+
+
+def _assigned_items_with_due(db: Session) -> list[tuple[TrainingPlanItem, int, int | None]]:
+    rows = db.execute(
+        select(TrainingPlanItem, TrainingPlan.employee_user_id, TrainingPlan.talent_profile_id)
+        .join(TrainingPlan, TrainingPlan.id == TrainingPlanItem.plan_id)
+        .where(TrainingPlan.status == "assigned", TrainingPlanItem.due_date.is_not(None))
+    ).all()
+    return [(item, employee_id, talent_id) for item, employee_id, talent_id in rows]
+
+
+def emit_due_reminders(
+    db: Session, *, today: date, days_ahead: int = 3, manager_user_id: int | None = None, admin: User
+) -> dict[str, int]:
+    """扫描 [today, today+days_ahead] 到期且未完成的学习记录并投递提醒（幂等）。"""
+    require_admin(admin)
+    limit = today + timedelta(days=days_ahead)
+    scanned = emitted = 0
+    for item, employee_id, _ in _assigned_items_with_due(db):
+        if not (today <= item.due_date <= limit):
+            continue
+        scanned += 1
+        record = _ensure_learning_record(db, item, employee_id)
+        if record.status == "completed":
+            continue
+        recipients = [employee_id] + ([manager_user_id] if manager_user_id else [])
+        notify.training_due_reminder(
+            db, record_id=record.id, recipients=recipients, due_date=item.due_date.isoformat()
+        )
+        emitted += 1
+    db.commit()
+    return {"scanned": scanned, "emitted": emitted}
+
+
+def emit_overdue(
+    db: Session, *, today: date, manager_user_id: int | None = None, admin: User
+) -> dict[str, int]:
+    """扫描已过期且未完成的学习记录并投递逾期通知（同一记录仅一次，幂等键无日期）。"""
+    require_admin(admin)
+    scanned = emitted = 0
+    for item, employee_id, _ in _assigned_items_with_due(db):
+        if item.due_date >= today:
+            continue
+        scanned += 1
+        record = _ensure_learning_record(db, item, employee_id)
+        if record.status == "completed":
+            continue
+        recipients = [employee_id] + ([manager_user_id] if manager_user_id else [])
+        notify.training_overdue(db, record_id=record.id, recipients=recipients)
+        emitted += 1
+    db.commit()
+    return {"scanned": scanned, "emitted": emitted}

@@ -60,6 +60,8 @@ from app.database import Base, get_db  # noqa: E402
 from app.models import User  # noqa: E402
 from app.modules.assessments.registry import ALL_ROUTERS  # noqa: E402
 from app.modules.assessments.registry_models import ALL_MODELS  # noqa: E402
+# C 培训/测评会向 D 域 notifications 表写入事件；测试库需一并建表
+from app.modules.notifications.models import Notification  # noqa: E402
 
 USERS_DDL = """
 CREATE TABLE users (
@@ -91,7 +93,7 @@ class Harness:
         with self.engine.begin() as connection:
             connection.execute(text(USERS_DDL))
         Base.metadata.create_all(
-            self.engine, tables=[model.__table__ for model in ALL_MODELS]
+            self.engine, tables=[model.__table__ for model in ALL_MODELS] + [Notification.__table__]
         )
         self.SessionLocal = sessionmaker(bind=self.engine, expire_on_commit=False)
 

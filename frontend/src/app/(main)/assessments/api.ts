@@ -83,6 +83,7 @@ export function assignAssessment(payload: {
   plan_id: number;
   user_id: number;
   idempotency_key: string;
+  attempt_no?: number;
 }): Promise<AssessmentAssignmentItem> {
   return post<AssessmentAssignmentItem>('/assessments/assignments', payload);
 }

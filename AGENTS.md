@@ -4,6 +4,8 @@
 
 ## 1. 开始前必须读取并确认
 
+全员执行以 [原 PRD 统一跟踪表](docs/modules/MASTER/原PRD统一执行跟踪表.md) 为任务入口，结合冻结需求推进本人条目。× 仅表示实现，接入和验收按表内证据判断；负责人在本人交接按条目 ID 回传，MASTER 核对后维护总表。不得把旧任务卡的缩减范围覆盖原 PRD 必达项。
+
 每个新会话、拉取更新、切换任务或恢复工作后，先按顺序读取：
 
 1. 本文件、README.md、更新记录.md及 [.collaboration/DECISIONS.md](.collaboration/DECISIONS.md) 的当前基线、未决冲突与同步状态。

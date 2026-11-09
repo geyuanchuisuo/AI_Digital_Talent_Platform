@@ -6,6 +6,7 @@ export interface TrainingCourse {
   description: string | null;
   material_url: string;
   dimension_names: string[];
+  capacity: number | null;
   status: 'active' | 'inactive';
   version: number;
   feedback_note: string | null;
@@ -66,10 +67,12 @@ export interface TrainingFeedbackSummary {
 
 export interface TrainingLearningRecord {
   plan_item_id: number;
+  record_id?: number | null;
   status: 'not_started' | 'learning' | 'completed';
   note: string | null;
   reported_at: string | null;
   is_self_reported: boolean;
+  formal_completed?: boolean;
 }
 
 export interface TrainingPlanItem {
@@ -85,12 +88,15 @@ export interface TrainingPlanItem {
   };
   dimension_name: string | null;
   reason: string | null;
+  due_date: string | null;
   sort_order: number;
   learning: {
+    record_id?: number | null;
     status: 'not_started' | 'learning' | 'completed';
     note: string | null;
     reported_at: string | null;
     is_self_reported: boolean;
+    formal_completed?: boolean;
   };
   feedback?: TrainingFeedbackState | null;
 }
@@ -125,4 +131,22 @@ export interface GrowthEvent {
   summary: string | null;
   payload: Record<string, unknown>;
   created_at: string;
+}
+
+export interface TrainingEnrollment {
+  id: number;
+  course_id: number;
+  employee_user_id: number;
+  priority: 'required' | 'elective';
+  status: 'pending' | 'approved' | 'rejected' | 'waitlisted' | 'cancelled' | 'expired';
+  expires_at: string | null;
+  note: string | null;
+}
+
+export interface LearningEvidence {
+  id: number;
+  evidence_type: string;
+  score: number;
+  verified_by: string | null;
+  payload: Record<string, unknown>;
 }
