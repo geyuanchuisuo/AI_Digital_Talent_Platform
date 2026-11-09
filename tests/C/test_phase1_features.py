@@ -181,5 +181,101 @@ class AiInterviewTest(unittest.TestCase):
         self.assertIn(s, [row["id"] for row in admin_rows])
 
 
+class TrainingNotificationsTest(unittest.TestCase):
+    """F09：课程指派/报名审批/延期/到期/逾期 的 D 域通知落地。"""
+
+    def setUp(self) -> None:
+        self.h = Harness()
+        self.admin = self.h.create_user("a", role="admin")
+        self.emp = self.h.create_user("e", role="employee")
+        self.course = self.h.client.post(
+            "/api/training/courses",
+            json={"title": "必修安全课", "description": "x", "material_url": "http://x"},
+            headers=Harness.headers(self.admin)).json()["data"]["id"]
+
+    def tearDown(self) -> None:
+        self.h.close()
+
+    def _plan(self, due_date: str | None) -> int:
+        item = {"course_id": self.course, "dimension_name": "专业"}
+        if due_date:
+            item["due_date"] = due_date
+        plan = self.h.client.post(
+            "/api/training/plans",
+            json={"employee_user_id": self.emp.id, "items": [item]},
+            headers=Harness.headers(self.admin)).json()["data"]["id"]
+        self.h.client.post(f"/api/training/plans/{plan}/assign", headers=Harness.headers(self.admin))
+        return plan
+
+    def _item_id(self, plan_id: int) -> int:
+        detail = self.h.client.get(
+            f"/api/training/plans/{plan_id}", headers=Harness.headers(self.admin)).json()["data"]
+        return detail["items"][0]["id"]
+
+    def _count(self, event_type: str) -> int:
+        from sqlalchemy import select
+        from app.modules.notifications.models import Notification
+        db = self.h.session()
+        try:
+            return len(list(db.scalars(select(Notification).where(Notification.event_type == event_type))))
+        finally:
+            db.close()
+
+    def test_course_assigned_notification(self):
+        self._plan("2026-11-20")
+        self.assertEqual(self._count("course.assigned"), 1)
+
+    def test_enrollment_reviewed_notification(self):
+        eid = self.h.client.post(
+            "/api/training/enrollments", json={"course_id": self.course, "priority": "required"},
+            headers=Harness.headers(self.emp)).json()["data"]["id"]
+        self.h.client.post(
+            f"/api/training/enrollments/{eid}/decide", json={"status": "approved"},
+            headers=Harness.headers(self.admin))
+        self.assertEqual(self._count("course.enrollment_reviewed"), 1)
+
+    def test_extension_requires_reason_and_notifies(self):
+        plan = self._plan("2026-11-20")
+        item = self._item_id(plan)
+        bad = self.h.client.post(
+            f"/api/training/plan-items/{item}/extension", json={"new_due_date": "2026-12-01"},
+            headers=Harness.headers(self.admin))
+        self.assertEqual(bad.status_code, 422)
+        ok = self.h.client.post(
+            f"/api/training/plan-items/{item}/extension",
+            json={"new_due_date": "2026-12-01", "reason": "项目冲突"},
+            headers=Harness.headers(self.admin))
+        self.assertEqual(ok.json()["data"]["due_date"], "2026-12-01")
+        self.assertEqual(self._count("training.extension_decided"), 1)
+
+    def test_scan_due_and_overdue(self):
+        plan = self._plan("2026-11-11")
+        item = self._item_id(plan)
+        scan = self.h.client.post(
+            "/api/training/reminders/scan", json={"today": "2026-11-09", "days_ahead": 3},
+            headers=Harness.headers(self.admin)).json()["data"]
+        self.assertEqual(scan["due"]["emitted"], 1)
+        self.assertEqual(scan["overdue"]["emitted"], 0)
+        self.assertEqual(self._count("training.due_reminder"), 1)
+        # 延期到过去 → 逾期扫描命中，且重复扫描不新增行（幂等）
+        self.h.client.post(
+            f"/api/training/plan-items/{item}/extension",
+            json={"new_due_date": "2026-11-05", "reason": "补录"},
+            headers=Harness.headers(self.admin))
+        self.h.client.post(
+            "/api/training/reminders/scan", json={"today": "2026-11-09"},
+            headers=Harness.headers(self.admin))
+        self.h.client.post(
+            "/api/training/reminders/scan", json={"today": "2026-11-09"},
+            headers=Harness.headers(self.admin))
+        self.assertEqual(self._count("training.overdue"), 1)
+
+    def test_scan_requires_admin(self):
+        r = self.h.client.post(
+            "/api/training/reminders/scan", json={"today": "2026-11-09"},
+            headers=Harness.headers(self.emp))
+        self.assertEqual(r.status_code, 403)
+
+
 if __name__ == "__main__":
     unittest.main()

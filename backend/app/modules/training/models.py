@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import DateTime, Float, Integer, SmallInteger, String, Text, UniqueConstraint, text
+from sqlalchemy import Date, DateTime, Float, Integer, SmallInteger, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -133,6 +133,8 @@ class TrainingPlanItem(PKMixin, CrossDbUpdatedAtMixin, Base):
     dimension_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # 必修课程到期日：用于到期提醒 / 逾期判定 / 延长期限（F09）
+    due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
 
 class TrainingPlanVersion(PKMixin, CrossDbUpdatedAtMixin, Base):
