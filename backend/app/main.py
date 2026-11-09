@@ -196,6 +196,11 @@ from app.modules.workflows.skills_router import router as skills_router  # noqa:
 
 app.include_router(skills_router)
 
+# D AI 中台管理面（T-D20）：/api/ai-platform 供应商/Prompt 库/调用日志与看板
+from app.modules.dashboard.router import router as ai_platform_router  # noqa: E402
+
+app.include_router(ai_platform_router)
+
 from app.core.tasks.events import router as task_events_router  # noqa: E402
 
 app.include_router(task_events_router)

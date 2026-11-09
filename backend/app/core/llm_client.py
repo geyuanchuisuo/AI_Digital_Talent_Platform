@@ -127,7 +127,12 @@ def repair_json(raw: str) -> Any:
 
 
 class LLMClient:
-    """可注入 base_url / client 的 LLM 客户端（便于假 server 测试）。"""
+    """可注入 base_url / client 的 LLM 客户端（便于假 server 测试）。
+
+    中台联动（T-D20）：`purpose` 随调用传入并逐次落 ai_call_logs（审计旁路，
+    落库失败不阻塞业务）；`provider_config_factory` 返回中台默认供应商配置
+    （每次 get_llm_client 实时读取——供应商启停/切换即时生效），None 回退 .env。
+    """
 
     def __init__(
         self,
@@ -137,18 +142,42 @@ class LLMClient:
         model: str | None = None,
         timeout: float | None = None,
         client: Any | None = None,
+        purpose: str = "unspecified",
+        provider_config_factory: Any | None = None,
     ) -> None:
+        cfg = provider_config_factory() if provider_config_factory is not None else None
+        if cfg is not None:
+            base_url = cfg.get("base_url") or base_url
+            api_key = cfg.get("api_key") or api_key
+            model = cfg.get("model") or model
+            if cfg.get("timeout_seconds"):
+                timeout = float(cfg["timeout_seconds"])
         self.base_url = base_url or settings.llm_base_url
         self.api_key = api_key or settings.llm_api_key
         self.model = model or settings.llm_model
         self.timeout = timeout or settings.llm_timeout
+        self.purpose = purpose
+        self.provider_name = (cfg or {}).get("name") or "env_default"
+        self._provider_config_factory = provider_config_factory
         self._client = client
         # 部分供应商（含部分讯飞网关）不支持 response_format；首次 400 时自动降级
         self._json_format_supported = True
 
     @property
     def client(self) -> Any:
+        # 每次访问都重查中台配置：供应商启停/默认切换即时生效（T-D20 验收②）。
+        # client 已外部注入（测试）时不再重建。
         if self._client is None:
+            cfg = (
+                self._provider_config_factory() if self._provider_config_factory is not None else None
+            )
+            if cfg is not None:
+                self.base_url = cfg.get("base_url") or self.base_url
+                self.api_key = cfg.get("api_key") or self.api_key
+                self.model = cfg.get("model") or self.model
+                self.provider_name = cfg.get("name") or self.provider_name
+                if cfg.get("timeout_seconds"):
+                    self.timeout = float(cfg["timeout_seconds"])
             self._client = OpenAI(
                 base_url=self.base_url,
                 api_key=self.api_key,
@@ -169,6 +198,7 @@ class LLMClient:
             }
             if want_json and self._json_format_supported:
                 kwargs["response_format"] = {"type": "json_object"}
+            started = time.monotonic()
             try:
                 with _get_semaphore():
                     resp = self.client.chat.completions.create(**kwargs)
@@ -183,6 +213,12 @@ class LLMClient:
                     )
                 if reasoning:
                     logger.debug("忽略推理模型 reasoning_content（%d 字符）", len(reasoning))
+                usage = getattr(resp, "usage", None)
+                self._record_call(
+                    result="ok", latency_ms=int((time.monotonic() - started) * 1000),
+                    prompt_tokens=getattr(usage, "prompt_tokens", None),
+                    completion_tokens=getattr(usage, "completion_tokens", None),
+                )
                 return content
             except APIStatusError as exc:
                 # 供应商不支持 response_format → 去掉该参数立即重试，不消耗重试预算
@@ -195,6 +231,10 @@ class LLMClient:
                     _backoff(http_try)
                     http_try += 1
                     continue
+                self._record_call(
+                    result="error", latency_ms=int((time.monotonic() - started) * 1000),
+                    error=f"LLM HTTP {exc.status_code}：{str(exc)[:RAW_SUMMARY_LEN]}",
+                )
                 raise LLMError(f"LLM HTTP {exc.status_code}：{str(exc)[:RAW_SUMMARY_LEN]}") from exc
             except (APITimeoutError, APIConnectionError) as exc:
                 if http_try < HTTP_MAX_ATTEMPTS - 1:
@@ -202,7 +242,30 @@ class LLMClient:
                     _backoff(http_try)
                     http_try += 1
                     continue
+                self._record_call(
+                    result="error", latency_ms=int((time.monotonic() - started) * 1000),
+                    error=f"LLM 网络异常：{type(exc).__name__}: {exc}",
+                )
                 raise LLMError(f"LLM 网络异常：{type(exc).__name__}: {exc}") from exc
+
+    def _record_call(self, *, result: str, latency_ms: int,
+                     prompt_tokens: int | None = None,
+                     completion_tokens: int | None = None,
+                     error: str | None = None) -> None:
+        """中台调用日志埋点（T-D20）：审计旁路，落库失败不阻塞业务。"""
+        try:
+            from app.database import SessionLocal  # noqa: PLC0415
+            from app.modules.dashboard import service as ai_platform  # noqa: PLC0415
+
+            with SessionLocal() as db:
+                ai_platform.record_call(
+                    db, provider_name=self.provider_name, model=self.model,
+                    purpose=self.purpose, result=result, latency_ms=latency_ms,
+                    prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
+                    error=error,
+                )
+        except Exception:  # noqa: BLE001
+            logger.exception("AI 调用日志落库异常（旁路，不阻塞）")
 
     def chat_text(
         self,
@@ -261,11 +324,35 @@ _default_client: LLMClient | None = None
 _default_client_lock = threading.Lock()
 
 
+def _default_provider_config() -> dict[str, Any] | None:
+    """中台默认供应商配置（T-D20 验收②启停/切换即时生效）。
+
+    每次实时读库；中台不可用/未配置时返回 None（回退 .env，不阻塞）。
+    """
+    try:
+        from app.database import SessionLocal  # noqa: PLC0415
+        from app.modules.dashboard import service as ai_platform  # noqa: PLC0415
+
+        with SessionLocal() as db:
+            row = ai_platform.resolve_default_provider(db)
+            if row is None:
+                return None
+            return {
+                "name": row.name,
+                "base_url": row.base_url,
+                "api_key": row.api_key,
+                "model": row.model,
+                "timeout_seconds": row.timeout_seconds,
+            }
+    except Exception:  # noqa: BLE001 - 中台库不可用回退 .env
+        return None
+
+
 def get_llm_client() -> LLMClient:
     global _default_client
     with _default_client_lock:
         if _default_client is None:
-            _default_client = LLMClient()
+            _default_client = LLMClient(provider_config_factory=_default_provider_config)
         return _default_client
 
 
@@ -282,3 +369,11 @@ def chat_json(prompt: str, schema: type[T] | None = None, **kwargs: Any) -> T | 
 
 def chat_text(prompt: str, **kwargs: Any) -> str:
     return get_llm_client().chat_text(prompt, **kwargs)
+
+
+def with_purpose(purpose: str) -> LLMClient:
+    """带用途标签的客户端（T-D20 调用日志 purpose 维度）。
+
+    复用默认供应商配置工厂；同一进程多 purpose 并发各自持有实例。
+    """
+    return LLMClient(provider_config_factory=_default_provider_config, purpose=purpose)
