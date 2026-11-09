@@ -11,6 +11,7 @@
 import {
   AuditOutlined,
   BarChartOutlined,
+  BellOutlined,
   FileSearchOutlined,
   LogoutOutlined,
   ProfileOutlined,
@@ -36,6 +37,8 @@ const MENU_ITEMS = [
   { key: '/assessments', icon: <AuditOutlined />, label: '岗位测评' },
   { key: '/interviews', icon: <SolutionOutlined />, label: '人工面试' },
   { key: '/training', icon: <ReadOutlined />, label: '培训成长' },
+  // D 模块（T-D24 通知中心）
+  { key: '/notifications', icon: <BellOutlined />, label: '通知中心' },
 ];
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
