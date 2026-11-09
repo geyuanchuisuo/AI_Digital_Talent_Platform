@@ -25,15 +25,20 @@ TABLE_OPTIONS = {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"}
 
 
 def upgrade() -> None:
-    op.add_column(
-        "training_learning_evidence",
-        sa.Column(
-            "evidence_key",
-            sa.String(length=100),
-            nullable=True,
-            comment="可信来源键：出勤记录/测评结果/学习会话 nonce，同记录内唯一",
-        ),
-    )
+    # C_0001 用当前模型元数据 create_all，部分库建表时已含本列；各环节幂等
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    columns = {col["name"] for col in inspector.get_columns("training_learning_evidence")}
+    if "evidence_key" not in columns:
+        op.add_column(
+            "training_learning_evidence",
+            sa.Column(
+                "evidence_key",
+                sa.String(length=100),
+                nullable=True,
+                comment="可信来源键：出勤记录/测评结果/学习会话 nonce，同记录内唯一",
+            ),
+        )
     op.execute(
         "UPDATE training_learning_evidence "
         "SET evidence_key = CONCAT('legacy:', id) WHERE evidence_key IS NULL"
@@ -44,11 +49,15 @@ def upgrade() -> None:
         existing_type=sa.String(length=100),
         nullable=False,
     )
-    op.create_unique_constraint(
-        "uk_evidence_record_key",
-        "training_learning_evidence",
-        ["learning_record_id", "evidence_key"],
-    )
+    constraints = {
+        c["name"] for c in sa.inspect(bind).get_unique_constraints("training_learning_evidence")
+    }
+    if "uk_evidence_record_key" not in constraints:
+        op.create_unique_constraint(
+            "uk_evidence_record_key",
+            "training_learning_evidence",
+            ["learning_record_id", "evidence_key"],
+        )
 
 
 def downgrade() -> None:
