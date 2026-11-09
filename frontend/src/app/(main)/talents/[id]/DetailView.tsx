@@ -41,6 +41,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { getErrorMessage } from '@/lib/http';
 import { getUser } from '@/lib/auth';
 import SourceEvidence from '@/features/talents/SourceEvidence';
+import ProfileQuestion from '@/features/talents/ProfileQuestion';
 
 import { deleteTalent, downloadResumeFile, fetchDuplicates, getTalent, revectorTalent } from '../api';
 import type { DuplicateItem, TalentDetailData } from '../types';
@@ -399,7 +400,7 @@ export default function DetailView({ talentId }: { talentId: number }) {
           items={[
             {
               key:'evidence', label:'原文依据',
-              children:<SourceEvidence personId={talentId} refreshKey={detail.profile.updated_at || ''} />,
+              children:<><SourceEvidence personId={talentId} refreshKey={detail.profile.updated_at || ''} /><ProfileQuestion personId={talentId} allowIndex /></>,
             },
             {
               key: 'experience',

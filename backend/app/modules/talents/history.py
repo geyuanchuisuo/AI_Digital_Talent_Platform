@@ -49,6 +49,8 @@ def save_version(db, profile, change_type, *, changed_by=None):
     snapshot['_audit_profile'] = _json({key: getattr(profile, column) for key, column in FIELD_COLUMNS.items()})
     snapshot['sources'] = [_json(svc._parsed_snapshot(parsed, db.get(ResumeFile, parsed.resume_file_id)))
         for parsed in db.scalars(select(ParsedResume).where(ParsedResume.talent_profile_id == profile.id).order_by(ParsedResume.id))]
+    from app.modules.talents.qa_sources import freeze_pages
+    snapshot['source_pages'] = freeze_pages(db, profile.id)
     previous = current_version(db, profile.id)
     if previous and change_type != 'restore' and _content(previous.profile_snapshot_json) == _content(snapshot):
         if snapshot['status'] == 'ready':

@@ -9,7 +9,10 @@ def test_integrated_b_and_d_have_one_migration_head():
     script = ScriptDirectory.from_config(config)
     assert len(script.get_heads()) == 1
     head = script.get_revision(script.get_current_head())
-    assert head.revision == 'B_0005_merge_c_capacity'
+    assert head.revision == 'B_0006_profile_questions'
+    qa_head = head
+    head = script.get_revision('B_0005_merge_c_capacity')
+    assert qa_head.down_revision == head.revision
     trace = script.get_revision('B_0004_parse_attempt_trace')
     quality = script.get_revision('B_0003_ocr_page_quality')
     merge = script.get_revision('B_0002_merge_workflow_review')

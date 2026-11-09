@@ -81,7 +81,14 @@ def fakes(monkeypatch):
 
     monkeypatch.setattr(milvus_store, "_default_store", store)
     monkeypatch.setattr(embedding_client, "embed_one", fake_embed_one)
-    return SimpleNamespace(store=store, embed=calls)
+    chunk_deletes=[]
+    def remove_chunks(person_id):
+        if store.down:
+            raise RuntimeError('片段索引不可用（测试模拟）')
+        chunk_deletes.append(person_id)
+    from app.modules.talents import qa_index
+    monkeypatch.setattr(qa_index,'remove_person',remove_chunks)
+    return SimpleNamespace(store=store, embed=calls, chunk_deletes=chunk_deletes)
 
 
 # --------------------------------------------------------------------------- #
@@ -592,6 +599,7 @@ def test_delete_restore_roundtrip(env, fakes, client, auth):
     assert resp.status_code == 200, resp.text
     body = resp.json()["data"]
     assert body == {"deleted": True, "vector_deleted": True}
+    assert pid in fakes.chunk_deletes
     assert fakes.store.deleted == [pid]
 
     ids = [

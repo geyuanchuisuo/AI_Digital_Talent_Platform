@@ -579,7 +579,10 @@ def _delete_vector_quietly(talent_id: int) -> bool:
     from app.core.milvus_store import delete_profile_vector
 
     try:
-        return delete_profile_vector(talent_id)
+        profile_deleted = delete_profile_vector(talent_id)
+        from app.modules.talents.qa_index import remove_person
+        remove_person(talent_id)
+        return profile_deleted
     except Exception:  # noqa: BLE001 - 向量删除失败不阻塞软删（数据库 §5.1）
         logger.exception("画像 %s 向量删除异常（按失败处理）", talent_id)
         return False

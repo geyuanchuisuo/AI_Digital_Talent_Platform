@@ -267,6 +267,7 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "result_confirmed_by", "stage_reason", "stage_updated_by",
         "stage_updated_at", "closed_at", "created_by", "created_at", "updated_at",
     },
+    "talent_profile_questions": {"id", "person_id", "profile_version", "asked_by", "status", "snapshot_json", "created_at"},
     "training_courses": {
         "id", "title", "description", "material_url", "dimension_names_json",
         "status", "version", "feedback_note", "feedback_note_at", "capacity",
@@ -478,9 +479,9 @@ def ddl(model) -> str:
 
 
 def test_exactly_70_tables_and_no_phase2_table():
-    assert len(TABLE_NAMES) == 75
-    assert len(MODEL_CLASSES) == 75
-    assert len(Base.metadata.tables) == 75
+    assert len(TABLE_NAMES) == 76
+    assert len(MODEL_CLASSES) == 76
+    assert len(Base.metadata.tables) == 76
     assert set(TABLE_NAMES) == set(EXPECTED_COLUMNS)
     # D-7 缓办：一期不建 llm_score_cache
     assert "llm_score_cache" not in Base.metadata.tables

@@ -40,6 +40,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 
 import { getErrorMessage } from '@/lib/http';
+import BatchProfileQuestion from '@/features/talents/BatchProfileQuestion';
 
 import { fetchTalents, restoreTalent, searchTalents } from './api';
 import type { TalentListItem, TalentSearchItem } from './types';
@@ -84,6 +85,8 @@ export default function TalentListPanel({ duplicateCount, onOpenDuplicates, onCh
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [rows, setRows] = useState<TableRow[]>([]);
+  const [selected,setSelected]=useState<number[]>([]);
+  useEffect(()=>{setSelected([]);},[rows,filters.recycle]);
   const [loading, setLoading] = useState(false);
   const [restoring, setRestoring] = useState<number | null>(null);
   const [reloadSignal, setReloadSignal] = useState(0);
@@ -349,6 +352,9 @@ export default function TalentListPanel({ duplicateCount, onOpenDuplicates, onCh
         </Space>
         <Table<TableRow>
           rowKey="id"
+          rowSelection={filters.recycle?undefined:{selectedRowKeys:selected,
+            onChange:keys=>setSelected(keys.map(Number)),
+            getCheckboxProps:row=>({disabled:selected.length>=20&&!selected.includes(row.id)})}}
           loading={loading}
           columns={columns}
           dataSource={rows}
@@ -369,6 +375,7 @@ export default function TalentListPanel({ duplicateCount, onOpenDuplicates, onCh
           }
           scroll={{ x: 900 }}
         />
+        <BatchProfileQuestion people={rows.filter(r=>selected.includes(r.id)).map(r=>({id:r.id,name:r.name}))}/>
       </Space>
     </Card>
   );
