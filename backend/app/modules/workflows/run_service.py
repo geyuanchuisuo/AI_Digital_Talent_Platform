@@ -50,7 +50,7 @@ def get_engine() -> WorkflowEngine:
     """进程级引擎单例（检查点存主库；registry_factory 同源）。测试可替换 _engine。"""
     global _engine  # noqa: PLW0603
     if _engine is None:
-        from app.core.config import settings  # noqa: PLC0415
+        from app.config import settings  # noqa: PLC0415
         from app.database import SessionLocal  # noqa: PLC0415
 
         _engine = WorkflowEngine(
@@ -151,6 +151,45 @@ def start_manual_run(
         waiting_node = str(result.interrupt.get("node_key") or "") or None
     _mirror(db, run, result, waiting_node=waiting_node)
     return {"run": run, "result": result}
+
+
+def start_event_run(
+    db: Session, *, definition_id: int, event_type: str, event_id: str,
+    params: dict[str, Any], actor,
+) -> dict[str, Any]:
+    """内部生产方调用：确定性 thread_id 让重复事件只执行一次。"""
+    service.require_management(actor)
+    if not event_type or not event_id or len(event_type) > 64 or len(event_id) > 191:
+        raise BizError(422, "事件类型与事件 ID 必填，且长度不得超过限制")
+    if not isinstance(params, dict):
+        raise BizError(422, "事件参数必须是对象")
+    token = uuid.uuid5(uuid.NAMESPACE_URL, f"workflow:{definition_id}:{event_type}:{event_id}").hex
+    thread_id = f"event_{token}"
+    existing = db.execute(select(WorkflowRun).where(WorkflowRun.thread_id == thread_id)).scalar_one_or_none()
+    if existing is not None:
+        return {"run": existing, "result": None, "duplicate": True}
+    try:
+        run = service.start_run(
+            db, definition_id=definition_id, thread_id=thread_id, params=params,
+            trigger_type="event", trigger_ref=event_id, created_by=actor.id,
+        )
+    except BizError as exc:
+        if exc.code != 409:
+            raise
+        duplicate = db.execute(select(WorkflowRun).where(WorkflowRun.thread_id == thread_id)).scalar_one_or_none()
+        if duplicate is None:
+            raise
+        return {"run": duplicate, "result": None, "duplicate": True}
+    graph = _build(run, db)
+    result = get_engine().start(
+        graph_name_for(run.version_id, run.thread_id), graph,
+        {"trigger": dict(params), "form": {}, "vars": {}}, thread_id=run.thread_id,
+    )
+    waiting_node = None
+    if result.status == "waiting" and isinstance(result.interrupt, dict):
+        waiting_node = str(result.interrupt.get("node_key") or "") or None
+    _mirror(db, run, result, waiting_node=waiting_node)
+    return {"run": run, "result": result, "duplicate": False}
 
 
 # ---- 审批恢复 ----
