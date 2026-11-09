@@ -204,12 +204,11 @@ def start_manual_run(
     return {"run": run, "result": result}
 
 
-def start_event_run(
+def _start_event_run(
     db: Session, *, definition_id: int, event_type: str, event_id: str,
-    params: dict[str, Any], actor,
+    params: dict[str, Any], created_by: int | None,
 ) -> dict[str, Any]:
-    """内部生产方调用：确定性 thread_id 让重复事件只执行一次。"""
-    service.require_management(actor)
+    """事件运行核心：不做管理侧门禁，由调用入口自行校验身份。"""
     if not event_type or not event_id or len(event_type) > 64 or len(event_id) > 191:
         raise BizError(422, "事件类型与事件 ID 必填，且长度不得超过限制")
     if not isinstance(params, dict):
@@ -222,7 +221,7 @@ def start_event_run(
     try:
         run = service.start_run(
             db, definition_id=definition_id, thread_id=thread_id, params=params,
-            trigger_type="event", trigger_ref=event_id, created_by=actor.id,
+            trigger_type="event", trigger_ref=event_id, created_by=created_by,
         )
     except BizError as exc:
         if exc.code != 409:
@@ -243,23 +242,39 @@ def start_event_run(
     return {"run": run, "result": result, "duplicate": False}
 
 
+def start_event_run(
+    db: Session, *, definition_id: int, event_type: str, event_id: str,
+    params: dict[str, Any], actor,
+) -> dict[str, Any]:
+    """管理侧入口：手动重放/联调用，仍校验管理侧身份。"""
+    service.require_management(actor)
+    return _start_event_run(
+        db, definition_id=definition_id, event_type=event_type, event_id=event_id,
+        params=params, created_by=getattr(actor, "id", None),
+    )
+
+
 def start_employee_assessment_run(
     db: Session, *, assignment_id: int, result_id: int, actor,
 ) -> dict[str, Any] | None:
-    """由原测评分配人触发已完成的员工测评；未配置发布流程则跳过。"""
-    service.require_management(actor)
+    """测评本人或该测评分配人触发已完成的员工测评；未配置发布流程则跳过。
+
+    员工交卷时由本人触发，因此不套管理侧门禁，只校验触发人与该测评的关系；
+    审计 `created_by` 记实际触发账号，不借用全权管理员身份。
+    """
     assignment = db.get(AssessmentAssignment, assignment_id)
     result = db.get(AssessmentResult, result_id)
     if assignment is None or result is None or result.assignment_id != assignment_id:
         raise BizError(404, "员工测评结果不存在")
     if assignment.purpose != "employee" or assignment.status != "completed":
         raise BizError(422, "仅已完成的员工测评可触发培训流程")
-    if assignment.created_by != actor.id:
-        raise BizError(403, "仅测评分配人可触发该员工的培训流程")
+    actor_id = getattr(actor, "id", None)
+    if actor_id is None or actor_id not in {assignment.user_id, assignment.created_by}:
+        raise BizError(403, "仅测评本人或分配人可触发该员工的培训流程")
     definition_id = resolve_event_definition(db, event_code="employee_assessment_completed")
     if definition_id is None:
         return None
-    return start_event_run(
+    return _start_event_run(
         db, definition_id=definition_id, event_type="assessment.completed",
         event_id=f"{assignment.id}:v{result.version}",
         params={
@@ -267,7 +282,7 @@ def start_employee_assessment_run(
             "result_id": result.id,
             "employee_user_id": assignment.user_id,
         },
-        actor=actor,
+        created_by=actor_id,
     )
 
 

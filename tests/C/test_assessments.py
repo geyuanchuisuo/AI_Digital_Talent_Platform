@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import unittest
 
 from c_harness import Harness
@@ -371,6 +372,116 @@ class AssessmentFlowTest(unittest.TestCase):
             self.assertEqual(visible.status_code, 200)
         finally:
             service.default_grade_short_answer = original
+
+    def _single_dimension_plan(self, purpose: str) -> int:
+        response = self._post(
+            "/api/assessments/plans",
+            {
+                "purpose": purpose,
+                "job_id": 1,
+                "job_title": "后端工程师",
+                "dimensions": [{"name": "专业", "type": "professional", "weight": 100}],
+                "total_question_count": 1,
+                "pass_score": 60,
+                "mode": "fixed",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        plan_id = response.json()["data"]["id"]
+        published = self._post(f"/api/assessments/plans/{plan_id}/publish", {})
+        self.assertEqual(published.status_code, 200, published.text)
+        return plan_id
+
+    def _answer_single_choice(self, assignment_id: int, user) -> None:
+        detail = self.client.get(
+            f"/api/assessments/assignments/{assignment_id}",
+            headers=self.harness.headers(user),
+        )
+        question_id = detail.json()["data"]["questions"][0]["question_id"]
+        saved = self.client.put(
+            f"/api/assessments/assignments/{assignment_id}/answers/{question_id}",
+            json={"selected_option": "A"},
+            headers=self.harness.headers(user),
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+
+    @contextlib.contextmanager
+    def _run_service_stub(self, fake):
+        """注入 D 工作流入口替身：本机未安装 langgraph，无法真实导入 run_service。"""
+        import sys
+        import types
+
+        import app.modules.workflows as workflows_pkg
+
+        module = types.ModuleType("app.modules.workflows.run_service")
+        module.start_employee_assessment_run = fake
+        missing = object()
+        previous_module = sys.modules.get(module.__name__, missing)
+        previous_attr = getattr(workflows_pkg, "run_service", missing)
+        sys.modules[module.__name__] = module
+        workflows_pkg.run_service = module
+        try:
+            yield
+        finally:
+            if previous_module is missing:
+                sys.modules.pop(module.__name__, None)
+            else:
+                sys.modules[module.__name__] = previous_module
+            if previous_attr is missing:
+                del workflows_pkg.run_service
+            else:
+                workflows_pkg.run_service = previous_attr
+
+    def test_employee_assessment_completed_emits_workflow_event_once(self):
+        """员工测评首次完成触发一次工作流桥接；补评不重复触发（幂等由 D 侧保证）。"""
+        calls: list[dict] = []
+
+        def fake_run(db, *, assignment_id, result_id, actor):
+            calls.append({"assignment_id": assignment_id, "result_id": result_id, "actor_id": actor.id})
+            return {"run": None, "result": None, "duplicate": False}
+
+        self._create_question("专业")
+        assignment_id = self._assign(self._single_dimension_plan("employee"), self.employee)
+        self._answer_single_choice(assignment_id, self.employee)
+
+        with self._run_service_stub(fake_run):
+            submit = self.client.post(
+                f"/api/assessments/assignments/{assignment_id}/submit",
+                headers=self.harness.headers(self.employee),
+            )
+            self.assertEqual(submit.status_code, 200, submit.text)
+            self.assertEqual(submit.json()["data"]["status"], "completed")
+            retry = self.client.post(
+                f"/api/assessments/assignments/{assignment_id}/retry-grading",
+                headers=self.harness.headers(self.employee),
+            )
+            self.assertEqual(retry.status_code, 200, retry.text)
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["assignment_id"], assignment_id)
+        self.assertEqual(calls[0]["actor_id"], self.employee.id)
+        self.assertIsNotNone(calls[0]["result_id"])
+
+    def test_recruitment_assessment_completed_does_not_emit_workflow_event(self):
+        """招聘测评完成不进入员工成长流程。"""
+        calls: list[dict] = []
+
+        def fake_run(db, *, assignment_id, result_id, actor):
+            calls.append({"assignment_id": assignment_id})
+
+        self._create_question("专业")
+        assignment_id = self._assign(self._single_dimension_plan("recruitment"), self.candidate)
+        self._answer_single_choice(assignment_id, self.candidate)
+
+        with self._run_service_stub(fake_run):
+            submit = self.client.post(
+                f"/api/assessments/assignments/{assignment_id}/submit",
+                headers=self.harness.headers(self.candidate),
+            )
+            self.assertEqual(submit.status_code, 200, submit.text)
+            self.assertEqual(submit.json()["data"]["status"], "completed")
+
+        self.assertEqual(calls, [])
 
 
 if __name__ == "__main__":

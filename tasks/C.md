@@ -1,5 +1,7 @@
 # C 工作包：岗位笔试、人工面试、员工培训成长
 
+> **全员统一执行入口（2026-11-09，Master 发布）**：[原 PRD 执行跟踪表](../docs/modules/MASTER/原PRD统一执行跟踪表.md)。本工作包按对应条目 ID、优先级和通过条件推进，已实现标 × 仍须按列明边界完成接入/验收；本人交接回传证据，由 Master 复核更新表。旧卡与冻结需求互斥的缩减说法不再执行。
+
 维护角色：C；姓名由组内绑定。日期：2026-11-06；更新：2026-11-07（自适应测评）。状态：后端三域（含培训评价、自适应选题）与前端页面已实现，SQLite 自动化测试、前端 typecheck 与 build 通过；待 A 公共集成、MySQL 迁移与实机联调。
 
 先读根 AGENTS.md、README、更新记录、四个角色最新交接、目标路径规则及[统一需求](../docs/需求文档.md)。接入事实见[C 契约基线](../docs/modules/C/源码接入基线.md)、[接入决策](../docs/源码接入与需求决策.md)和[来源参考区](../docs/imports/hhy_gycs_master/README.md)（以实际目录为准）；全组安排见[四人分工](../docs/四人分工与试行方案.md)。用户已在本轮明确指定角色 C；最新范围以[一期细化草案](../docs/modules/C/一期需求细化.md)及[逐项确认](../docs/modules/C/需求细化与确认.md)为准；测评模式按用户 2026-11-07 裁决改为自适应，固定试卷仅作兼容。
@@ -33,9 +35,9 @@ C 维护测评/培训业务提示与评分语义，需要 D 的 loader/schema/�
 
 ## 当前进度（2026-07 起持续更新；本节为 2026-11-09 状态）
 
-- 后端：`backend/app/modules/{assessments,interviews,training,inventory}` 已实现 32 张表（原 22 + 盘点 5 + AI 面试间 3 + 培训报名/证据 2）、契约路由、权限裁剪、自适应策略/选题留痕/能力分析、固定组卷兼容、结果版本与公开、人工面试反馈、培训草稿/分配/自报/成长事件、培训期次/出勤/评价与匿名汇总、课程报名审批/候补/名额上限/24h 超时释放、学习证据与正式完成门槛、必修到期/逾期/延期、F10 九宫格盘点/人才池/异议/IDP/匿名汇总与导出审计、AI 面试间（真实模型评分+重试）；`registry_models.py` 提供 `ALL_MODELS`，`registry.py` 提供 `ALL_ROUTERS` 并 re-export 模型供 A 接入。迁移 `C_0003_phase1_expansion`，`C_0004_application_fk`（改挂 `B_0002_merge_workflow_review`），`C_0005_plan_item_due_date`，`C_0006_course_capacity`（当前单头）。
+- 后端：`backend/app/modules/{assessments,interviews,training,inventory}` 已实现 32 张表（原 22 + 盘点 5 + AI 面试间 3 + 培训报名/证据 2）、契约路由、权限裁剪、自适应策略/选题留痕/能力分析、固定组卷兼容、结果版本与公开、人工面试反馈、培训草稿/分配/自报/成长事件、培训期次/出勤/评价与匿名汇总、课程报名审批/候补/名额上限/24h 超时释放、学习证据与正式完成门槛、必修到期/逾期/延期、F10 九宫格盘点/人才池/异议/IDP/匿名汇总与导出审计、AI 面试间（真实模型评分+重试）、员工测评完成触发 D 工作流桥接（调用 `run_service.start_employee_assessment_run`，事件 `employee_assessment_completed`，仅 `purpose=employee`，招聘不触发）；`registry_models.py` 提供 `ALL_MODELS`，`registry.py` 提供 `ALL_ROUTERS` 并 re-export 模型供 A 接入。迁移 `C_0003_phase1_expansion`，`C_0004_application_fk`（改挂 `B_0002_merge_workflow_review`），`C_0005_plan_item_due_date`，`C_0006_course_capacity`（当前单头）。
 - 前端：`frontend/src/app/(main)/{assessments,interviews,training,inventory}` 已实现页面与接口封装，含自适应逐题答题、能力雷达/评级、员工评价、管理员期次/出勤与反馈汇总，以及新增 `/inventory`（盘点/人才池/汇总/异议/IDP/CSV 导出）、`/interviews/ai`（AI 面试会话与逐题作答）、`/training/enrollments`（报名审批/候补/超时释放/学习证据）；菜单入口仍需 A 修改 `AppShell`。
-- 测试：`$env:PYTHONPATH="backend"; python -m unittest discover -s tests/C -p "test_*.py" -v`，58 项通过（SQLite + 注入式评分/出题/草稿/主题/评委替身，覆盖通知、到期扫描、名额候补、导出审计与复测）；`npm run typecheck` 通过，最近一次 `npm run build` 通过（构建含 `/inventory`、`/interviews/ai`、`/training/enrollments`）。
+- 测试：`$env:PYTHONPATH="backend"; python -m unittest discover -s tests/C -p "test_*.py" -v`，60 项通过（SQLite + 注入式评分/出题/草稿/主题/评委替身，覆盖通知、到期扫描、名额候补、导出审计、复测与业务事件发送）；`npm run typecheck` 通过，最近一次 `npm run build` 通过（构建含 `/inventory`、`/interviews/ai`、`/training/enrollments`）。
 - 未验证：MySQL/Alembic 实际迁移（`C_0004`/`C_0005`/`C_0006` 依赖 A 的集成链）、真实 LLM 评分/出题/主题归纳/AI 面试评分、真实 JWT 权限、真实浏览器页面交互（新增三页未实机查看）、通知真实投递与每日定时触发、来源历史测试不覆盖 C 新模块。
 
 后续在本人 clone/分支与机器范围内继续联调，代码变更新增 docs/updates/C/ 交接。一期扩表已随 `0ed9bad` 发布到远端 master；本轮后续改动在 `master_YB` 继续，发布需另行授权。
