@@ -306,3 +306,33 @@ def cancel_run(
 ):
     run = run_service.cancel_waiting_run(db, thread_id=thread_id, user=user)
     return ok({"run_id": run.id, "thread_id": run.thread_id, "status": run.status})
+
+
+@router.post("/runs/{thread_id}/cancel-running", summary="取消运行中的运行（管理侧；协作式中断，执行中节点不打断）")
+def cancel_running(
+    thread_id: str,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    run = run_service.cancel_running_run(db, thread_id=thread_id, user=user)
+    return ok({"run_id": run.id, "thread_id": run.thread_id, "status": run.status})
+
+
+@router.post("/runs/{thread_id}/retry", summary="失败阶段重试（管理侧；从失败检查点续跑，已成功节点不重执行）")
+def retry_run(
+    thread_id: str,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    outcome = run_service.retry_failed_run(db, thread_id=thread_id, user=user)
+    run, result = outcome["run"], outcome["result"]
+    return ok(
+        {
+            "run_id": run.id,
+            "thread_id": run.thread_id,
+            "status": run.status,
+            "engine_status": result.status,
+            "interrupt": result.interrupt if result.status == "waiting" else None,
+            "error": result.error,
+        }
+    )

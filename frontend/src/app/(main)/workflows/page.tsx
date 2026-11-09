@@ -36,6 +36,8 @@ import {
   fetchVersions,
   approveRun,
   cancelRun,
+  cancelRunningRun,
+  retryRun,
   startRun,
   reviewVersion,
   rollbackDefinition,
@@ -145,6 +147,28 @@ export default function WorkflowsPage() {
       if (action === 'cancel') await cancelRun(run.thread_id);
       else await approveRun(run.thread_id, action === 'approve', '');
       message.success(action === 'cancel' ? '等待态已取消' : '审批已提交');
+      void loadRuns();
+      if (runDetail?.run.thread_id === run.thread_id) void openRunDetail(run.thread_id);
+    } catch (e) {
+      message.error(getErrorMessage(e));
+    }
+  };
+
+  const doCancelRunning = async (run: WorkflowRunSummary) => {
+    try {
+      await cancelRunningRun(run.thread_id);
+      message.success('取消请求已提交（执行中节点不打断，后续节点停止推进）');
+      void loadRuns();
+      if (runDetail?.run.thread_id === run.thread_id) void openRunDetail(run.thread_id);
+    } catch (e) {
+      message.error(getErrorMessage(e));
+    }
+  };
+
+  const doRetryRun = async (run: WorkflowRunSummary) => {
+    try {
+      await retryRun(run.thread_id);
+      message.success('重试已发起（已成功节点不重执行）');
       void loadRuns();
       if (runDetail?.run.thread_id === run.thread_id) void openRunDetail(run.thread_id);
     } catch (e) {
@@ -399,6 +423,12 @@ export default function WorkflowsPage() {
                     <Button size="small" onClick={() => void doRunAction(run, 'reject')}>驳回</Button>
                     <Button size="small" danger onClick={() => void doRunAction(run, 'cancel')}>取消等待</Button>
                   </>
+                )}
+                {run.status === 'running' && (
+                  <Button size="small" danger onClick={() => void doCancelRunning(run)}>取消运行</Button>
+                )}
+                {run.status === 'failed' && (
+                  <Button size="small" type="primary" onClick={() => void doRetryRun(run)}>重试</Button>
                 )}
               </Space>
             ) },

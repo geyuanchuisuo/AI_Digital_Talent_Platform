@@ -13,14 +13,18 @@ def mark_status(session_factory, thread_id: str, status: str, *, error: str | No
     """登记状态流转；行不存在时返回 False（登记缺失不应炸引擎，调用方记日志即可）。
 
     受控转换：仅允许 running→(waiting|succeeded|failed)、waiting→(running|succeeded|
-    failed)、终态→cancelled 的方向被写入；cancelled 不再被任何结果覆盖——迟到的
-    引擎回执不得复活已取消的运行（T-D18 等待态取消语义）。违反方向时返回 False。
+    failed)、failed→running（失败重试，T-D18）、终态→cancelled 的方向被写入；
+    cancelled 不再被任何结果覆盖——迟到的引擎回执不得复活已取消的运行
+    （T-D18 等待态取消语义）。违反方向时返回 False。
+
+    条件 UPDATE 原子判定转移方向（先读旧值仅供快速拒绝），取消与迟到回执的
+    竞态在数据库行级判断下收敛为「先到先得」。
     """
     from datetime import datetime as _dt
 
     from app.models import WorkflowEngineRun
     from app.core.workflows.engine.models import ENGINE_RUN_STATUSES
-    from sqlalchemy import select
+    from sqlalchemy import select, update
 
     if status not in ENGINE_RUN_STATUSES:
         raise ValueError(f"非法引擎状态 {status!r}，仅允许 {ENGINE_RUN_STATUSES}")
@@ -28,22 +32,34 @@ def mark_status(session_factory, thread_id: str, status: str, *, error: str | No
         "running": {"waiting", "succeeded", "failed"},
         "waiting": {"running", "succeeded", "failed"},
         "succeeded": {"cancelled"},
-        "failed": {"cancelled"},
+        "failed": {"cancelled", "running"},
         "cancelled": set(),
     }
     with session_factory() as db:
         row = db.execute(
-            select(WorkflowEngineRun).where(WorkflowEngineRun.thread_id == thread_id)
-        ).scalar_one_or_none()
+            select(WorkflowEngineRun.status).where(WorkflowEngineRun.thread_id == thread_id)
+        ).first()
         if row is None:
             return False
-        if status not in ALLOWED.get(row.status, set()):
+        if status not in ALLOWED.get(row[0], set()):
             return False
-        row.status = status
-        row.error = error
-        row.finished_at = _dt.now() if status in ("succeeded", "failed", "cancelled") else None
+        # CAS 锁定源状态：读判写之间被并发改动时 rowcount=0，拒绝覆盖
+        result = db.execute(
+            update(WorkflowEngineRun)
+            .where(
+                WorkflowEngineRun.thread_id == thread_id,
+                WorkflowEngineRun.status == row[0],
+            )
+            .values(
+                status=status,
+                error=error,
+                finished_at=(
+                    _dt.now() if status in ("succeeded", "failed", "cancelled") else None
+                ),
+            )
+        )
         db.commit()
-        return True
+        return bool(result.rowcount)
 
 
 def register_run(session_factory, *, graph_name: str, thread_id: str) -> None:

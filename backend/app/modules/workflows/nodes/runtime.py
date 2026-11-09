@@ -7,12 +7,17 @@
 
 节点包装职责：每节点执行前后落 workflow_run_steps（running→succeeded/failed），
 异常原样上抛——引擎统一把运行标 failed（T-D04 回退边界），失败可重试。
+T-D18：执行前做协作取消检查（业务运行已 cancelled 则中止，引擎把该节点标
+failed 留痕）；重试续跑按「上次该节点已终态」递增 attempt（审计依据）。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Callable, TypedDict
+
+from langgraph.errors import GraphBubbleUp
+from sqlalchemy import select
 
 from app.core.errors import BizError
 from app.modules.workflows.models import REF_KINDS
@@ -96,36 +101,75 @@ def load_user(session_factory: Callable[[], Any], user_id: int | None) -> Any:
 def make_node_executor(
     ctx: NodeContext, node: dict[str, Any], executor: Callable[[NodeContext, dict, dict], dict]
 ) -> Callable[[RunState], dict]:
-    """包装单节点执行：步骤记录 + 输入解析 + vars 合并；审批节点挂起期间步骤记 waiting
-    由 run_service 依据引擎 interrupt 负载落（本包装不感知挂起）。"""
+    """包装单节点执行：取消检查 + 步骤记录 + 输入解析 + vars 合并；审批节点挂起
+    期间步骤记 waiting 由 run_service 依据引擎 interrupt 负载落（本包装不感知挂起，
+    GraphBubbleUp 不落 failed——挂起不是失败）。"""
 
     node_key = str(node.get("node_key") or "")
     node_type = str(node.get("node_type") or "")
     node_name = str(node.get("name") or node_key)
 
+    def _next_attempt(db: Any) -> int:
+        """该节点已落过终态步骤 → 本次是重试续跑，记新 attempt；否则幂等覆盖。"""
+        from sqlalchemy import func
+
+        from app.models import WorkflowRunStep
+
+        last = db.execute(
+            select(func.max(WorkflowRunStep.attempt)).where(
+                WorkflowRunStep.run_id == ctx.run_id,
+                WorkflowRunStep.node_key == node_key,
+            )
+        ).scalar()
+        if last is None:
+            return 1
+        if db.execute(
+            select(WorkflowRunStep.id).where(
+                WorkflowRunStep.run_id == ctx.run_id,
+                WorkflowRunStep.node_key == node_key,
+                WorkflowRunStep.attempt == last,
+                WorkflowRunStep.status.in_(("succeeded", "failed", "skipped")),
+            )
+        ).first() is not None:
+            return int(last) + 1
+        return int(last)
+
     def execute(state: RunState) -> dict:
         with ctx.session_factory() as db:
+            from app.models import WorkflowRun
+
+            run_status = db.execute(
+                select(WorkflowRun.status).where(WorkflowRun.id == ctx.run_id)
+            ).scalar_one_or_none()
+            if run_status == "cancelled":
+                # 协作取消：运行已被管理侧取消，本节点不执行（引擎把它标 failed
+                # 留痕，迟到回执被受控白名单拒绝，不会复活取消态）
+                raise BizError(409, f"运行已取消，节点 {node_key!r} 停止执行")
+            attempt = _next_attempt(db)
             service.record_step(
                 db, ctx.run_id, node_key=node_key, node_type=node_type,
-                status="running", output={"node_name": node_name},
+                status="running", output={"node_name": node_name}, attempt=attempt,
             )
         try:
             inputs = resolve_inputs(node, state)
             outputs = executor(ctx, node, inputs) or {}
+        except GraphBubbleUp:
+            # 审批挂起（interrupt）：等待不是失败，步骤由 run_service 落 waiting
+            raise
         except Exception as exc:  # noqa: BLE001 - 失败如实落步骤后原样上抛
             # BizError 带白名单状态码（如 403 越权）——码随文本落步骤，审计可辨
             text = f"[{exc.code}] {exc.message}" if isinstance(exc, BizError) else str(exc)
             with ctx.session_factory() as db:
                 service.record_step(
                     db, ctx.run_id, node_key=node_key, node_type=node_type,
-                    status="failed", error=text[:500],
+                    status="failed", error=text[:500], attempt=attempt,
                 )
             raise
         merged_vars = {**(state.get("vars") or {}), node_key: dict(outputs)}
         with ctx.session_factory() as db:
             service.record_step(
                 db, ctx.run_id, node_key=node_key, node_type=node_type,
-                status="succeeded", output=outputs,
+                status="succeeded", output=outputs, attempt=attempt,
             )
         return {"vars": merged_vars}
 
