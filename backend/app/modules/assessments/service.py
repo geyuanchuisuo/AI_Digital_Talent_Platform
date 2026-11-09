@@ -1219,37 +1219,31 @@ def _create_result(
 
 
 def _emit_employee_assessment_completed(
-    db: Session, assignment: AssessmentAssignment, result: AssessmentResult
+    db: Session, assignment: AssessmentAssignment, result: AssessmentResult, user: User
 ) -> dict[str, Any] | None:
-    """员工测评首次完成时向 D 工作流发业务事件；招聘不触发。
+    """员工测评首次完成时触发 D 工作流桥接；招聘不触发。
 
-    延迟导入：工作流引擎依赖（langgraph）只在真正发事件时加载，
+    延迟导入：工作流引擎依赖（langgraph）只在真正触发时加载，
     避免测评域在未安装引擎依赖的环境下无法导入。
     """
     if assignment.purpose != "employee":
         return None
-    from app.modules.workflows import business_events as workflow_events  # noqa: PLC0415
-
     try:
-        return workflow_events.emit_business_event(
-            db,
-            event_code="employee_assessment_completed",
-            event_id=f"assessment:{assignment.id}:v{result.version}",
-            params={
-                "assignment_id": assignment.id,
-                "result_id": result.id,
-                "result_version": result.version,
-                "employee_user_id": assignment.user_id,
-                "plan_id": assignment.plan_id,
-                "plan_version": assignment.plan_version,
-                "job_id": assignment.job_id,
-                "job_title": assignment.job_title,
-            },
-            source="C.assessments",
+        from app.modules.workflows import run_service  # noqa: PLC0415
+
+        outcome = run_service.start_employee_assessment_run(
+            db, assignment_id=assignment.id, result_id=result.id, actor=user
         )
     except Exception as exc:  # noqa: BLE001 - 事件失败不回滚已完成测评，但错误须明示
         db.rollback()
         return {"emitted": False, "error": str(exc)}
+    if outcome is None:
+        return {"emitted": False, "reason": "definition_not_published"}
+    return {
+        "emitted": True,
+        "duplicate": bool(outcome.get("duplicate")),
+        "thread_id": getattr(outcome.get("run"), "thread_id", None),
+    }
 
 
 def submit_assignment(
@@ -1293,7 +1287,7 @@ def submit_assignment(
     db.commit()
     db.refresh(result)
     db.refresh(assignment)
-    workflow_event = _emit_employee_assessment_completed(db, assignment, result)
+    workflow_event = _emit_employee_assessment_completed(db, assignment, result, user)
     return {
         "assignment_id": assignment.id,
         "status": assignment.status,
@@ -1339,7 +1333,7 @@ def retry_grading(
     db.commit()
     db.refresh(result)
     workflow_event = (
-        _emit_employee_assessment_completed(db, assignment, result) if newly_completed else None
+        _emit_employee_assessment_completed(db, assignment, result, user) if newly_completed else None
     )
     return {"assignment_id": assignment.id, "status": assignment.status,
             "retried": retried, "failed_count": 0, "result": result,

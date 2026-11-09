@@ -10,27 +10,40 @@ from typing import Any, Callable
 
 
 def mark_status(session_factory, thread_id: str, status: str, *, error: str | None = None) -> bool:
-    """登记状态流转；行不存在时返回 False（登记缺失不应炸引擎，调用方记日志即可）。"""
+    """登记状态流转；行不存在时返回 False（登记缺失不应炸引擎，调用方记日志即可）。
+
+    受控转换：仅允许 running→(waiting|succeeded|failed)、waiting→(running|succeeded|
+    failed)、终态→cancelled 的方向被写入；cancelled 不再被任何结果覆盖——迟到的
+    引擎回执不得复活已取消的运行（T-D18 等待态取消语义）。违反方向时返回 False。
+    """
     from datetime import datetime as _dt
 
     from app.models import WorkflowEngineRun
     from app.core.workflows.engine.models import ENGINE_RUN_STATUSES
-    from sqlalchemy import update
+    from sqlalchemy import select
 
     if status not in ENGINE_RUN_STATUSES:
         raise ValueError(f"非法引擎状态 {status!r}，仅允许 {ENGINE_RUN_STATUSES}")
+    ALLOWED: dict[str, set[str]] = {
+        "running": {"waiting", "succeeded", "failed"},
+        "waiting": {"running", "succeeded", "failed"},
+        "succeeded": {"cancelled"},
+        "failed": {"cancelled"},
+        "cancelled": set(),
+    }
     with session_factory() as db:
-        result = db.execute(
-            update(WorkflowEngineRun)
-            .where(WorkflowEngineRun.thread_id == thread_id)
-            .values(
-                status=status,
-                error=error,
-                finished_at=_dt.now() if status in ("succeeded", "failed", "cancelled") else None,
-            )
-        )
+        row = db.execute(
+            select(WorkflowEngineRun).where(WorkflowEngineRun.thread_id == thread_id)
+        ).scalar_one_or_none()
+        if row is None:
+            return False
+        if status not in ALLOWED.get(row.status, set()):
+            return False
+        row.status = status
+        row.error = error
+        row.finished_at = _dt.now() if status in ("succeeded", "failed", "cancelled") else None
         db.commit()
-        return bool(result.rowcount)
+        return True
 
 
 def register_run(session_factory, *, graph_name: str, thread_id: str) -> None:

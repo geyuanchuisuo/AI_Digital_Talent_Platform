@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import unittest
 
 from c_harness import Harness
@@ -404,27 +405,46 @@ class AssessmentFlowTest(unittest.TestCase):
         )
         self.assertEqual(saved.status_code, 200, saved.text)
 
+    @contextlib.contextmanager
+    def _run_service_stub(self, fake):
+        """注入 D 工作流入口替身：本机未安装 langgraph，无法真实导入 run_service。"""
+        import sys
+        import types
+
+        import app.modules.workflows as workflows_pkg
+
+        module = types.ModuleType("app.modules.workflows.run_service")
+        module.start_employee_assessment_run = fake
+        missing = object()
+        previous_module = sys.modules.get(module.__name__, missing)
+        previous_attr = getattr(workflows_pkg, "run_service", missing)
+        sys.modules[module.__name__] = module
+        workflows_pkg.run_service = module
+        try:
+            yield
+        finally:
+            if previous_module is missing:
+                sys.modules.pop(module.__name__, None)
+            else:
+                sys.modules[module.__name__] = previous_module
+            if previous_attr is missing:
+                del workflows_pkg.run_service
+            else:
+                workflows_pkg.run_service = previous_attr
+
     def test_employee_assessment_completed_emits_workflow_event_once(self):
-        """员工测评首次完成发送一次业务事件；补评不重复发送（幂等由 D 侧保证）。"""
-        from unittest import mock
-
-        from app.modules.workflows import business_events
-
+        """员工测评首次完成触发一次工作流桥接；补评不重复触发（幂等由 D 侧保证）。"""
         calls: list[dict] = []
 
-        def fake_emit(db, **kwargs):
-            calls.append(kwargs)
-            return {
-                "skipped": True,
-                "reason": "definition_not_found",
-                "event_code": kwargs["event_code"],
-            }
+        def fake_run(db, *, assignment_id, result_id, actor):
+            calls.append({"assignment_id": assignment_id, "result_id": result_id, "actor_id": actor.id})
+            return {"run": None, "result": None, "duplicate": False}
 
         self._create_question("专业")
         assignment_id = self._assign(self._single_dimension_plan("employee"), self.employee)
         self._answer_single_choice(assignment_id, self.employee)
 
-        with mock.patch.object(business_events, "emit_business_event", fake_emit):
+        with self._run_service_stub(fake_run):
             submit = self.client.post(
                 f"/api/assessments/assignments/{assignment_id}/submit",
                 headers=self.harness.headers(self.employee),
@@ -438,27 +458,22 @@ class AssessmentFlowTest(unittest.TestCase):
             self.assertEqual(retry.status_code, 200, retry.text)
 
         self.assertEqual(len(calls), 1)
-        call = calls[0]
-        self.assertEqual(call["event_code"], "employee_assessment_completed")
-        self.assertEqual(call["source"], "C.assessments")
-        self.assertEqual(call["event_id"], f"assessment:{assignment_id}:v1")
-        self.assertEqual(call["params"]["employee_user_id"], self.employee.id)
-        self.assertEqual(call["params"]["result_version"], 1)
-        self.assertEqual(call["params"]["job_title"], "后端工程师")
+        self.assertEqual(calls[0]["assignment_id"], assignment_id)
+        self.assertEqual(calls[0]["actor_id"], self.employee.id)
+        self.assertIsNotNone(calls[0]["result_id"])
 
     def test_recruitment_assessment_completed_does_not_emit_workflow_event(self):
         """招聘测评完成不进入员工成长流程。"""
-        from unittest import mock
+        calls: list[dict] = []
 
-        from app.modules.workflows import business_events
+        def fake_run(db, *, assignment_id, result_id, actor):
+            calls.append({"assignment_id": assignment_id})
 
         self._create_question("专业")
         assignment_id = self._assign(self._single_dimension_plan("recruitment"), self.candidate)
         self._answer_single_choice(assignment_id, self.candidate)
 
-        with mock.patch.object(
-            business_events, "emit_business_event", autospec=True
-        ) as emit_spy:
+        with self._run_service_stub(fake_run):
             submit = self.client.post(
                 f"/api/assessments/assignments/{assignment_id}/submit",
                 headers=self.harness.headers(self.candidate),
@@ -466,7 +481,7 @@ class AssessmentFlowTest(unittest.TestCase):
             self.assertEqual(submit.status_code, 200, submit.text)
             self.assertEqual(submit.json()["data"]["status"], "completed")
 
-        emit_spy.assert_not_called()
+        self.assertEqual(calls, [])
 
 
 if __name__ == "__main__":

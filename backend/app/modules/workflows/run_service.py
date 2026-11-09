@@ -22,10 +22,10 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import BizError
 from app.core.workflows.engine.runner import EngineRunResult, WorkflowEngine
-from app.models import WorkflowEngineRun
+from app.models import AssessmentAssignment, AssessmentResult, ParsedResume, ParseTask, ResumeFile, WorkflowEngineRun
 from app.core.workflows.engine.saver import make_saver
 from app.modules.workflows import service
-from app.modules.workflows.models import WorkflowRun, WorkflowRunStep
+from app.modules.workflows.models import WorkflowDefinition, WorkflowDefinitionVersion, WorkflowRun, WorkflowRunStep
 from app.modules.workflows.nodes.graph_builder import build_version_graph, graph_name_for
 from app.modules.workflows.nodes.runtime import NodeContext
 
@@ -121,6 +121,56 @@ def _waiting_node_type(db: Session, run: WorkflowRun, node_key: str) -> str:
     return node.node_type
 
 
+# ---- 受控触发绑定 ----
+
+def resolve_event_definition(db: Session, *, event_code: str) -> int | None:
+    """从唯一发布版本解析业务事件绑定；未配置时不自动触发。"""
+    if event_code not in ("employee_assessment_completed", "resume_profiled"):
+        raise BizError(422, "业务事件未登记")
+    definitions = list(db.scalars(
+        select(WorkflowDefinition)
+        .join(WorkflowDefinitionVersion, WorkflowDefinitionVersion.definition_id == WorkflowDefinition.id)
+        .where(
+            WorkflowDefinition.code == event_code,
+            WorkflowDefinitionVersion.status == "published",
+        )
+        .limit(2)
+    ))
+    if len(definitions) > 1:
+        raise BizError(409, "同一业务事件存在多个发布版本，请先收敛绑定")
+    return definitions[0].id if definitions else None
+
+
+def start_parse_profiled_run(
+    db: Session, *, resume_file_id: int, actor,
+) -> dict[str, Any] | None:
+    """仅由上传同一简历的管理账号触发解析成功流程；未绑定发布定义时跳过。"""
+    service.require_management(actor)
+    task = db.execute(
+        select(ParseTask).where(ParseTask.resume_file_id == resume_file_id)
+    ).scalar_one_or_none()
+    parsed = db.get(ParsedResume, resume_file_id)
+    file_row = db.get(ResumeFile, resume_file_id)
+    if task is None or parsed is None or file_row is None:
+        raise BizError(404, "解析结果不存在")
+    if task.status != "success" or parsed.talent_profile_id is None:
+        raise BizError(422, "解析尚未成功并归属画像，不触发流程")
+    if file_row.uploaded_by != actor.id:
+        raise BizError(403, "仅该简历的上传人可触发后续匹配流程")
+    definition_id = resolve_event_definition(db, event_code="resume_profiled")
+    if definition_id is None:
+        return None
+    return start_event_run(
+        db, definition_id=definition_id, event_type="resume.profiled",
+        event_id=f"{resume_file_id}:profiled",
+        params={
+            "resume_file_id": resume_file_id,
+            "talent_profile_id": parsed.talent_profile_id,
+        },
+        actor=actor,
+    )
+
+
 # ---- 手动触发 ----
 
 def start_manual_run(
@@ -204,14 +254,35 @@ def start_event_run(
     )
 
 
-def start_event_run_for_service(
-    db: Session, *, definition_id: int, event_type: str, event_id: str,
-    params: dict[str, Any], source: str,
-) -> dict[str, Any]:
-    """内部生产方入口（白名单来源，无真管理账号）：审计 created_by 为空，来源由业务事件模块校验。"""
+def start_employee_assessment_run(
+    db: Session, *, assignment_id: int, result_id: int, actor,
+) -> dict[str, Any] | None:
+    """测评本人或该测评分配人触发已完成的员工测评；未配置发布流程则跳过。
+
+    员工交卷时由本人触发，因此不套管理侧门禁，只校验触发人与该测评的关系；
+    审计 `created_by` 记实际触发账号，不借用全权管理员身份。
+    """
+    assignment = db.get(AssessmentAssignment, assignment_id)
+    result = db.get(AssessmentResult, result_id)
+    if assignment is None or result is None or result.assignment_id != assignment_id:
+        raise BizError(404, "员工测评结果不存在")
+    if assignment.purpose != "employee" or assignment.status != "completed":
+        raise BizError(422, "仅已完成的员工测评可触发培训流程")
+    actor_id = getattr(actor, "id", None)
+    if actor_id is None or actor_id not in {assignment.user_id, assignment.created_by}:
+        raise BizError(403, "仅测评本人或分配人可触发该员工的培训流程")
+    definition_id = resolve_event_definition(db, event_code="employee_assessment_completed")
+    if definition_id is None:
+        return None
     return _start_event_run(
-        db, definition_id=definition_id, event_type=event_type, event_id=event_id,
-        params=params, created_by=None,
+        db, definition_id=definition_id, event_type="assessment.completed",
+        event_id=f"{assignment.id}:v{result.version}",
+        params={
+            "assignment_id": assignment.id,
+            "result_id": result.id,
+            "employee_user_id": assignment.user_id,
+        },
+        created_by=actor_id,
     )
 
 
