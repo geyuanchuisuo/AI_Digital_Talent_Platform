@@ -154,12 +154,11 @@ def start_manual_run(
     return {"run": run, "result": result}
 
 
-def start_event_run(
+def _start_event_run(
     db: Session, *, definition_id: int, event_type: str, event_id: str,
-    params: dict[str, Any], actor,
+    params: dict[str, Any], created_by: int | None,
 ) -> dict[str, Any]:
-    """内部生产方调用：确定性 thread_id 让重复事件只执行一次。"""
-    service.require_management(actor)
+    """事件运行核心：不做管理侧门禁，由调用入口自行校验身份。"""
     if not event_type or not event_id or len(event_type) > 64 or len(event_id) > 191:
         raise BizError(422, "事件类型与事件 ID 必填，且长度不得超过限制")
     if not isinstance(params, dict):
@@ -172,7 +171,7 @@ def start_event_run(
     try:
         run = service.start_run(
             db, definition_id=definition_id, thread_id=thread_id, params=params,
-            trigger_type="event", trigger_ref=event_id, created_by=actor.id,
+            trigger_type="event", trigger_ref=event_id, created_by=created_by,
         )
     except BizError as exc:
         if exc.code != 409:
@@ -191,6 +190,29 @@ def start_event_run(
         waiting_node = str(result.interrupt.get("node_key") or "") or None
     _mirror(db, run, result, waiting_node=waiting_node)
     return {"run": run, "result": result, "duplicate": False}
+
+
+def start_event_run(
+    db: Session, *, definition_id: int, event_type: str, event_id: str,
+    params: dict[str, Any], actor,
+) -> dict[str, Any]:
+    """管理侧入口：手动重放/联调用，仍校验管理侧身份。"""
+    service.require_management(actor)
+    return _start_event_run(
+        db, definition_id=definition_id, event_type=event_type, event_id=event_id,
+        params=params, created_by=getattr(actor, "id", None),
+    )
+
+
+def start_event_run_for_service(
+    db: Session, *, definition_id: int, event_type: str, event_id: str,
+    params: dict[str, Any], source: str,
+) -> dict[str, Any]:
+    """内部生产方入口（白名单来源，无真管理账号）：审计 created_by 为空，来源由业务事件模块校验。"""
+    return _start_event_run(
+        db, definition_id=definition_id, event_type=event_type, event_id=event_id,
+        params=params, created_by=None,
+    )
 
 
 # ---- 审批恢复 ----

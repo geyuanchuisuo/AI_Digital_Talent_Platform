@@ -372,6 +372,102 @@ class AssessmentFlowTest(unittest.TestCase):
         finally:
             service.default_grade_short_answer = original
 
+    def _single_dimension_plan(self, purpose: str) -> int:
+        response = self._post(
+            "/api/assessments/plans",
+            {
+                "purpose": purpose,
+                "job_id": 1,
+                "job_title": "后端工程师",
+                "dimensions": [{"name": "专业", "type": "professional", "weight": 100}],
+                "total_question_count": 1,
+                "pass_score": 60,
+                "mode": "fixed",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        plan_id = response.json()["data"]["id"]
+        published = self._post(f"/api/assessments/plans/{plan_id}/publish", {})
+        self.assertEqual(published.status_code, 200, published.text)
+        return plan_id
+
+    def _answer_single_choice(self, assignment_id: int, user) -> None:
+        detail = self.client.get(
+            f"/api/assessments/assignments/{assignment_id}",
+            headers=self.harness.headers(user),
+        )
+        question_id = detail.json()["data"]["questions"][0]["question_id"]
+        saved = self.client.put(
+            f"/api/assessments/assignments/{assignment_id}/answers/{question_id}",
+            json={"selected_option": "A"},
+            headers=self.harness.headers(user),
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+
+    def test_employee_assessment_completed_emits_workflow_event_once(self):
+        """员工测评首次完成发送一次业务事件；补评不重复发送（幂等由 D 侧保证）。"""
+        from unittest import mock
+
+        from app.modules.workflows import business_events
+
+        calls: list[dict] = []
+
+        def fake_emit(db, **kwargs):
+            calls.append(kwargs)
+            return {
+                "skipped": True,
+                "reason": "definition_not_found",
+                "event_code": kwargs["event_code"],
+            }
+
+        self._create_question("专业")
+        assignment_id = self._assign(self._single_dimension_plan("employee"), self.employee)
+        self._answer_single_choice(assignment_id, self.employee)
+
+        with mock.patch.object(business_events, "emit_business_event", fake_emit):
+            submit = self.client.post(
+                f"/api/assessments/assignments/{assignment_id}/submit",
+                headers=self.harness.headers(self.employee),
+            )
+            self.assertEqual(submit.status_code, 200, submit.text)
+            self.assertEqual(submit.json()["data"]["status"], "completed")
+            retry = self.client.post(
+                f"/api/assessments/assignments/{assignment_id}/retry-grading",
+                headers=self.harness.headers(self.employee),
+            )
+            self.assertEqual(retry.status_code, 200, retry.text)
+
+        self.assertEqual(len(calls), 1)
+        call = calls[0]
+        self.assertEqual(call["event_code"], "employee_assessment_completed")
+        self.assertEqual(call["source"], "C.assessments")
+        self.assertEqual(call["event_id"], f"assessment:{assignment_id}:v1")
+        self.assertEqual(call["params"]["employee_user_id"], self.employee.id)
+        self.assertEqual(call["params"]["result_version"], 1)
+        self.assertEqual(call["params"]["job_title"], "后端工程师")
+
+    def test_recruitment_assessment_completed_does_not_emit_workflow_event(self):
+        """招聘测评完成不进入员工成长流程。"""
+        from unittest import mock
+
+        from app.modules.workflows import business_events
+
+        self._create_question("专业")
+        assignment_id = self._assign(self._single_dimension_plan("recruitment"), self.candidate)
+        self._answer_single_choice(assignment_id, self.candidate)
+
+        with mock.patch.object(
+            business_events, "emit_business_event", autospec=True
+        ) as emit_spy:
+            submit = self.client.post(
+                f"/api/assessments/assignments/{assignment_id}/submit",
+                headers=self.harness.headers(self.candidate),
+            )
+            self.assertEqual(submit.status_code, 200, submit.text)
+            self.assertEqual(submit.json()["data"]["status"], "completed")
+
+        emit_spy.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
