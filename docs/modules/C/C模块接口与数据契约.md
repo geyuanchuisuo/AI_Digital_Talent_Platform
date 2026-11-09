@@ -103,6 +103,8 @@ AI 面试间：`ai_interview_sessions`、`ai_interview_questions`、`ai_intervie
 - `POST /enrollments`、`GET /enrollments`、`POST /enrollments/{id}/decide`（员工报名必修/选修，管理员审批/候补，24h 未确认超时释放）
 - `POST /learning-evidence`、`GET /learning-records/{id}/evidence`（员工提交学习证据：视频心跳/测验/出勤等；列表本人或管理员可见）
 - `POST /learning-records/{id}/confirm-completion`（管理员依据有效证据认定正式完成，无证据返回 400）
+- `POST /plan-items/{id}/extension`（管理员延期必修期限，`new_due_date` + `reason` 必填；留 `training_due_extended` 事件并通知）
+- `POST /reminders/scan`（管理员/外部调度：按 `today`、`days_ahead` 扫描到期与逾期，经 D 通知中心投递，幂等）
 
 AI 面试间 `/api/ai-interviews`：
 
@@ -118,6 +120,7 @@ AI 面试间 `/api/ai-interviews`：
 - `POST /reviews/{id}/disputes`、`POST /disputes/{id}/respond`（员工异议、HR 回复）
 - `PUT /reviews/{id}/idp`（个人发展计划，review 唯一）
 - `GET /summary`（管理员部门匿名汇总；单格 <5 条隐藏到 `_under_threshold`）
+- `GET /summary/export`（管理员导出匿名汇总 CSV，按 `cycle_name` 可选过滤；写 `summary_exported` 审计事件，文件不含个人身份）
 - 可见性：员工本人查看不返回 `grid_cell` 与内部评分；非管理员查看汇总 403。
 
 ## 5. 后端执行与依赖边界
@@ -148,11 +151,13 @@ AI 面试间 `/api/ai-interviews`：
 6. 改进说明：管理员依据汇总发布统一 `feedback_note`，不改课程版本；员工在本人评价状态中可见。
 7. 角色边界：一期无讲师/部门经理角色，匿名汇总暂由管理员持有；后续开放需 A 提供角色与授权映射，C 不放宽现有权限。
 
-## 8. 本轮实现与验证状态（2026-11-07）
+## 8. 本轮实现与验证状态（2026-11-09 更新）
 
-- 已实现：`backend/app/modules/assessments`（模型/自适应策略与选题/评分/服务/路由/registry/模型出题）、`interviews`（人工面试 + AI 面试间）、`training`（课程/计划/评价 + 报名审批/候补 + 学习证据）、`inventory`（F10 九宫格/人才池/异议/IDP）四域与 32 张表；前端 `frontend/src/app/(main)/{assessments,interviews,target,training,inventory}` 页面、类型与接口封装，含自适应逐题答题、能力雷达、员工评价、管理员期次/反馈汇总、`/inventory`（盘点/人才池/汇总/异议/IDP）、`/interviews/ai`（会话/题目/逐题作答）、`/training/enrollments`（报名审批/学习证据）。
-- application_id 契约（2026-11-07 对接 A 的 M3）：`interview_rounds.application_id` 与 `ai_interview_sessions.application_id` 已对齐 A 的 `applications.id`（`PK_TYPE`，MySQL 下 BIGINT UNSIGNED）并加数据库级外键（RESTRICT，申请不物理删除），迁移 `C_0004_application_fk`（down_revision `A_0007_scope_grants`）。语义：`applications` 为同人多岗位独立申请，C 侧仅引用其主键，不复制其状态机。
-- 已验证：`$env:PYTHONPATH="backend"; python -m unittest discover -s tests/C -p "test_*.py" -v` 运行 49 项全部通过（SQLite 内存库 + FastAPI TestClient + 注入式评分/出题/草稿/主题/评委替身，覆盖固定组卷、自适应策略校验、覆盖优先与难度升降、任务种子分散与不重复、题量/维度结束规则、发布题库快照与不足拒绝、逐题幂等出题、单选即时评分、选题留痕权限、能力雷达/评级、模型出题 503 不写入、交卷幂等、评分失败重试、结果版本/公开、答案开放、面试可见性裁剪、培训分配/修订/自报/成长事件、评价资格/7 天窗口/跨期合并/撤回/5 份门槛/主题支持、培训报名审批/24h 超时、学习证据与正式完成门槛、盘点九宫格计算与可见性/异议/IDP/人才池、AI 面试间会话/题目/作答/评分/重试/总分/列表可见性）。
+- 已实现：`backend/app/modules/assessments`（模型/自适应策略与选题/评分/服务/路由/registry/模型出题）、`interviews`（人工面试 + AI 面试间）、`training`（课程/计划/评价 + 报名审批/候补 + 学习证据 + 到期/逾期/延期）、`inventory`（F10 九宫格/人才池/异议/IDP/匿名汇总/导出审计）四域与 32 张表；前端 `frontend/src/app/(main)/{assessments,interviews,target,training,inventory}` 页面、类型与接口封装，含自适应逐题答题、能力雷达、员工评价、管理员期次/反馈汇总、`/inventory`（盘点/人才池/汇总/异议/IDP）、`/interviews/ai`（会话/题目/逐题作答）、`/training/enrollments`（报名审批/学习证据）、培训计划到期日录入与管理员延期。
+- 时间列：C 域 32 张表统一使用公共 `CrossDbUpdatedAtMixin`（2026-11-09 收敛，删除自建 `CTimestampMixin`；列结构与 DDL 等价，无需迁移）。
+- application_id 契约（2026-11-07 对接 A 的 M3）：`interview_rounds.application_id` 与 `ai_interview_sessions.application_id` 已对齐 A 的 `applications.id`（`PK_TYPE`，MySQL 下 BIGINT UNSIGNED）并加数据库级外键（RESTRICT，申请不物理删除），迁移 `C_0004_application_fk`。语义：`applications` 为同人多岗位独立申请，C 侧仅引用其主键，不复制其状态机。**2026-11-09 改挂**：`C_0004` 的 `down_revision` 由 `A_0007_scope_grants` 改为 `B_0002_merge_workflow_review`（master 合入 A_0008/B_0001/B_0002/D_0001~D_0009 后原挂点会造成双 head；迁移从未在任何库执行，改挂安全）。新增 `C_0005_plan_item_due_date`（`training_plan_items.due_date DATE NULL`），当前单头 `C_0005_plan_item_due_date`。
+- 通知接入（2026-11-09，只读调用 D 通知中心）：`course.assigned`（计划指派）、`course.enrollment_reviewed`（报名审批）、`training.due_reminder` / `training.overdue`（到期/逾期扫描）、`training.extension_decided`（延期）五类事件按 D 契约 ref 与幂等键投递；`course.waitlist_promoted` 因 D 契约 ref 为 `training_session` 而 C 无期次实体，暂未接（见 D 请求）。
+- 已验证：`$env:PYTHONPATH="backend"; python -m unittest discover -s tests/C -p "test_*.py"` 运行 **55 项全部通过**（SQLite 内存库 + FastAPI TestClient + 注入式评分/出题/草稿/主题/评委替身；在原 49 项基础上新增：课程指派/审批通知、延期必填原因与通知、到期+逾期扫描幂等、扫描需管理员、汇总导出与审计事件）。
 - 已验证：`npm run typecheck` 与 `npm run build`（frontend）均通过；构建路由清单含 `/inventory`、`/interviews/ai`、`/training/enrollments`；application_id 外键的 MySQL DDL 编译验证（`BIGINT UNSIGNED` + `REFERENCES applications(id)`，类型与 A 的 PK_TYPE 匹配）。
-- 未验证：MySQL/Alembic 实际迁移（C_0004 依赖 A 的迁移链，本地无 MySQL 环境）、真实 LLM 评分/出题/主题归纳/AI 面试评分、真实 JWT 与账号权限、真实浏览器页面（新增三页与自适应答题、雷达图未实机查看）、A 的 `AppShell` 菜单集成。上述未验证项不得表述为验收通过。
-- 接入方式：`main.py` 已循环 `from app.modules.assessments.registry import ALL_ROUTERS` 注册全部 C 路由；`app/models/__init__.py` 已由 A 整合为 51 表（含 C 全部 32 表）；新增前端菜单入口待 A 在 `AppShell` 添加，见 `docs/requests/C/20261107-A-一期扩表集成与申请契约.md` 第 6 项。
+- 未验证：MySQL/Alembic 实际迁移（`C_0004`/`C_0005` 依赖 A 的集成链，本地无 MySQL）、真实 LLM 评分/出题/主题归纳/AI 面试评分、真实 JWT 与账号权限、真实浏览器页面、A 的 `AppShell` 菜单集成（新增三页仍缺入口）、通知的真实投递与每日定时触发。上述未验证项不得表述为验收通过。
+- 接入方式：`main.py` 已循环 `from app.modules.assessments.registry import ALL_ROUTERS` 注册全部 C 路由；`app/models/__init__.py` 已由 A 整合为 75 表（含 C 全部 32 表）；新增前端菜单入口待 A 在 `AppShell` 添加，见 `docs/requests/C/20261107-A-一期扩表集成与申请契约.md` 第 6 项。

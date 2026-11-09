@@ -75,6 +75,35 @@ class InventoryApiTest(unittest.TestCase):
         d = self.h.client.post(f"/api/inventory/pools/{pid}/decide", json={"status": "approved"}, headers=Harness.headers(self.admin))
         self.assertEqual(d.json()["data"]["status"], "approved")
 
+    def test_summary_export_and_audit(self):
+        rid = self._post(
+            "/api/inventory/reviews",
+            {"employee_user_id": self.emp.id, "cycle_name": "2026H1",
+             "performance_score": 5, "potential_hr_score": 5},
+            self.admin,
+        ).json()["data"]["id"]
+        self.h.client.post(f"/api/inventory/reviews/{rid}/confirm", headers=Harness.headers(self.admin))
+        r = self.h.client.get(
+            "/api/inventory/summary/export?cycle_name=2026H1", headers=Harness.headers(self.admin))
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("text/csv", r.headers["content-type"])
+        self.assertIn("total,,1", r.text)
+        self.assertNotIn(str(self.emp.id), r.text)  # 不含个人身份
+        # 员工不可导出
+        r2 = self.h.client.get("/api/inventory/summary/export", headers=Harness.headers(self.emp))
+        self.assertEqual(r2.status_code, 403)
+        # 导出写了审计事件
+        from sqlalchemy import select
+        from app.modules.inventory.models import InventoryEvent
+        db = self.h.session()
+        try:
+            events = list(db.scalars(select(InventoryEvent).where(
+                InventoryEvent.event_type == "summary_exported")))
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0].payload_json["cycle_name"], "2026H1")
+        finally:
+            db.close()
+
 
 class TrainingEnrollmentTest(unittest.TestCase):
     def setUp(self) -> None:

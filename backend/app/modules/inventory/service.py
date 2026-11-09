@@ -195,3 +195,32 @@ def department_summary(db: Session, user) -> dict[str, Any]:
         select(InventoryReview).where(InventoryReview.status == "confirmed")
     ).scalars().all()
     return visible_summary([_review_dict(r) for r in rows], viewer_role=user.role)
+
+
+def export_summary(db: Session, *, user, cycle_name: str | None = None) -> tuple[str, dict[str, Any]]:
+    """导出匿名汇总 CSV 并写审计事件（F10：导出审计）。
+
+    复用 `visible_summary` 的门槛裁剪：<5 的档位只给合并计数，导出文件同样不含个人身份。
+    """
+    _require_admin(user)
+    stmt = select(InventoryReview).where(InventoryReview.status == "confirmed")
+    if cycle_name:
+        stmt = stmt.where(InventoryReview.cycle_name == cycle_name)
+    rows = db.execute(stmt).scalars().all()
+    summary = visible_summary([_review_dict(r) for r in rows], viewer_role=user.role)
+    lines = ["grid_cell,label,count"]
+    for cell, count in summary["cells"].items():
+        label = summary["labels"].get(cell) or "低于门槛合并"
+        lines.append(f"{cell},{label},{count}")
+    lines.append(f"total,,{summary['total']}")
+    text = "\n".join(lines) + "\n"
+    _event(
+        db,
+        review_id=None,
+        event_type="summary_exported",
+        operator_id=user.id,
+        note=cycle_name,
+        payload={"cycle_name": cycle_name, "cells": summary["cells"], "total": summary["total"]},
+    )
+    db.commit()
+    return text, summary
