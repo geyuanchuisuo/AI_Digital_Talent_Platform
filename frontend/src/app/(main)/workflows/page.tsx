@@ -30,12 +30,19 @@ import {
   createDraftVersion,
   deactivateVersion,
   fetchDefinitions,
+  fetchRunDetail,
+  fetchRuns,
   fetchVersionDetail,
   fetchVersions,
+  approveRun,
+  cancelRun,
+  startRun,
   reviewVersion,
   rollbackDefinition,
   submitVersion,
   type VersionDetail,
+  type WorkflowRunDetail,
+  type WorkflowRunSummary,
   type WorkflowDefinition,
   type WorkflowVersion,
   type WorkflowVersionStatus,
@@ -59,6 +66,9 @@ export default function WorkflowsPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [versions, setVersions] = useState<WorkflowVersion[]>([]);
   const [detail, setDetail] = useState<VersionDetail | null>(null);
+  const [runs, setRuns] = useState<WorkflowRunSummary[]>([]);
+  const [runDetail, setRunDetail] = useState<WorkflowRunDetail | null>(null);
+  const [runParams, setRunParams] = useState('{}');
   const [defModalOpen, setDefModalOpen] = useState(false);
   const [draftModalOpen, setDraftModalOpen] = useState(false);
   const [draftText, setDraftText] = useState('{\n  "nodes": [],\n  "edges": []\n}');
@@ -93,6 +103,54 @@ export default function WorkflowsPage() {
   const reloadVersions = useCallback(() => {
     if (selectedId != null) void loadVersions(selectedId);
   }, [selectedId, loadVersions]);
+
+  const loadRuns = useCallback(async () => {
+    try {
+      setRuns(await fetchRuns(selectedId ?? undefined));
+    } catch (e) {
+      message.error(getErrorMessage(e));
+    }
+  }, [selectedId]);
+
+  useEffect(() => {
+    void loadRuns();
+  }, [loadRuns]);
+
+  const openRunDetail = async (threadId: string) => {
+    try {
+      setRunDetail(await fetchRunDetail(threadId));
+    } catch (e) {
+      message.error(getErrorMessage(e));
+    }
+  };
+
+  const doStartRun = async () => {
+    if (selectedId == null) return;
+    try {
+      const params: unknown = JSON.parse(runParams);
+      if (params === null || typeof params !== 'object' || Array.isArray(params)) {
+        message.error('触发参数必须为 JSON 对象');
+        return;
+      }
+      await startRun(selectedId, params as Record<string, unknown>);
+      message.success('已发起工作流运行');
+      void loadRuns();
+    } catch (e) {
+      message.error(e instanceof SyntaxError ? 'JSON 解析失败' : getErrorMessage(e));
+    }
+  };
+
+  const doRunAction = async (run: WorkflowRunSummary, action: 'approve' | 'reject' | 'cancel') => {
+    try {
+      if (action === 'cancel') await cancelRun(run.thread_id);
+      else await approveRun(run.thread_id, action === 'approve', '');
+      message.success(action === 'cancel' ? '等待态已取消' : '审批已提交');
+      void loadRuns();
+      if (runDetail?.run.thread_id === run.thread_id) void openRunDetail(run.thread_id);
+    } catch (e) {
+      message.error(getErrorMessage(e));
+    }
+  };
 
   const openDetail = async (v: WorkflowVersion) => {
     try {
@@ -306,6 +364,75 @@ export default function WorkflowsPage() {
           />
         )}
       </Card>
+
+      <Card title="运行记录" extra={<Button icon={<ReloadOutlined />} onClick={() => void loadRuns()}>刷新</Button>}>
+        <Space style={{ marginBottom: 12 }} wrap>
+          <Input.TextArea
+            rows={2}
+            value={runParams}
+            onChange={(e) => setRunParams(e.target.value)}
+            placeholder="手动触发参数（JSON 对象）"
+            style={{ width: 280, fontFamily: 'monospace' }}
+          />
+          <Button type="primary" disabled={selectedId == null} onClick={() => void doStartRun()}>
+            手动触发所选流程
+          </Button>
+        </Space>
+        <Table<WorkflowRunSummary>
+          rowKey="id"
+          size="small"
+          dataSource={runs}
+          pagination={{ pageSize: 10 }}
+          columns={[
+            { title: 'ID', dataIndex: 'id', width: 70 },
+            { title: '定义 ID', dataIndex: 'definition_id', width: 90 },
+            { title: '版本 ID', dataIndex: 'version_id', width: 90 },
+            { title: '触发', dataIndex: 'trigger_type', width: 80 },
+            { title: '状态', dataIndex: 'status', width: 90, render: (s: string) => <Tag>{s}</Tag> },
+            { title: '错误', dataIndex: 'error', ellipsis: true },
+            { title: '操作', render: (_: unknown, run: WorkflowRunSummary) => (
+              <Space size={4} wrap>
+                <Button size="small" onClick={() => void openRunDetail(run.thread_id)}>详情</Button>
+                {run.status === 'waiting' && (
+                  <>
+                    <Button size="small" type="primary" onClick={() => void doRunAction(run, 'approve')}>同意</Button>
+                    <Button size="small" onClick={() => void doRunAction(run, 'reject')}>驳回</Button>
+                    <Button size="small" danger onClick={() => void doRunAction(run, 'cancel')}>取消等待</Button>
+                  </>
+                )}
+              </Space>
+            ) },
+          ]}
+        />
+      </Card>
+
+      <Modal
+        title={runDetail ? `运行详情 · #${runDetail.run.id}` : '运行详情'}
+        open={runDetail != null}
+        footer={null}
+        onCancel={() => setRunDetail(null)}
+        width={760}
+      >
+        {runDetail && (
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <Text>状态：{runDetail.run.status} · 触发：{runDetail.run.trigger_type}</Text>
+            {runDetail.run.error && <Text type="danger">错误：{runDetail.run.error}</Text>}
+            <Table
+              rowKey={(step) => `${step.node_key}-${step.attempt}`}
+              size="small"
+              pagination={false}
+              dataSource={runDetail.steps}
+              columns={[
+                { title: '节点', dataIndex: 'node_key' },
+                { title: '类型', dataIndex: 'node_type' },
+                { title: '尝试', dataIndex: 'attempt' },
+                { title: '状态', dataIndex: 'status' },
+                { title: '错误', dataIndex: 'error' },
+              ]}
+            />
+          </Space>
+        )}
+      </Modal>
 
       <Modal
         title="新建流程定义"
