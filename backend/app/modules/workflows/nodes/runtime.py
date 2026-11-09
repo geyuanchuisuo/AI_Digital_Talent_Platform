@@ -50,11 +50,7 @@ def resolve_ref(state: RunState, ref: dict[str, Any] | None) -> Any:
     if kind not in REF_KINDS:
         raise BizError(422, f"输入引用 kind {kind!r} 不在白名单 {REF_KINDS}")
     if kind == "trigger":
-        payload = state.get("trigger") or {}
-        key = str(ref.get("field") or "")
-        if key not in payload:
-            raise BizError(422, f"触发负载缺少字段 {key!r}")
-        return payload[key]
+        return state.get("trigger") or {}
     if kind == "form_field":
         form = state.get("form") or {}
         key = str(ref.get("field") or "")
@@ -62,7 +58,7 @@ def resolve_ref(state: RunState, ref: dict[str, Any] | None) -> Any:
             raise BizError(422, f"表单字段缺少 {key!r}")
         return form[key]
     if kind == "node_output":
-        node_key = str(ref.get("node") or "")
+        node_key = str(ref.get("node_key") or "")
         field_name = str(ref.get("field") or "")
         upstream = (state.get("vars") or {}).get(node_key)
         if not isinstance(upstream, dict) or field_name not in upstream:
@@ -113,8 +109,8 @@ def make_node_executor(
                 db, ctx.run_id, node_key=node_key, node_type=node_type,
                 status="running", output={"node_name": node_name},
             )
-        inputs = resolve_inputs(node, state)
         try:
+            inputs = resolve_inputs(node, state)
             outputs = executor(ctx, node, inputs) or {}
         except Exception as exc:  # noqa: BLE001 - 失败如实落步骤后原样上抛
             # BizError 带白名单状态码（如 403 越权）——码随文本落步骤，审计可辨
