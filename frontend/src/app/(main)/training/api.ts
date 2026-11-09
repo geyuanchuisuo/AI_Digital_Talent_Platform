@@ -197,6 +197,11 @@ export function fetchEnrollments(params?: { course_id?: number }) {
   return get<TrainingEnrollment[]>('/training/enrollments', { params });
 }
 
+/** 释放超时未决定的报名占位并递补候补（管理员） */
+export function releaseExpiredEnrollments() {
+  return post<{ scanned: number; released: number; promoted: number }>('/training/enrollments/release-expired');
+}
+
 /** 有效学习证据与正式完成认定 */
 export function submitLearningEvidence(payload: {
   learning_record_id: number;

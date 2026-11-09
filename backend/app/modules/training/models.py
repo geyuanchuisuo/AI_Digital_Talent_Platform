@@ -21,6 +21,8 @@ class TrainingCourse(PKMixin, CrossDbUpdatedAtMixin, Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     material_url: Mapped[str] = mapped_column(String(500), nullable=False)
     dimension_names_json: Mapped[list] = mapped_column(JSONList, nullable=False, default=list)
+    # 名额上限：NULL 表示不限；报名 pending 占位、approved 占用，超出即转候补
+    capacity: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="active", server_default=str_default("active")
     )

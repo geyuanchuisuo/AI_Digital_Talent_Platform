@@ -50,6 +50,7 @@ def _course_out(row: TrainingCourse) -> dict[str, Any]:
         "description": row.description,
         "material_url": row.material_url,
         "dimension_names": list(row.dimension_names_json or []),
+        "capacity": row.capacity,
         "status": row.status,
         "version": row.version,
         "feedback_note": row.feedback_note,
@@ -351,6 +352,14 @@ def get_enrollments(
          "expires_at": r.expires_at.isoformat() if r.expires_at else None, "note": r.note}
         for r in rows
     ])
+
+
+@router.post("/enrollments/release-expired", summary="释放超时未决定的报名占位并递补候补（管理员）")
+def post_enrollment_release_expired(
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    return ok(service.release_expired_enrollments(db, actor=user))
 
 
 # ---------------------------------------------------------------- 防挂机/有效学习证据

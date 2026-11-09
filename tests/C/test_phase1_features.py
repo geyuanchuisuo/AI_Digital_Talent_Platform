@@ -129,6 +129,69 @@ class TrainingEnrollmentTest(unittest.TestCase):
             headers=Harness.headers(self.admin))
         self.assertEqual(d.json()["data"]["status"], "approved")
 
+    def test_capacity_waitlist_and_promotion(self):
+        course = self.h.client.post(
+            "/api/training/courses",
+            json={"title": "限名额", "description": "x", "material_url": "http://x", "capacity": 1},
+            headers=Harness.headers(self.admin)).json()["data"]
+        self.assertEqual(course["capacity"], 1)
+        emp2 = self.h.create_user("e2", role="employee")
+        first = self.h.client.post(
+            "/api/training/enrollments", json={"course_id": course["id"]},
+            headers=Harness.headers(self.emp)).json()["data"]
+        self.assertEqual(first["status"], "pending")
+        second = self.h.client.post(
+            "/api/training/enrollments", json={"course_id": course["id"]},
+            headers=Harness.headers(emp2)).json()["data"]
+        self.assertEqual(second["status"], "waitlisted")
+        self.h.client.post(
+            f"/api/training/enrollments/{first['id']}/decide", json={"status": "approved"},
+            headers=Harness.headers(self.admin))
+        # 通过后取消即释放名额，最早候补递补为 pending 占位
+        cancelled = self.h.client.post(
+            f"/api/training/enrollments/{first['id']}/decide", json={"status": "cancelled"},
+            headers=Harness.headers(self.admin))
+        self.assertEqual(cancelled.json()["data"]["status"], "cancelled")
+        rows = self.h.client.get("/api/training/enrollments", headers=Harness.headers(self.admin)).json()["data"]
+        statuses = {row["id"]: row["status"] for row in rows}
+        self.assertEqual(statuses[second["id"]], "pending")
+        # 候补通过时若名额已满则拒绝
+        self.h.client.post(
+            f"/api/training/enrollments/{second['id']}/decide", json={"status": "approved"},
+            headers=Harness.headers(self.admin))
+        third_emp = self.h.create_user("e3", role="employee")
+        third = self.h.client.post(
+            "/api/training/enrollments", json={"course_id": course["id"]},
+            headers=Harness.headers(third_emp)).json()["data"]
+        self.assertEqual(third["status"], "waitlisted")
+        blocked = self.h.client.post(
+            f"/api/training/enrollments/{third['id']}/decide", json={"status": "approved"},
+            headers=Harness.headers(self.admin))
+        self.assertEqual(blocked.status_code, 400)
+
+    def test_release_expired_and_requires_admin(self):
+        from datetime import datetime, timedelta
+
+        from app.modules.training.models import TrainingEnrollment
+        eid = self.h.client.post(
+            "/api/training/enrollments", json={"course_id": self.course},
+            headers=Harness.headers(self.emp)).json()["data"]["id"]
+        db = self.h.session()
+        try:
+            row = db.get(TrainingEnrollment, eid)
+            row.expires_at = datetime.now() - timedelta(hours=1)
+            db.commit()
+        finally:
+            db.close()
+        denied = self.h.client.post(
+            "/api/training/enrollments/release-expired", headers=Harness.headers(self.emp))
+        self.assertEqual(denied.status_code, 403)
+        released = self.h.client.post(
+            "/api/training/enrollments/release-expired", headers=Harness.headers(self.admin))
+        self.assertEqual(released.json()["data"]["released"], 1)
+        rows = self.h.client.get("/api/training/enrollments", headers=Harness.headers(self.admin)).json()["data"]
+        self.assertEqual({row["id"]: row["status"] for row in rows}[eid], "expired")
+
 
 class LearningEvidenceTest(unittest.TestCase):
     def setUp(self) -> None:

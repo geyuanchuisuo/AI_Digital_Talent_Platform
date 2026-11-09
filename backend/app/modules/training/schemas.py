@@ -21,6 +21,7 @@ class CourseCreateRequest(_StrictModel):
     material_url: str = Field(min_length=1, max_length=500)
     dimension_names: list[str] = Field(default_factory=list, max_length=20)
     status: CourseStatus = "active"
+    capacity: int | None = Field(default=None, ge=1, le=10000)
 
 
 class CourseUpdateRequest(_StrictModel):
@@ -29,6 +30,7 @@ class CourseUpdateRequest(_StrictModel):
     material_url: str | None = Field(default=None, min_length=1, max_length=500)
     dimension_names: list[str] | None = Field(default=None, max_length=20)
     status: CourseStatus | None = None
+    capacity: int | None = Field(default=None, ge=1, le=10000)
 
 
 class PlanItemIn(_StrictModel):

@@ -700,6 +700,7 @@ function CourseAdmin() {
       material_url: row.material_url,
       dimension_names: row.dimension_names,
       status: row.status,
+      capacity: row.capacity,
     });
     setModalOpen(true);
   };
@@ -749,6 +750,7 @@ function CourseAdmin() {
       render: (v: string[]) => (v?.length ? v.map((name) => <Tag key={name}>{name}</Tag>) : '—'),
     },
     { title: '状态', dataIndex: 'status', width: 90, render: courseStatusTag },
+    { title: '名额', dataIndex: 'capacity', width: 80, render: (v) => v ?? '不限' },
     { title: '版本', dataIndex: 'version', width: 70, render: (v) => `v${v}` },
     {
       title: '操作',
@@ -825,6 +827,9 @@ function CourseAdmin() {
           </Form.Item>
           <Form.Item name="dimension_names" label="对应能力维度（可多个）">
             <Select mode="tags" tokenSeparators={[',', '，']} placeholder="输入维度名后回车" />
+          </Form.Item>
+          <Form.Item name="capacity" label="报名名额上限（留空不限）">
+            <InputNumber min={1} max={10000} style={{ width: '100%' }} placeholder="留空表示不限" />
           </Form.Item>
           <Form.Item name="status" label="状态">
             <Select

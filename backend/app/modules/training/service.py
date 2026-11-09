@@ -93,6 +93,8 @@ def _course_columns(payload: CourseCreateRequest | CourseUpdateRequest) -> dict[
         columns["dimension_names_json"] = [str(item).strip() for item in data["dimension_names"] or [] if str(item).strip()]
     if "status" in data:
         columns["status"] = data["status"]
+    if "capacity" in data:
+        columns["capacity"] = data["capacity"]
     return columns
 
 
@@ -151,6 +153,7 @@ def _course_snapshot(course: TrainingCourse) -> dict[str, Any]:
         "description": course.description,
         "material_url": course.material_url,
         "dimension_names": list(course.dimension_names_json or []),
+        "capacity": course.capacity,
         "version": course.version,
         "snapshot_at": datetime.now().isoformat(timespec="seconds"),
     }
@@ -1053,8 +1056,64 @@ def update_feedback_note(
 ENROLLMENT_TTL_HOURS = 24
 
 
+def _occupying_count(db: Session, course_id: int, *, exclude_id: int | None = None) -> int:
+    """占用名额的报名数：pending 占位、approved 占用；排除指定行用于审批计算。"""
+    stmt = select(func.count()).select_from(TrainingEnrollment).where(
+        TrainingEnrollment.course_id == course_id,
+        TrainingEnrollment.status.in_(("pending", "approved")),
+    )
+    if exclude_id is not None:
+        stmt = stmt.where(TrainingEnrollment.id != exclude_id)
+    return int(db.scalar(stmt) or 0)
+
+
+def _next_session_id(db: Session, course_id: int, *, now: datetime) -> int | None:
+    """候补递补通知需要期次引用；取最近未结束期次，没有则跳过通知。"""
+    return db.scalar(
+        select(TrainingSession.id)
+        .where(TrainingSession.course_id == course_id, TrainingSession.ends_at >= now)
+        .order_by(TrainingSession.starts_at.asc())
+    )
+
+
+def _promote_waitlist(db: Session, course_id: int, *, now: datetime, actor_user_id: int | None = None) -> TrainingEnrollment | None:
+    """名额释放后把最早候补转为 pending 占位，并通知本人（无期次引用则跳过通知）。"""
+    course = db.get(TrainingCourse, course_id)
+    if not course or not course.capacity:
+        return None
+    if _occupying_count(db, course_id) >= course.capacity:
+        return None
+    row = db.scalar(
+        select(TrainingEnrollment)
+        .where(TrainingEnrollment.course_id == course_id, TrainingEnrollment.status == "waitlisted")
+        .order_by(TrainingEnrollment.id.asc())
+    )
+    if not row:
+        return None
+    row.status = "pending"
+    row.expires_at = now + timedelta(hours=ENROLLMENT_TTL_HOURS)
+    row.decided_by = None
+    row.decided_at = None
+    db.flush()
+    session_id = _next_session_id(db, course_id, now=now)
+    if session_id is not None:
+        try:
+            with db.begin_nested():
+                notify.course_waitlist_promoted(
+                    db,
+                    session_id=session_id,
+                    recipient_user_id=row.employee_user_id,
+                    seq=row.id,
+                    deadline=row.expires_at.isoformat(),
+                    actor_user_id=actor_user_id,
+                )
+        except Exception:  # noqa: BLE001 - 通知失败仅回滚 savepoint，不影响递补状态
+            pass
+    return row
+
+
 def apply_enrollment(db: Session, payload: EnrollmentRequest, *, user: User) -> TrainingEnrollment:
-    """员工自主报名；pending 占位，24h 未决定则超时释放。"""
+    """员工自主报名；有名额时 pending 占位 24h，无名额直接进入候补队列。"""
     _require_employee_caller(user)
     course = _require_course(db, payload.course_id)
     if course.status != "active":
@@ -1067,12 +1126,13 @@ def apply_enrollment(db: Session, payload: EnrollmentRequest, *, user: User) -> 
     )
     if existing:
         return existing
+    full = bool(course.capacity) and _occupying_count(db, payload.course_id) >= int(course.capacity)
     row = TrainingEnrollment(
         course_id=payload.course_id,
         employee_user_id=user.id,
         priority=payload.priority,
-        status="pending",
-        expires_at=datetime.now() + timedelta(hours=ENROLLMENT_TTL_HOURS),
+        status="waitlisted" if full else "pending",
+        expires_at=None if full else datetime.now() + timedelta(hours=ENROLLMENT_TTL_HOURS),
     )
     db.add(row)
     db.commit()
@@ -1087,27 +1147,79 @@ def decide_enrollment(
     row = db.get(TrainingEnrollment, enrollment_id)
     if not row:
         raise BizError(404, "报名记录不存在")
-    if row.status not in ("pending", "waitlisted"):
+    if row.status not in ("pending", "waitlisted") and not (
+        row.status == "approved" and payload.status == "cancelled"
+    ):
         raise BizError(400, "该报名已处理")
-    if row.expires_at and row.expires_at < datetime.now() and payload.status == "approved":
-        raise BizError(400, "报名已超时，需员工重新申请")
+    now = datetime.now()
+    if row.status == "pending" and row.expires_at and row.expires_at < now:
+        # 超时占位释放：不再占用名额，员工需重新报名
+        row.status = "expired"
+        db.commit()
+        _promote_waitlist(db, row.course_id, now=now, actor_user_id=admin.id)
+        db.commit()
+        raise BizError(400, "报名已超时释放，需员工重新申请")
+    if payload.status == "approved":
+        course = _require_course(db, row.course_id)
+        if course.capacity and row.status == "waitlisted":
+            if _occupying_count(db, row.course_id, exclude_id=row.id) >= int(course.capacity):
+                raise BizError(400, "名额已满，无法通过该候补报名")
     row.status = payload.status
     row.decided_by = admin.id
-    row.decided_at = datetime.now()
+    row.decided_at = now
     if payload.note is not None:
         row.note = payload.note
+    if row.status == "approved":
+        row.expires_at = None
     db.commit()
     db.refresh(row)
-    # 通知 D 域：报名审批结果（rejected/cancelled 也告知，幂等键含结果）
-    notify.course_enrollment_reviewed(
-        db,
-        enrollment_id=row.id,
-        recipient_user_id=row.employee_user_id,
-        result=row.status,
-        actor_user_id=admin.id,
-    )
+    notified = True
+    try:
+        # 通知 D 域：报名审批结果（rejected/cancelled 也告知，幂等键含结果）
+        notify.course_enrollment_reviewed(
+            db,
+            enrollment_id=row.id,
+            recipient_user_id=row.employee_user_id,
+            result=row.status,
+            actor_user_id=admin.id,
+        )
+    except Exception:  # noqa: BLE001 - 通知失败不回滚已生效的业务状态
+        notified = False
+        db.rollback()
+    if row.status in ("rejected", "cancelled"):
+        # 释放名额后递补最早候补
+        if not notified:
+            db.refresh(row)
+        _promote_waitlist(db, row.course_id, now=now, actor_user_id=admin.id)
     db.commit()
+    db.refresh(row)
     return row
+
+
+def release_expired_enrollments(db: Session, *, now: datetime | None = None, actor: User | None = None) -> dict[str, int]:
+    """扫描超时未决定的 pending 占位并释放，随后对每个受影响课程递补候补。"""
+    if actor is not None:
+        require_admin(actor)
+    moment = now or datetime.now()
+    rows = list(
+        db.scalars(
+            select(TrainingEnrollment).where(
+                TrainingEnrollment.status == "pending",
+                TrainingEnrollment.expires_at.is_not(None),
+                TrainingEnrollment.expires_at < moment,
+            )
+        )
+    )
+    course_ids = {row.course_id for row in rows}
+    for row in rows:
+        row.status = "expired"
+    db.flush()
+    promoted = 0
+    for course_id in course_ids:
+        if _promote_waitlist(db, course_id, now=moment, actor_user_id=actor.id if actor else None) is not None:
+            promoted += 1
+    db.commit()
+    return {"scanned": len(rows), "released": len(rows), "promoted": promoted}
 
 
 def list_enrollments(db: Session, *, course_id: int | None = None, user: User) -> list[TrainingEnrollment]:

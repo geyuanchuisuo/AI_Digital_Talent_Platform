@@ -6,6 +6,7 @@ export interface TrainingCourse {
   description: string | null;
   material_url: string;
   dimension_names: string[];
+  capacity: number | null;
   status: 'active' | 'inactive';
   version: number;
   feedback_note: string | null;
@@ -137,7 +138,7 @@ export interface TrainingEnrollment {
   course_id: number;
   employee_user_id: number;
   priority: 'required' | 'elective';
-  status: 'pending' | 'approved' | 'rejected' | 'waitlisted' | 'cancelled';
+  status: 'pending' | 'approved' | 'rejected' | 'waitlisted' | 'cancelled' | 'expired';
   expires_at: string | null;
   note: string | null;
 }

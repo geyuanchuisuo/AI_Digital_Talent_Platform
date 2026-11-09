@@ -33,6 +33,7 @@ import {
   fetchCourses,
   fetchEnrollments,
   fetchLearningEvidence,
+  releaseExpiredEnrollments,
   submitLearningEvidence,
 } from '../api';
 import type { LearningEvidence, TrainingCourse, TrainingEnrollment } from '../types';
@@ -43,6 +44,7 @@ const ENROLL_STATUS: Record<string, { color: string; text: string }> = {
   rejected: { color: 'error', text: '已拒绝' },
   waitlisted: { color: 'warning', text: '候补' },
   cancelled: { color: 'default', text: '已取消' },
+  expired: { color: 'default', text: '超时释放' },
 };
 
 function enrollTag(status: string) {
@@ -81,10 +83,20 @@ function EnrollmentTable({ isAdmin }: { isAdmin: boolean }) {
     void load();
   }, [load]);
 
-  const decide = async (row: TrainingEnrollment, status: 'approved' | 'rejected') => {
+  const decide = async (row: TrainingEnrollment, status: 'approved' | 'rejected' | 'cancelled') => {
     try {
       await decideEnrollment(row.id, { status });
-      message.success(status === 'approved' ? '已通过' : '已拒绝');
+      message.success(status === 'approved' ? '已通过' : status === 'rejected' ? '已拒绝' : '已取消');
+      void load();
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    }
+  };
+
+  const releaseExpired = async () => {
+    try {
+      const res = await releaseExpiredEnrollments();
+      message.success(`已释放 ${res.released} 条超时报名，递补 ${res.promoted} 条候补`);
       void load();
     } catch (error) {
       message.error(getErrorMessage(error));
@@ -116,6 +128,10 @@ function EnrollmentTable({ isAdmin }: { isAdmin: boolean }) {
                     拒绝
                   </a>
                 </Space>
+              ) : row.status === 'approved' ? (
+                <a style={{ color: '#cf1322' }} onClick={() => void decide(row, 'cancelled')}>
+                  取消并递补
+                </a>
               ) : (
                 '—'
               ),
@@ -125,10 +141,16 @@ function EnrollmentTable({ isAdmin }: { isAdmin: boolean }) {
   ];
 
   return (
-    <Card>
+    <Card
+      extra={
+        isAdmin ? (
+          <Button onClick={() => void releaseExpired()}>释放超时占位</Button>
+        ) : null
+      }
+    >
       <Typography.Paragraph type="secondary">
         {isAdmin
-          ? '待审批报名需在截止时间内处理，超时未审批由后端自动释放为已取消。'
+          ? '待审批报名需在截止时间内处理，超时未审批可点「释放超时占位」自动释放并递补候补。'
           : '报名后等待管理员审批；超时未审批会自动取消，可重新报名。'}
       </Typography.Paragraph>
       <Table rowKey="id" size="small" loading={loading} columns={columns} dataSource={rows} pagination={false} />
@@ -159,7 +181,10 @@ function EmployeeApply() {
             showSearch
             optionFilterProp="label"
             placeholder="选择课程"
-            options={courses.map((c) => ({ value: c.id, label: `#${c.id} ${c.title}` }))}
+            options={courses.map((c) => ({
+              value: c.id,
+              label: `#${c.id} ${c.title}${c.capacity ? `（名额 ${c.capacity}）` : ''}`,
+            }))}
           />
         </Form.Item>
         <Form.Item name="priority">
