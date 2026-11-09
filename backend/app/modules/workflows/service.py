@@ -333,12 +333,25 @@ def start_run(
 def sync_run_status(
     db: Session, run_id: int, *, status: str, error: str | None = None
 ) -> WorkflowRun:
-    """业务侧运行状态镜像（与引擎登记同状态机）；终态落 finished_at。"""
+    """业务侧运行状态镜像（与引擎登记同方向机）；终态落 finished_at。
+
+    与引擎 mark_status 同方向白名单：已取消的运行拒绝任何回写，迟到的
+    引擎回执不得复活业务侧状态（T-D18 等待态取消语义）。
+    """
     if status not in RUN_STATUSES:
         raise BizError(422, "运行状态非法")
+    ALLOWED: dict[str, set[str]] = {
+        "running": {"waiting", "succeeded", "failed"},
+        "waiting": {"running", "succeeded", "failed"},
+        "succeeded": {"cancelled"},
+        "failed": {"cancelled"},
+        "cancelled": set(),
+    }
     run = db.get(WorkflowRun, run_id)
     if run is None:
         raise BizError(404, "运行实例不存在")
+    if status not in ALLOWED.get(run.status, set()):
+        return run
     run.status = status
     run.error = error
     if status in RUN_TERMINAL_STATUSES:
