@@ -8,11 +8,10 @@ from sqlalchemy import DateTime, Float, Integer, SmallInteger, String, Text, Uni
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
-from app.models.base import JSONDict, JSONList, MYSQL_TABLE_OPTIONS, PKMixin, str_default
-from app.modules.assessments.models import CTimestampMixin
+from app.models.base import CrossDbUpdatedAtMixin, JSONDict, JSONList, MYSQL_TABLE_OPTIONS, PKMixin, str_default
 
 
-class TrainingCourse(PKMixin, CTimestampMixin, Base):
+class TrainingCourse(PKMixin, CrossDbUpdatedAtMixin, Base):
     """真实课程目录；材料仅接受 http/https 链接，不伪造资源。"""
 
     __tablename__ = "training_courses"
@@ -32,7 +31,7 @@ class TrainingCourse(PKMixin, CTimestampMixin, Base):
     updated_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
-class TrainingSession(PKMixin, CTimestampMixin, Base):
+class TrainingSession(PKMixin, CrossDbUpdatedAtMixin, Base):
     """课程期次：反馈窗口与出勤资格的唯一起点。"""
 
     __tablename__ = "training_sessions"
@@ -45,7 +44,7 @@ class TrainingSession(PKMixin, CTimestampMixin, Base):
     created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
-class TrainingAttendance(PKMixin, CTimestampMixin, Base):
+class TrainingAttendance(PKMixin, CrossDbUpdatedAtMixin, Base):
     """实际出勤记录；只有在此登记过的员工才具备评价资格。"""
 
     __tablename__ = "training_attendances"
@@ -59,7 +58,7 @@ class TrainingAttendance(PKMixin, CTimestampMixin, Base):
     attended_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
 
 
-class TrainingFeedback(PKMixin, CTimestampMixin, Base):
+class TrainingFeedback(PKMixin, CrossDbUpdatedAtMixin, Base):
     """员工对同一课程跨期最多一份有效反馈；文字意见不再对外返回原文。"""
 
     __tablename__ = "training_feedbacks"
@@ -81,7 +80,7 @@ class TrainingFeedback(PKMixin, CTimestampMixin, Base):
     withdrawn_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
-class TrainingFeedbackTheme(PKMixin, CTimestampMixin, Base):
+class TrainingFeedbackTheme(PKMixin, CrossDbUpdatedAtMixin, Base):
     """模型从匿名文字意见归纳的主题；只保存达到最小样本门槛的主题。"""
 
     __tablename__ = "training_feedback_themes"
@@ -97,7 +96,7 @@ class TrainingFeedbackTheme(PKMixin, CTimestampMixin, Base):
     generated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
 
 
-class TrainingPlan(PKMixin, CTimestampMixin, Base):
+class TrainingPlan(PKMixin, CrossDbUpdatedAtMixin, Base):
     __tablename__ = "training_plans"
     __table_args__ = MYSQL_TABLE_OPTIONS
 
@@ -118,7 +117,7 @@ class TrainingPlan(PKMixin, CTimestampMixin, Base):
     updated_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
-class TrainingPlanItem(PKMixin, CTimestampMixin, Base):
+class TrainingPlanItem(PKMixin, CrossDbUpdatedAtMixin, Base):
     """计划项绑定当时的课程快照，后续改课程不回写历史版本。"""
 
     __tablename__ = "training_plan_items"
@@ -136,7 +135,7 @@ class TrainingPlanItem(PKMixin, CTimestampMixin, Base):
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
-class TrainingPlanVersion(PKMixin, CTimestampMixin, Base):
+class TrainingPlanVersion(PKMixin, CrossDbUpdatedAtMixin, Base):
     __tablename__ = "training_plan_versions"
     __table_args__ = (
         UniqueConstraint("plan_id", "version", name="uk_plan_version"),
@@ -151,7 +150,7 @@ class TrainingPlanVersion(PKMixin, CTimestampMixin, Base):
     created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
-class TrainingLearningRecord(PKMixin, CTimestampMixin, Base):
+class TrainingLearningRecord(PKMixin, CrossDbUpdatedAtMixin, Base):
     """员工自报学习状态；完成不代表验证学时。"""
 
     __tablename__ = "training_learning_records"
@@ -176,7 +175,7 @@ class TrainingLearningRecord(PKMixin, CTimestampMixin, Base):
     evidence_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default=text("0"))
 
 
-class TrainingGrowthEvent(PKMixin, CTimestampMixin, Base):
+class TrainingGrowthEvent(PKMixin, CrossDbUpdatedAtMixin, Base):
     """追加式成长事件：来源 assessment/interview/training/hr_ability。"""
 
     __tablename__ = "training_growth_events"
@@ -194,7 +193,7 @@ class TrainingGrowthEvent(PKMixin, CTimestampMixin, Base):
     payload_json: Mapped[dict] = mapped_column(JSONDict, nullable=False, default=dict)
 
 
-class TrainingEnrollment(PKMixin, CTimestampMixin, Base):
+class TrainingEnrollment(PKMixin, CrossDbUpdatedAtMixin, Base):
     """员工课程报名：必修/选修，审批占位与候补队列，24h 超时释放。"""
 
     __tablename__ = "training_enrollments"
@@ -217,7 +216,7 @@ class TrainingEnrollment(PKMixin, CTimestampMixin, Base):
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
-class TrainingLearningEvidence(PKMixin, CTimestampMixin, Base):
+class TrainingLearningEvidence(PKMixin, CrossDbUpdatedAtMixin, Base):
     """有效学习证据（防挂机）：服务端可校验的心跳/页面停留/测验/出勤等。"""
 
     __tablename__ = "training_learning_evidence"

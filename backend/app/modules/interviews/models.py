@@ -11,11 +11,10 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstr
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
-from app.models.base import JSONDict, JSONList, MYSQL_TABLE_OPTIONS, PK_TYPE, PKMixin, str_default
-from app.modules.assessments.models import CTimestampMixin
+from app.models.base import CrossDbUpdatedAtMixin, JSONDict, JSONList, MYSQL_TABLE_OPTIONS, PK_TYPE, PKMixin, str_default
 
 
-class InterviewRound(PKMixin, CTimestampMixin, Base):
+class InterviewRound(PKMixin, CrossDbUpdatedAtMixin, Base):
     __tablename__ = "interview_rounds"
     __table_args__ = MYSQL_TABLE_OPTIONS
 
@@ -45,7 +44,7 @@ class InterviewRound(PKMixin, CTimestampMixin, Base):
     updated_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
-class InterviewFeedback(PKMixin, CTimestampMixin, Base):
+class InterviewFeedback(PKMixin, CrossDbUpdatedAtMixin, Base):
     """每轮一条结构化反馈；无面试总分字段。"""
 
     __tablename__ = "interview_feedback"
@@ -66,7 +65,7 @@ class InterviewFeedback(PKMixin, CTimestampMixin, Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
 
-class InterviewRoundEvent(PKMixin, CTimestampMixin, Base):
+class InterviewRoundEvent(PKMixin, CrossDbUpdatedAtMixin, Base):
     """轮次变更审计：创建/改期/完成/取消/反馈保存。"""
 
     __tablename__ = "interview_round_events"

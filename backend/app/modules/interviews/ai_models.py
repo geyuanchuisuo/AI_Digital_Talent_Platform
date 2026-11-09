@@ -12,11 +12,10 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstr
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
-from app.models.base import JSONDict, MYSQL_TABLE_OPTIONS, PK_TYPE, PKMixin, str_default
-from app.modules.assessments.models import CTimestampMixin
+from app.models.base import CrossDbUpdatedAtMixin, JSONDict, MYSQL_TABLE_OPTIONS, PK_TYPE, PKMixin, str_default
 
 
-class AiInterviewSession(PKMixin, CTimestampMixin, Base):
+class AiInterviewSession(PKMixin, CrossDbUpdatedAtMixin, Base):
     __tablename__ = "ai_interview_sessions"
     __table_args__ = MYSQL_TABLE_OPTIONS
 
@@ -37,7 +36,7 @@ class AiInterviewSession(PKMixin, CTimestampMixin, Base):
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
-class AiInterviewQuestion(PKMixin, CTimestampMixin, Base):
+class AiInterviewQuestion(PKMixin, CrossDbUpdatedAtMixin, Base):
     __tablename__ = "ai_interview_questions"
     __table_args__ = (
         UniqueConstraint("session_id", "sequence_no", name="uk_ai_q_session_seq"),
@@ -58,7 +57,7 @@ class AiInterviewQuestion(PKMixin, CTimestampMixin, Base):
     )
 
 
-class AiInterviewEvent(PKMixin, CTimestampMixin, Base):
+class AiInterviewEvent(PKMixin, CrossDbUpdatedAtMixin, Base):
     __tablename__ = "ai_interview_events"
     __table_args__ = MYSQL_TABLE_OPTIONS
 
