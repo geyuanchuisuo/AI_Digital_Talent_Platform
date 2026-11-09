@@ -71,7 +71,7 @@ AI 面试间：`ai_interview_sessions`、`ai_interview_questions`、`ai_intervie
 
 - `POST /questions`、`GET /questions`、`PATCH /questions/{id}`、`POST /questions/{id}/approve`、`POST /questions/generate-draft`（管理员；模型生成待审核题目）
 - `POST /plans`、`GET /plans`、`GET /plans/{id}`、`PATCH /plans/{id}`、`POST /plans/{id}/publish`（管理员；自适应发布返回策略与题库快照，不返回试卷）
-- `POST /assignments`（管理员分配；`idempotency_key` 幂等）
+- `POST /assignments`（管理员分配；`idempotency_key` 幂等；`attempt_no` 递增形成复测新记录，不覆盖旧结果）
 - `GET /assignments`（管理员列表）、`GET /my/assignments`（本人）
 - `GET /assignments/{id}`（本人/管理员，按答案开放裁剪；自适应返回已出题目）
 - `POST /assignments/{id}/next-question`（本人；自适应逐题出题，幂等）、`GET /assignments/{id}/selections`（管理员始终可见，本人答案开放后可见）

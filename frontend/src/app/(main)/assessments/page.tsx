@@ -867,10 +867,13 @@ function AssignmentAdmin() {
     void load();
   }, [load]);
 
-  const openAssign = async () => {
+  const openAssign = async (prefill?: { plan_id: number; user_id: number; attempt_no: number }) => {
     try {
       const data = await fetchPlans({ status: 'published', page: 1, page_size: 100 });
       setPlans(data.items);
+      form.setFieldsValue(
+        prefill ? { plan_id: prefill.plan_id, user_id: prefill.user_id, attempt_no: prefill.attempt_no } : { attempt_no: 1 },
+      );
       setAssignOpen(true);
     } catch (error) {
       message.error(getErrorMessage(error));
@@ -883,7 +886,8 @@ function AssignmentAdmin() {
       await assignAssessment({
         plan_id: values.plan_id,
         user_id: values.user_id,
-        idempotency_key: `ui-${values.plan_id}-${values.user_id}-${Date.now()}`,
+        attempt_no: values.attempt_no ?? 1,
+        idempotency_key: `ui-${values.plan_id}-${values.user_id}-${values.attempt_no ?? 1}-${Date.now()}`,
       });
       message.success('已分配测评');
       setAssignOpen(false);
@@ -955,6 +959,15 @@ function AssignmentAdmin() {
           >
             开放答案
           </a>
+          {row.status === 'completed' && (
+            <a
+              onClick={() =>
+                void openAssign({ plan_id: row.plan_id, user_id: row.user_id, attempt_no: row.attempt_no + 1 })
+              }
+            >
+              复测
+            </a>
+          )}
         </Space>
       ),
     },
@@ -988,6 +1001,9 @@ function AssignmentAdmin() {
           </Form.Item>
           <Form.Item name="user_id" label="答题人 user_id" rules={[{ required: true }]}>
             <InputNumber min={1} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="attempt_no" label="复测序号（首次为 1）">
+            <InputNumber min={1} max={20} style={{ width: '100%' }} />
           </Form.Item>
         </Form>
       </Modal>
