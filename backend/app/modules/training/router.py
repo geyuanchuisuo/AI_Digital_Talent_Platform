@@ -365,14 +365,28 @@ def post_enrollment_release_expired(
 # ---------------------------------------------------------------- 防挂机/有效学习证据
 
 
-@router.post("/learning-evidence", summary="提交学习证据")
+@router.post("/learning-records/{record_id}/study-sessions", summary="领取学习会话凭证（员工本人）")
+def post_study_session(
+    record_id: int,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    return ok(service.issue_study_session(db, record_id, user=user))
+
+
+@router.post("/learning-evidence", summary="提交学习证据（分数/验证人由服务端计算）")
 def post_evidence(
     payload: EvidenceSubmitRequest,
     user: CurrentUser,
     db: Annotated[Session, Depends(get_db)],
 ):
     row = service.submit_evidence(db, payload, user=user)
-    return ok({"id": row.id, "score": row.score})
+    return ok({
+        "id": row.id,
+        "evidence_type": row.evidence_type,
+        "score": row.score,
+        "verified_by": row.verified_by,
+    })
 
 
 @router.post("/learning-records/{record_id}/confirm-completion", summary="管理员认定正式完成")

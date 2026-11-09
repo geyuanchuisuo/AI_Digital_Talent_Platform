@@ -221,14 +221,22 @@ class TrainingEnrollment(PKMixin, CrossDbUpdatedAtMixin, Base):
 
 
 class TrainingLearningEvidence(PKMixin, CrossDbUpdatedAtMixin, Base):
-    """有效学习证据（防挂机）：服务端可校验的心跳/页面停留/测验/出勤等。"""
+    """有效学习证据（防挂机）：分数与验证人只能由服务端可信校验产生。
+
+    `evidence_key` 指向服务端可信来源（出勤记录/测评结果/学习会话 nonce），
+    同一条记录内唯一，用于阻止同一来源重复计入或凭证重放。
+    """
 
     __tablename__ = "training_learning_evidence"
-    __table_args__ = MYSQL_TABLE_OPTIONS
+    __table_args__ = (
+        UniqueConstraint("learning_record_id", "evidence_key", name="uk_evidence_record_key"),
+        MYSQL_TABLE_OPTIONS,
+    )
 
     learning_record_id: Mapped[int] = mapped_column(Integer, nullable=False)
     employee_user_id: Mapped[int] = mapped_column(Integer, nullable=False)
     evidence_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    evidence_key: Mapped[str] = mapped_column(String(100), nullable=False)
     payload_json: Mapped[dict] = mapped_column(JSONDict, nullable=False, default=dict)
     score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default=text("0"))
     verified_by: Mapped[str | None] = mapped_column(String(30), nullable=True)
