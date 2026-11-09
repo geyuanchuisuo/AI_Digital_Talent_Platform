@@ -120,3 +120,54 @@ export function rollbackDefinition(
     target_version_id: targetVersionId,
   });
 }
+
+export interface WorkflowRunSummary {
+  id: number;
+  definition_id: number;
+  version_id: number;
+  thread_id: string;
+  trigger_type: 'manual' | 'event' | 'schedule';
+  status: 'running' | 'waiting' | 'succeeded' | 'failed' | 'cancelled';
+  error: string | null;
+  created_by: number | null;
+  created_at: string;
+  finished_at: string | null;
+}
+
+export interface WorkflowRunDetail {
+  run: WorkflowRunSummary & { trigger_ref: string | null; params: Record<string, unknown> | null };
+  steps: Array<{
+    node_key: string;
+    node_type: string;
+    attempt: number;
+    status: string;
+    output: Record<string, unknown> | null;
+    error: string | null;
+    started_at: string | null;
+    finished_at: string | null;
+  }>;
+  engine_state?: { next: string[] } | null;
+}
+
+export function fetchRuns(definitionId?: number): Promise<WorkflowRunSummary[]> {
+  const query = definitionId == null ? '' : `?definition_id=${definitionId}`;
+  return get<WorkflowRunSummary[]>(`/workflows/runs${query}`);
+}
+
+export function fetchRunDetail(threadId: string): Promise<WorkflowRunDetail> {
+  return get<WorkflowRunDetail>(`/workflows/runs/${encodeURIComponent(threadId)}`);
+}
+
+export function startRun(definitionId: number, params: Record<string, unknown>) {
+  return post<{ run_id: number; thread_id: string; status: string; interrupt: unknown }>(
+    '/workflows/runs', { definition_id: definitionId, params },
+  );
+}
+
+export function approveRun(threadId: string, approved: boolean, note: string) {
+  return post(`/workflows/runs/${encodeURIComponent(threadId)}/approval`, { approved, note });
+}
+
+export function cancelRun(threadId: string) {
+  return post(`/workflows/runs/${encodeURIComponent(threadId)}/cancel`, {});
+}

@@ -6,11 +6,14 @@ import {
   createDefinition,
   deactivateVersion,
   fetchDefinitions,
+  fetchRunDetail,
+  fetchRuns,
   fetchVersionDetail,
   fetchVersions,
   reviewVersion,
   rollbackDefinition,
   submitVersion,
+  startRun,
 } from './api';
 import type { VersionDetail, WorkflowDefinition, WorkflowVersion } from './api';
 
@@ -20,6 +23,11 @@ vi.mock('./api', () => ({
   fetchVersions: vi.fn(),
   createDraftVersion: vi.fn(),
   fetchVersionDetail: vi.fn(),
+  fetchRuns: vi.fn(),
+  fetchRunDetail: vi.fn(),
+  startRun: vi.fn(),
+  approveRun: vi.fn(),
+  cancelRun: vi.fn(),
   updateDraftGraph: vi.fn(),
   submitVersion: vi.fn(),
   reviewVersion: vi.fn(),
@@ -28,6 +36,9 @@ vi.mock('./api', () => ({
 }));
 
 const fetchDefinitionsMock = vi.mocked(fetchDefinitions);
+const fetchRunsMock = vi.mocked(fetchRuns);
+const fetchRunDetailMock = vi.mocked(fetchRunDetail);
+const startRunMock = vi.mocked(startRun);
 const fetchVersionsMock = vi.mocked(fetchVersions);
 const fetchVersionDetailMock = vi.mocked(fetchVersionDetail);
 const createDefinitionMock = vi.mocked(createDefinition);
@@ -109,6 +120,13 @@ describe('WorkflowsPage（T-D15 受控生命周期）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     fetchDefinitionsMock.mockResolvedValue([definition]);
+    fetchRunsMock.mockResolvedValue([]);
+    fetchRunDetailMock.mockResolvedValue({ run: {
+      id: 1, definition_id: 7, version_id: 101, thread_id: 'run-1',
+      trigger_type: 'manual', status: 'waiting', error: null, created_by: 2,
+      created_at: '2026-11-09T10:00:00', finished_at: null, trigger_ref: null, params: {},
+    }, steps: [] });
+    startRunMock.mockResolvedValue({ run_id: 1, thread_id: 'run-1', status: 'waiting', interrupt: null });
     fetchVersionsMock.mockResolvedValue([version()]);
   });
 
@@ -199,5 +217,29 @@ describe('WorkflowsPage（T-D15 受控生命周期）', () => {
     expect(screen.getByText('profile_parse')).toBeTruthy();
     expect(screen.getByText('match_1')).toBeTruthy();
     expect(screen.getByText(/提交人 2/)).toBeTruthy();
+  }, 60_000);
+
+  it('手动触发只在选择定义后开放并提交 JSON 参数', async () => {
+    await renderAndOpen();
+    const trigger = buttonNamed('手动触发所选流程') as HTMLButtonElement;
+    expect(trigger.disabled).toBe(true);
+    fireEvent.click(screen.getByText('hire_review').closest('tr')!);
+    await waitFor(() => expect(trigger.disabled).toBe(false));
+    fireEvent.change(screen.getByPlaceholderText('手动触发参数（JSON 对象）'), {
+      target: { value: '{"source":"manual"}' },
+    });
+    fireEvent.click(trigger);
+    await waitFor(() => expect(startRunMock).toHaveBeenCalledWith(7, { source: 'manual' }));
+  }, 60_000);
+
+  it('运行详情取指定 thread_id，等待态动作仅管理列表显示', async () => {
+    fetchRunsMock.mockResolvedValue([{ id: 1, definition_id: 7, version_id: 101,
+      thread_id: 'run-1', trigger_type: 'manual', status: 'waiting', error: null,
+      created_by: 2, created_at: '2026-11-09T10:00:00', finished_at: null }]);
+    await renderAndOpen();
+    fireEvent.click(await waitFor(() => buttonNamed('详情')));
+    await waitFor(() => expect(fetchRunDetailMock).toHaveBeenCalledWith('run-1'));
+    expect(screen.getByText('状态：waiting · 触发：manual')).toBeTruthy();
+    expect(buttonNamed('取消等待')).toBeTruthy();
   }, 60_000);
 });
