@@ -173,6 +173,31 @@ def start_parse_profiled_run(
 
 # ---- 手动触发 ----
 
+def execute_registered_run(run: WorkflowRun) -> dict[str, Any] | None:
+    """对已登记的运行执行引擎并镜像状态（定时触发复用；不校验身份——登记方负责）。
+
+    运行 created_by 为空（未配置定时执行主体）时不执行引擎，运行留在 running：
+    如实失败优于静默跳过，管理员在运行列表可见并可直接取消。
+    """
+    if run.created_by is None:
+        return None
+    db = get_session_factory()()
+    run_row = db.get(WorkflowRun, run.id)
+    graph = _build(run_row, db)
+    result = get_engine().start(
+        graph_name_for(run.version_id, run.thread_id),
+        graph,
+        {"trigger": dict(run.params_json or {}), "form": {}, "vars": {}},
+        thread_id=run.thread_id,
+    )
+    waiting_node = None
+    if result.status == "waiting" and isinstance(result.interrupt, dict):
+        waiting_node = str(result.interrupt.get("node_key") or "") or None
+    db.expire(run_row)
+    _mirror(db, run_row, result, waiting_node=waiting_node)
+    return {"run": run_row, "result": result}
+
+
 def start_manual_run(
     db: Session,
     *,

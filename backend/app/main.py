@@ -64,6 +64,7 @@ async def lifespan(app: FastAPI):
     from app.tasks.runner import runner
     from app.tasks.match_worker import handle_match_batch
     from app.tasks.screen_worker import handle_screen_batch
+    from app.modules.workflows import schedule as wf_schedule
 
     settings.load_runtime_overrides()
     _ensure_milvus_collection()
@@ -71,15 +72,18 @@ async def lifespan(app: FastAPI):
     runner.register("screen", handle_screen_batch)
     runner.register("match", handle_match_batch)
     runner.start()
+    wf_schedule.get_loop().start()
     logger.info(
-        "startup: env=%s task_concurrency=%s worker=%s",
+        "startup: env=%s task_concurrency=%s worker=%s wf_schedule=%s",
         settings.app_env,
         settings.task_concurrency,
         "running" if runner.is_running else "stopped",
+        "running" if wf_schedule.get_loop().is_running else "stopped",
     )
     try:
         yield
     finally:
+        wf_schedule.get_loop().stop()
         runner.stop()
         logger.info("shutdown: worker=stopped")
 
