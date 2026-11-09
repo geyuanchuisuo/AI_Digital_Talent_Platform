@@ -8,13 +8,18 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import secrets
 from datetime import date, datetime, timedelta
 from typing import Any, Callable
 from urllib.parse import urlparse
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.core.errors import BizError
 from app.models import User
 from app.modules.assessments.models import AssessmentAssignment, AssessmentResult
@@ -1234,45 +1239,243 @@ def list_enrollments(db: Session, *, course_id: int | None = None, user: User) -
 
 # ---------------------------------------------------------------- 防挂机/有效学习证据
 
-def submit_evidence(db: Session, payload: EvidenceSubmitRequest, *, user: User) -> TrainingLearningEvidence:
-    """员工提交学习证据；服务端记录证据类型与得分，不直接认定正式完成。"""
-    record = db.get(TrainingLearningRecord, payload.learning_record_id)
-    if not record or record.employee_user_id != user.id:
+# 一期固定阈值：课程暂未落库“完成条件配置”，先用统一常量；课程可配后替换为按课程取值。
+FORMAL_COMPLETION_MIN_SCORE = 60.0
+COURSE_STUDY_TARGET_MINUTES = 45.0  # 单门课有效学时目标，累计达到即计满分
+MIN_STUDY_SESSION_MINUTES = 5.0  # 单次学习会话最短有效时长，避免“打开即完成”
+STUDY_SESSION_TTL_MINUTES = 120  # 学习会话凭证有效期
+
+EVIDENCE_PROVIDER_ATTENDANCE = "system.attendance"
+EVIDENCE_PROVIDER_ASSESSMENT = "system.assessment"
+EVIDENCE_PROVIDER_STUDY = "system.study_session"
+TRUSTED_EVIDENCE_PROVIDERS = frozenset(
+    {EVIDENCE_PROVIDER_ATTENDANCE, EVIDENCE_PROVIDER_ASSESSMENT, EVIDENCE_PROVIDER_STUDY}
+)
+
+
+def _evidence_record(db: Session, learning_record_id: int, user: User) -> TrainingLearningRecord:
+    """证据只属于员工本人，且计划已分配；未分配计划不产生可信学习数据。"""
+    _require_employee_caller(user)
+    record = db.get(TrainingLearningRecord, learning_record_id)
+    if record is None or record.employee_user_id != user.id:
         raise BizError(403, "只能提交本人学习记录的证据")
+    plan_item = db.get(TrainingPlanItem, record.plan_item_id)
+    if plan_item is None:
+        raise BizError(400, "学习记录缺少培训计划项，不能认定学习证据")
+    plan = db.get(TrainingPlan, plan_item.plan_id)
+    if plan is None or plan.employee_user_id != user.id:
+        raise BizError(403, "只能提交本人学习记录的证据")
+    if plan.status != "assigned":
+        raise BizError(400, "计划尚未分配，不能产生学习证据")
+    return record
+
+
+def _study_token_secret() -> bytes:
+    """会话凭证由服务端签名，客户端无法伪造签发时间或替他人领取。"""
+    return settings.jwt_secret.encode("utf-8")
+
+
+def _sign_study_token(record_id: int, employee_id: int, issued_epoch: int, nonce: str) -> str:
+    body = f"{record_id}:{employee_id}:{issued_epoch}:{nonce}"
+    digest = hmac.new(_study_token_secret(), body.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"{body}:{digest}"
+
+
+def issue_study_session(
+    db: Session, learning_record_id: int, *, user: User, now: datetime | None = None
+) -> dict[str, Any]:
+    """员工领取一次性学习会话凭证；有效时长由服务端按签发与兑换时间差计算。"""
+    record = _evidence_record(db, learning_record_id, user)
+    moment = now or datetime.now()
+    nonce = secrets.token_hex(8)
+    return {
+        "learning_record_id": record.id,
+        "session_token": _sign_study_token(record.id, user.id, int(moment.timestamp()), nonce),
+        "expires_at": (moment + timedelta(minutes=STUDY_SESSION_TTL_MINUTES)).isoformat(),
+    }
+
+
+def _parse_study_token(token: str, *, record_id: int, employee_id: int, now: datetime) -> tuple[str, float]:
+    """校验签名/归属/有效期，返回 (nonce, 服务端计算的有效学习分钟数)。"""
+    parts = token.split(":")
+    if len(parts) != 5 or not all(part for part in parts):
+        raise BizError(400, "学习会话凭证格式无效")
+    raw_record, raw_employee, raw_epoch, nonce, digest = parts
+    expected = hmac.new(
+        _study_token_secret(), ":".join(parts[:4]).encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    if not hmac.compare_digest(expected, digest):
+        raise BizError(400, "学习会话凭证签名无效")
+    if not (raw_record.isdigit() and raw_employee.isdigit() and raw_epoch.isdigit()):
+        raise BizError(400, "学习会话凭证格式无效")
+    if int(raw_record) != record_id or int(raw_employee) != employee_id:
+        raise BizError(403, "学习会话凭证不属于本人学习记录")
+    issued_at = datetime.fromtimestamp(int(raw_epoch))
+    elapsed_minutes = (now - issued_at).total_seconds() / 60.0
+    if elapsed_minutes < 0:
+        raise BizError(400, "学习会话凭证签发时间异常")
+    if elapsed_minutes > STUDY_SESSION_TTL_MINUTES:
+        raise BizError(400, "学习会话凭证已过期，请重新开始学习")
+    if elapsed_minutes < MIN_STUDY_SESSION_MINUTES:
+        raise BizError(
+            400, f"有效学习时长不足 {MIN_STUDY_SESSION_MINUTES:g} 分钟，本次不计入证据"
+        )
+    return nonce, elapsed_minutes
+
+
+def _attendance_evidence(db: Session, record: TrainingLearningRecord) -> tuple[float, str, dict, str]:
+    plan_item = db.get(TrainingPlanItem, record.plan_item_id)
+    attendance = db.scalars(
+        select(TrainingAttendance)
+        .join(TrainingSession, TrainingSession.id == TrainingAttendance.session_id)
+        .where(
+            TrainingSession.course_id == plan_item.course_id,
+            TrainingAttendance.employee_user_id == record.employee_user_id,
+        )
+        .order_by(TrainingAttendance.id.desc())
+    ).first()
+    if attendance is None:
+        raise BizError(400, "未查到本人该课程的真实出勤记录，不能作为学习证据")
+    detail = {
+        "attendance_id": attendance.id,
+        "session_id": attendance.session_id,
+        "course_id": plan_item.course_id,
+    }
+    return 100.0, EVIDENCE_PROVIDER_ATTENDANCE, detail, f"attendance:{attendance.id}"
+
+
+def _assessment_evidence(db: Session, record: TrainingLearningRecord) -> tuple[float, str, dict, str]:
+    result = db.scalars(
+        select(AssessmentResult)
+        .join(AssessmentAssignment, AssessmentAssignment.id == AssessmentResult.assignment_id)
+        .where(
+            AssessmentAssignment.user_id == record.employee_user_id,
+            AssessmentAssignment.purpose != "recruitment",
+            AssessmentResult.passed == 1,
+        )
+        .order_by(AssessmentResult.id.desc())
+    ).first()
+    if result is None:
+        raise BizError(400, "未查到本人已通过的员工测评结果，不能作为学习证据")
+    detail = {
+        "result_id": result.id,
+        "version": result.version,
+        "total_score": float(result.total_score),
+    }
+    return 100.0, EVIDENCE_PROVIDER_ASSESSMENT, detail, f"assessment:{result.id}:v{result.version}"
+
+
+def _study_evidence(
+    db: Session,
+    record: TrainingLearningRecord,
+    payload: dict,
+    *,
+    employee_id: int,
+    now: datetime,
+) -> tuple[float, str, dict, str]:
+    token = str(payload.get("session_token") or "").strip()
+    if not token:
+        raise BizError(400, "学习会话凭证缺失，请先领取 study-sessions 凭证")
+    nonce, minutes = _parse_study_token(
+        token, record_id=record.id, employee_id=employee_id, now=now
+    )
+    previous = list(
+        db.scalars(
+            select(TrainingLearningEvidence).where(
+                TrainingLearningEvidence.learning_record_id == record.id,
+                TrainingLearningEvidence.evidence_type == "study_session",
+                TrainingLearningEvidence.verified_by == EVIDENCE_PROVIDER_STUDY,
+            )
+        )
+    )
+    prior_minutes = sum(float((row.payload_json or {}).get("minutes") or 0) for row in previous)
+    cumulative = prior_minutes + minutes
+    score = min(100.0, round(cumulative / COURSE_STUDY_TARGET_MINUTES * 100, 2))
+    detail = {"minutes": round(minutes, 2), "cumulative_minutes": round(cumulative, 2)}
+    return score, EVIDENCE_PROVIDER_STUDY, detail, f"study_session:{nonce}"
+
+
+def submit_evidence(
+    db: Session, payload: EvidenceSubmitRequest, *, user: User, now: datetime | None = None
+) -> TrainingLearningEvidence:
+    """员工提交学习证据；分数与验证人由服务端可信来源计算，客户端不能自报。
+
+    同一可信来源（出勤/测评结果/会话 nonce）在一条学习记录内只能计入一次，
+    用于阻止重复计数与凭证重放。
+    """
+    record = _evidence_record(db, payload.learning_record_id, user)
+    moment = now or datetime.now()
+    raw_payload = dict(payload.payload or {})
+    if payload.evidence_type == "attendance":
+        score, provider, detail, evidence_key = _attendance_evidence(db, record)
+    elif payload.evidence_type == "assessment":
+        score, provider, detail, evidence_key = _assessment_evidence(db, record)
+    else:
+        score, provider, detail, evidence_key = _study_evidence(
+            db, record, raw_payload, employee_id=user.id, now=moment
+        )
+    duplicate = db.scalar(
+        select(TrainingLearningEvidence).where(
+            TrainingLearningEvidence.learning_record_id == record.id,
+            TrainingLearningEvidence.evidence_key == evidence_key,
+        )
+    )
+    if duplicate is not None:
+        raise BizError(400, "该学习证据已提交，同一来源不能重复计入")
     evidence = TrainingLearningEvidence(
         learning_record_id=record.id,
         employee_user_id=user.id,
-        evidence_type=payload.evidence_type.strip(),
-        payload_json=payload.payload,
-        score=float(payload.score),
-        verified_by=payload.verified_by,
+        evidence_type=payload.evidence_type,
+        evidence_key=evidence_key,
+        payload_json=detail,
+        score=score,
+        verified_by=provider,
     )
     db.add(evidence)
-    # 累计证据分供正式完成判定
-    existing = db.scalars(
-        select(TrainingLearningEvidence).where(TrainingLearningEvidence.learning_record_id == record.id)
-    ).all()
-    record.evidence_score = sum(e.score for e in existing) / len(existing) if existing else 0.0
+    try:
+        db.flush()
+    except IntegrityError as exc:  # 并发重复提交时由唯一约束兜底
+        db.rollback()
+        raise BizError(400, "该学习证据已提交，同一来源不能重复计入") from exc
+    rows = list(
+        db.scalars(
+            select(TrainingLearningEvidence).where(
+                TrainingLearningEvidence.learning_record_id == record.id
+            )
+        )
+    )
+    record.evidence_score = max(float(row.score) for row in rows)
     db.commit()
     db.refresh(evidence)
     return evidence
 
 
 def confirm_formal_completion(db: Session, learning_record_id: int, *, admin: User) -> TrainingLearningRecord:
-    """管理员依据有效证据认定正式完成；无证据拒绝。"""
+    """管理员依据可信证据认定正式完成；仅系统校验证据计数，且须达到完成阈值。"""
     require_admin(admin)
     record = db.get(TrainingLearningRecord, learning_record_id)
     if not record:
         raise BizError(404, "学习记录不存在")
-    evidence_count = db.scalar(
-        select(func.count(TrainingLearningEvidence.id)).where(
-            TrainingLearningEvidence.learning_record_id == learning_record_id
+    rows = list(
+        db.scalars(
+            select(TrainingLearningEvidence).where(
+                TrainingLearningEvidence.learning_record_id == learning_record_id,
+                TrainingLearningEvidence.verified_by.in_(TRUSTED_EVIDENCE_PROVIDERS),
+            )
         )
     )
-    if not evidence_count:
+    if not rows:
         raise BizError(400, "无有效学习证据，不能认定正式完成")
+    best = max(float(row.score) for row in rows)
+    if best < FORMAL_COMPLETION_MIN_SCORE:
+        raise BizError(
+            400,
+            f"有效学习证据得分 {best:g} 未达到完成阈值 {FORMAL_COMPLETION_MIN_SCORE:g}，"
+            "不能认定正式完成",
+        )
     record.formal_completed = 1
     record.status = "completed"
+    record.evidence_score = best
     db.commit()
     db.refresh(record)
     return record

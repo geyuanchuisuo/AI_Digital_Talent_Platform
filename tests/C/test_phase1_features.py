@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 from c_harness import Harness
@@ -198,12 +199,13 @@ class LearningEvidenceTest(unittest.TestCase):
         self.h = Harness()
         self.admin = self.h.create_user("a", role="admin")
         self.emp = self.h.create_user("e", role="employee")
-        course = self.h.client.post(
+        self.course_id = self.h.client.post(
             "/api/training/courses", json={"title": "C", "description": "x", "material_url": "http://x"},
             headers=Harness.headers(self.admin)).json()["data"]["id"]
         plan = self.h.client.post(
             "/api/training/plans",
-            json={"employee_user_id": self.emp.id, "items": [{"course_id": course, "dimension_name": "专业"}]},
+            json={"employee_user_id": self.emp.id,
+                  "items": [{"course_id": self.course_id, "dimension_name": "专业"}]},
             headers=Harness.headers(self.admin)).json()["data"]["id"]
         # 分配计划后员工才能上报学习进度，从而创建学习记录
         self.h.client.post(f"/api/training/plans/{plan}/assign", headers=Harness.headers(self.admin))
@@ -219,21 +221,127 @@ class LearningEvidenceTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.h.close()
 
-    def test_evidence_blocks_completion_without_evidence(self):
-        r = self.h.client.post(
+    def _confirm(self):
+        return self.h.client.post(
             f"/api/training/learning-records/{self.record_id}/confirm-completion",
             headers=Harness.headers(self.admin))
-        self.assertEqual(r.status_code, 400)
-        e = self.h.client.post(
+
+    def _issue_token(self, *, minutes_ago: float) -> str:
+        from app.models import User
+        from app.modules.training import service
+
+        db = self.h.session()
+        try:
+            token = service.issue_study_session(
+                db, self.record_id, user=db.get(User, self.emp.id),
+                now=datetime.now() - timedelta(minutes=minutes_ago),
+            )["session_token"]
+        finally:
+            db.close()
+        return token
+
+    def _submit_study(self, token: str):
+        from app.models import User
+        from app.modules.training import service
+        from app.modules.training.schemas import EvidenceSubmitRequest
+
+        db = self.h.session()
+        try:
+            return service.submit_evidence(
+                db,
+                EvidenceSubmitRequest(
+                    learning_record_id=self.record_id,
+                    evidence_type="study_session",
+                    payload={"session_token": token},
+                ),
+                user=db.get(User, self.emp.id),
+            )
+        finally:
+            db.close()
+
+    def test_client_cannot_self_report_score_or_verifier(self):
+        # 客户端直传 score/verified_by 或自定义证据类型一律拒绝（分数/验证人只能由服务端产生）
+        r = self.h.client.post(
             "/api/training/learning-evidence",
             json={"learning_record_id": self.record_id, "evidence_type": "video_heartbeat",
-                  "payload": {"duration": 600}, "score": 90},
+                  "payload": {"duration": 600}, "score": 100, "verified_by": "hr"},
             headers=Harness.headers(self.emp))
-        self.assertEqual(e.status_code, 200)
+        self.assertEqual(r.status_code, 422)
         r2 = self.h.client.post(
-            f"/api/training/learning-records/{self.record_id}/confirm-completion",
+            "/api/training/learning-evidence",
+            json={"learning_record_id": self.record_id, "evidence_type": "attendance", "score": 100},
+            headers=Harness.headers(self.emp))
+        self.assertEqual(r2.status_code, 422)
+
+    def test_attendance_evidence_requires_real_attendance_and_completes(self):
+        self.assertEqual(self._confirm().status_code, 400)
+        # 没有出勤记录时不能造出证据
+        r = self.h.client.post(
+            "/api/training/learning-evidence",
+            json={"learning_record_id": self.record_id, "evidence_type": "attendance"},
+            headers=Harness.headers(self.emp))
+        self.assertEqual(r.status_code, 400)
+        session = self.h.client.post(
+            f"/api/training/courses/{self.course_id}/sessions",
+            json={"instructor_name": "讲师", "starts_at": "2026-11-09T09:00:00",
+                  "ends_at": "2026-11-09T10:00:00"},
+            headers=Harness.headers(self.admin)).json()["data"]["id"]
+        self.h.client.post(
+            f"/api/training/sessions/{session}/attendance",
+            json={"employee_user_id": self.emp.id},
             headers=Harness.headers(self.admin))
-        self.assertTrue(r2.json()["data"]["formal_completed"])
+        r = self.h.client.post(
+            "/api/training/learning-evidence",
+            json={"learning_record_id": self.record_id, "evidence_type": "attendance"},
+            headers=Harness.headers(self.emp)).json()["data"]
+        self.assertEqual(r["score"], 100.0)
+        self.assertEqual(r["verified_by"], "system.attendance")
+        # 同一出勤记录不能重复计入
+        again = self.h.client.post(
+            "/api/training/learning-evidence",
+            json={"learning_record_id": self.record_id, "evidence_type": "attendance"},
+            headers=Harness.headers(self.emp))
+        self.assertEqual(again.status_code, 400)
+        ok_confirm = self._confirm()
+        self.assertEqual(ok_confirm.status_code, 200)
+        self.assertTrue(ok_confirm.json()["data"]["formal_completed"])
+
+    def test_study_session_rejects_short_forged_and_replay(self):
+        from app.core.errors import BizError
+
+        # 不足最短有效时长（5 分钟）不计入证据
+        with self.assertRaises(BizError):
+            self._submit_study(self._issue_token(minutes_ago=1))
+        token = self._issue_token(minutes_ago=6)
+        first = self._submit_study(token)
+        self.assertLess(first.score, 60)  # 6/45 分钟，未达完成阈值
+        # 同一会话凭证重放被拒
+        with self.assertRaises(BizError):
+            self._submit_study(token)
+        # 篡改签发时间但签名不符被拒
+        forged = token[:-1] + ("0" if token[-1] != "0" else "1")
+        with self.assertRaises(BizError):
+            self._submit_study(forged)
+        # 证据分未达阈值时不能认定正式完成
+        self.assertEqual(self._confirm().status_code, 400)
+
+    def test_evidence_only_employee_of_record(self):
+        other = self.h.create_user("e2", role="employee")
+        r = self.h.client.post(
+            "/api/training/learning-evidence",
+            json={"learning_record_id": self.record_id, "evidence_type": "attendance"},
+            headers=Harness.headers(other))
+        self.assertEqual(r.status_code, 403)
+        r2 = self.h.client.post(
+            "/api/training/learning-records/"
+            f"{self.record_id}/study-sessions",
+            headers=Harness.headers(other))
+        self.assertEqual(r2.status_code, 403)
+        r3 = self.h.client.post(
+            f"/api/training/learning-records/{self.record_id}/study-sessions",
+            headers=Harness.headers(self.emp))
+        self.assertEqual(r3.status_code, 200)
+
 
 
 class AiInterviewTest(unittest.TestCase):

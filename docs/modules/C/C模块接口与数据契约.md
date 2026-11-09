@@ -41,7 +41,8 @@ AI 面试间：`ai_interview_sessions`、`ai_interview_questions`、`ai_intervie
 - 评价：课程 + 员工唯一（跨期合并为一份），课程/讲师 1–5 分、可选匿名文字、状态 submitted/withdrawn、来源期次与时间。
 - 反馈主题：课程维度保存模型归纳后的主题标签与支持份数，只保存达到 5 份支持的主题，不保存原文。
 - 培训计划：员工 user_id、目标岗位、来源（ai/manual）、状态（draft/assigned）、证据快照、计划版本；项目保存课程快照，不随课程后续编辑回写；`training_plan_versions` 保存历史快照。
-- 学习记录：按计划项+员工唯一，状态 not_started/learning/completed，备注、自报时间；完成仅代表自报。
+- 学习记录：按计划项+员工唯一，状态 not_started/learning/completed，备注、自报时间；完成仅代表自报，不等于正式完成。
+- 学习证据：`evidence_type` 仅 `attendance`（本人该课程真实出勤）/`assessment`（本人已通过的员工测评）/`study_session`（服务端签发的一次性学习会话凭证）；`score` 与 `verified_by` 只能由服务端可信来源计算（`system.attendance`/`system.assessment`/`system.study_session`），客户端不可直传；`learning_record_id + evidence_key` 唯一，阻止同一来源重复计入与凭证重放。
 - 成长事件：追加式记录测评完成、培训分配、课程完成。
 
 ## 3. 固定与自适应测评及计分规则
@@ -102,8 +103,9 @@ AI 面试间：`ai_interview_sessions`、`ai_interview_questions`、`ai_intervie
 - `GET /courses/{id}/feedback/summary`、`POST /courses/{id}/feedback-themes/refresh`、`PUT /courses/{id}/feedback-note`（管理员：匿名汇总、主题归纳、统一改进说明）
 - `POST /enrollments`、`GET /enrollments`、`POST /enrollments/{id}/decide`（员工报名必修/选修；管理员审批/候补；有 `capacity` 时按 pending 占位、approved 占用计数，满额直接进入 waitlisted；approved 可取消并递补最早候补）
 - `POST /enrollments/release-expired`（管理员/外部调度：把超时未决定的 pending 置为 `expired` 释放占位，并按课程递补候补；有期次时投递 `course.waitlist_promoted`）
-- `POST /learning-evidence`、`GET /learning-records/{id}/evidence`（员工提交学习证据：视频心跳/测验/出勤等；列表本人或管理员可见）
-- `POST /learning-records/{id}/confirm-completion`（管理员依据有效证据认定正式完成，无证据返回 400）
+- `POST /learning-records/{id}/study-sessions`（员工本人领取服务端签名的学习会话凭证，含有效期）
+- `POST /learning-evidence`、`GET /learning-records/{id}/evidence`（员工提交学习证据：出勤/已通过测评/学习会话时长；分数与验证人由服务端计算，客户端字段 `score`/`verified_by` 被严格拒绝；列表本人或管理员可见）
+- `POST /learning-records/{id}/confirm-completion`（管理员依据服务端校验证据认定正式完成：无证据或证据未达完成阈值返回 400）
 - `POST /plan-items/{id}/extension`（管理员延期必修期限，`new_due_date` + `reason` 必填；留 `training_due_extended` 事件并通知）
 - `POST /reminders/scan`（管理员/外部调度：按 `today`、`days_ahead` 扫描到期与逾期，经 D 通知中心投递，幂等）
 
@@ -136,10 +138,10 @@ AI 面试间 `/api/ai-interviews`：
 固定试卷保留为兼容模式，不作为自适应替代；在线运行时不自动生成并直接使用未审核题目（生成题一律 `pending` 待人工审核）。其余原"不做"项全部纳入一期实施：
 
 - AI 面试间：在线考试与结构化问答组织记录、AI 评判；音视频/情绪推断涉及个人信息的须先完成告知授权与隐私评审后启用（隐私评审前不上线音视频）。
-- 防挂机/有效学习证据：学习进度须由服务端可校验的学习证据支撑，自报与正式完成分离。
+- 防挂机/有效学习证据：学习进度须由服务端可校验的学习证据支撑，自报与正式完成分离。具体规则：`study_session` 凭证由服务端 HMAC 签名并绑定学习记录/员工，单次有效时长 ≥5 分钟、凭证有效期 120 分钟、同一 nonce 只能兑换一次；出勤与已通过测评各按其真实记录键去重。
 - 课程审批/候补/名额占位/24h 超时：员工可自主报名必修/选修课，审批占位、候补队列、24h 未确认超时释放。
 - 九宫格/人才池（F10）：绩效（最近 HR 确认周期）+ 潜力（经理初评、HR 审核）→ 九宫格；人才池进出审批、年度/提前复核、员工异议、个人发展计划、部门匿名汇总 <5 隐藏、导出审计。
-- 有效学时证明：按课程配置的完成条件（学习进度/线下出勤/测验）认定正式完成，无证据不认定。
+- 有效学时证明：按服务端可信证据认定正式完成，无证据不认定；一期固定阈值——出勤或已通过员工测评计 100 分并达标，`study_session` 按累计时长/45 分钟折算，正式完成需可信证据最高分 ≥60 分。课程级完成条件配置未落库前使用该统一常量，后续接入按课程取值。
 - 面试总分与自动招聘推进仍不做（人工面试不计总分、不自动推进招聘状态）；自动人事决策不做；候选人培训不做（候选人入职后由 A 改员工角色后再分配）。
 
 ## 7. 培训评价规则（D-34 / REQ-TRN-001 AC-6，2026-11-06 纳入一期）
@@ -155,11 +157,14 @@ AI 面试间 `/api/ai-interviews`：
 ## 8. 本轮实现与验证状态（2026-11-09 更新）
 
 - 已实现：`backend/app/modules/assessments`（模型/自适应策略与选题/评分/服务/路由/registry/模型出题）、`interviews`（人工面试 + AI 面试间）、`training`（课程/计划/评价 + 报名审批/候补/名额上限/超时释放 + 学习证据 + 到期/逾期/延期）、`inventory`（F10 九宫格/人才池/异议/IDP/匿名汇总/导出审计）四域与 32 张表；前端 `frontend/src/app/(main)/{assessments,interviews,target,training,inventory}` 页面、类型与接口封装，含自适应逐题答题、能力雷达、员工评价、管理员期次/反馈汇总、`/inventory`（盘点/人才池/汇总/异议/IDP）、`/interviews/ai`（会话/题目/逐题作答）、`/training/enrollments`（报名审批/候补/超时释放/学习证据）、培训计划到期日录入与管理员延期、课程名额维护与盘点 CSV 导出入口。
+- 学习证据可信化（2026-11-09，C08）：`submit_evidence` 不再接收客户端 `score`/`verified_by`（DTO 严格字段，直传返回 422），三类证据的分数与验证人由服务端计算：`attendance` 读本人该课程真实出勤（100 分）、`assessment` 读本人已通过员工测评（100 分，招聘测评不计）、`study_session` 凭服务端 HMAC 签名的一次性会话券兑换并按服务端时间差计有效分钟数（累计/45 分钟折算）。`evidence_key`（出勤 id/测评结果版本/会话 nonce）同记录唯一，重复提交或凭证重放返回 400；`confirm_formal_completion` 只认 `system.*` 验证人的证据且最高分须 ≥60。迁移 `C_0007_learning_evidence_key` 新增该列与唯一约束。
 - 时间列：C 域 32 张表统一使用公共 `CrossDbUpdatedAtMixin`（2026-11-09 收敛，删除自建 `CTimestampMixin`；列结构与 DDL 等价，无需迁移）。
-- application_id 契约（2026-11-07 对接 A 的 M3）：`interview_rounds.application_id` 与 `ai_interview_sessions.application_id` 已对齐 A 的 `applications.id`（`PK_TYPE`，MySQL 下 BIGINT UNSIGNED）并加数据库级外键（RESTRICT，申请不物理删除），迁移 `C_0004_application_fk`。语义：`applications` 为同人多岗位独立申请，C 侧仅引用其主键，不复制其状态机。**2026-11-09 改挂**：`C_0004` 的 `down_revision` 由 `A_0007_scope_grants` 改为 `B_0002_merge_workflow_review`（master 合入 A_0008/B_0001/B_0002/D_0001~D_0009 后原挂点会造成双 head；迁移从未在任何库执行，改挂安全）。新增 `C_0005_plan_item_due_date`（`training_plan_items.due_date DATE NULL`）与 `C_0006_course_capacity`（`training_courses.capacity INT NULL`，报名名额上限），当前单头 `C_0006_course_capacity`。
+- application_id 契约（2026-11-07 对接 A 的 M3）：`interview_rounds.application_id` 与 `ai_interview_sessions.application_id` 已对齐 A 的 `applications.id`（`PK_TYPE`，MySQL 下 BIGINT UNSIGNED）并加数据库级外键（RESTRICT，申请不物理删除），迁移 `C_0004_application_fk`。语义：`applications` 为同人多岗位独立申请，C 侧仅引用其主键，不复制其状态机。**2026-11-09 改挂**：`C_0004` 的 `down_revision` 由 `A_0007_scope_grants` 改为 `B_0002_merge_workflow_review`（master 合入 A_0008/B_0001/B_0002/D_0001~D_0009 后原挂点会造成双 head；迁移从未在任何库执行，改挂安全）。新增 `C_0005_plan_item_due_date`（`training_plan_items.due_date DATE NULL`）与 `C_0006_course_capacity`（`training_courses.capacity INT NULL`，报名名额上限）与 `C_0007_learning_evidence_key`（`training_learning_evidence.evidence_key VARCHAR(100) NOT NULL` + `uk_evidence_record_key`，历史行回填 `legacy:<id>`），当前单头 `C_0007_learning_evidence_key`。
 - 通知接入（2026-11-09，只读调用 D 通知中心）：`course.assigned`（计划指派）、`course.enrollment_reviewed`（报名审批）、`course.waitlist_promoted`（候补递补，课程存在未结束期次时以该期次为 ref，否则跳过）、`training.due_reminder` / `training.overdue`（到期/逾期扫描）、`training.extension_decided`（延期）六类事件按 D 契约 ref 与幂等键投递。
 - 员工测评完成事件（2026-11-09，响应 `REQ-D-20261109-103009`；同日按用户决定改为采用 D 已发布的桥接）：`purpose=employee` 的测评在 `submit_assignment`、`retry_grading` 首次进入 `completed` 时，调用 D 的 `run_service.start_employee_assessment_run(db, assignment_id=..., result_id=..., actor=当前登录人)`；事件码 `employee_assessment_completed`、事件 ID `{assignment_id}:v{result_version}` 由 D 侧生成并按其 `WorkflowDefinition.code` 解析 published 版本；招聘测评不触发；重复交卷/补评不重复触发（D 侧 UUIDv5 thread_id 幂等）；触发失败（含流程未发布返回 `None`）不回滚已提交的测评结果，返回值仅新增内部字段 `workflow_event`（不进入 HTTP 响应体）。触发人校验为“测评本人或该测评分配人”，不使用全权管理员账号代发。
-- 已验证：`$env:PYTHONPATH="backend"; python -m unittest discover -s tests/C -p "test_*.py"` 运行 **60 项全部通过**（SQLite 内存库 + FastAPI TestClient + 注入式评分/出题/草稿/主题/评委替身；在原 58 项基础上新增：员工测评完成发一次业务事件且补评不重复、招聘测评不触发，事件入口用替身隔离）。
-- 已验证：`npm run typecheck` 与 `npm run build`（frontend）均通过；构建路由清单含 `/inventory`、`/interviews/ai`、`/training/enrollments`；application_id 外键的 MySQL DDL 编译验证（`BIGINT UNSIGNED` + `REFERENCES applications(id)`，类型与 A 的 PK_TYPE 匹配）。
-- 未验证：MySQL/Alembic 实际迁移（`C_0004`/`C_0005`/`C_0006` 依赖 A 的集成链，本地无 MySQL）、真实 LLM 评分/出题/主题归纳/AI 面试评分、真实 JWT 与账号权限、真实浏览器页面、A 的 `AppShell` 菜单集成（新增三页仍缺入口）、通知的真实投递与每日定时触发。上述未验证项不得表述为验收通过。
+- 已验证：`$env:PYTHONPATH="backend"; python -m unittest discover -s tests/C -p "test_*.py"` 运行 **63 项全部通过**（SQLite 内存库 + FastAPI TestClient + 注入式评分/出题/草稿/主题/评委替身；本轮新增 C08 四例：客户端直传 score/verified_by 与非法证据类型 422、出勤证据需真实出勤且重复计入 400、学习会话凭证短时长/伪造/重放被拒且未达阈值不能完成、他人不可提交本人证据）。
+- 已验证：`npm run typecheck` 与 `npm run build`（frontend）均通过；构建路由清单含 `/inventory`、`/interviews/ai`、`/training/enrollments`；application_id 外键的 MySQL DDL 编译验证（`BIGINT UNSIGNED` + `REFERENCES applications(id)`，类型与 A 的 PK_TYPE 匹配）；本轮 `training_learning_evidence` 表的 MySQL DDL 编译验证含 `uk_evidence_record_key` 唯一约束。
+- 已验证（MySQL 集成环境，2026-11-09 补测）：本机 MySQL 以 Docker 容器 `aitalent-yb-env-mysql` 提供（`127.0.0.1:3307` → `3306`，库 `ai_talent_yb`），启动后在空库执行 `alembic upgrade` 已通过 `C_0001`~`C_0002`、A 链与 `D_0001_notifications`（`C_0001` 使用临时本地补丁，见下条；未提交、文件已还原）。
+- 已发现/待 A 修复（`REQ-C-20261109-121506`）：`C_0001` 用 `create_all` 读取当前模型元数据，会把 `application_id` 外键提前带入 `interview_rounds`/`ai_interview_sessions`，而 `applications` 由 A_0005 创建，导致**从空库**升级在 `C_0001` 报 `1824`。该文件按 `ownership.json` 归 A，C 已提交补丁请求 A 处理；本地用该补丁验证后续链可跑到 `D_0001`。
+- 未验证（进行中）：全链从空库继续执行在 `D_0002_workflow_checkpoint` 处阻塞——该迁移导入 `langgraph`（requirements 已声明，本机 Python 3.10 与 `backend/.venv` 均未安装，pip 因网络 SSL 失败无法安装），因此 `C_0004`~`C_0007` 的 MySQL 实跑仍未完成；`C_0007` 目前仅完成 MySQL 方言 DDL 编译。真实 LLM 评分/出题/主题归纳/AI 面试评分、真实 JWT 与账号权限、真实浏览器页面、A 的 `AppShell` 菜单集成（新增三页仍缺入口）、通知的真实投递与每日定时触发均未验证；前端 `/training/enrollments` 已去掉自报分数输入并接入 `study-sessions` 领券与结算，但未实机浏览器验证。上述未验证项不得表述为验收通过。
 - 接入方式：`main.py` 已循环 `from app.modules.assessments.registry import ALL_ROUTERS` 注册全部 C 路由；`app/models/__init__.py` 已由 A 整合为 75 表（含 C 全部 32 表）；新增前端菜单入口待 A 在 `AppShell` 添加，见 `docs/requests/C/20261107-A-一期扩表集成与申请契约.md` 第 6 项。
