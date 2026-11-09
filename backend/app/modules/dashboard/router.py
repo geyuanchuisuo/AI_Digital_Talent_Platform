@@ -16,9 +16,16 @@ from app.api.deps import CurrentUser
 from app.core.errors import BizError
 from app.core.response import ok
 from app.database import get_db
-from app.modules.dashboard import service
+from app.modules.dashboard import overview, service
 
 router = APIRouter(prefix="/api/ai-platform", tags=["ai-platform"])
+
+
+# ---- 管理员工作台（T-D22）----
+
+@router.get("/admin-overview", summary="管理员工作台六类数量卡片（管理侧；实时查询）")
+def admin_overview(user: CurrentUser, db: Annotated[Session, Depends(get_db)]):
+    return ok(overview.admin_overview(db, user=user))
 
 
 # ---- 模型供应商 ----

@@ -12,6 +12,7 @@ import {
   AuditOutlined,
   BarChartOutlined,
   BellOutlined,
+  DashboardOutlined,
   FileSearchOutlined,
   LogoutOutlined,
   ProfileOutlined,
@@ -37,7 +38,8 @@ const MENU_ITEMS = [
   { key: '/assessments', icon: <AuditOutlined />, label: '岗位测评' },
   { key: '/interviews', icon: <SolutionOutlined />, label: '人工面试' },
   { key: '/training', icon: <ReadOutlined />, label: '培训成长' },
-  // D 模块（T-D24 通知中心）
+  // D 模块（T-D22 管理员工作台 + T-D24 通知中心）
+  { key: '/dashboard', icon: <DashboardOutlined />, label: '工作台' },
   { key: '/notifications', icon: <BellOutlined />, label: '通知中心' },
 ];
 
