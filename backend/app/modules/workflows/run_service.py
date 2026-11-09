@@ -17,11 +17,12 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.core.errors import BizError
 from app.core.workflows.engine.runner import EngineRunResult, WorkflowEngine
+from app.models import WorkflowEngineRun
 from app.core.workflows.engine.saver import make_saver
 from app.modules.workflows import service
 from app.modules.workflows.models import WorkflowRun, WorkflowRunStep
@@ -231,6 +232,23 @@ def resume_approval(
             raise BizError(422, f"审批 deadline 非法：{deadline!r}") from exc
 
     graph = _build(run, db)
+    claimed = db.execute(
+        update(WorkflowRun)
+        .where(WorkflowRun.id == run.id, WorkflowRun.status == "waiting")
+        .values(status="running")
+    )
+    if claimed.rowcount != 1:
+        db.rollback()
+        raise BizError(409, "等待态已被取消或其他审批占用")
+    engine_claimed = db.execute(
+        update(WorkflowEngineRun)
+        .where(WorkflowEngineRun.thread_id == thread_id, WorkflowEngineRun.status == "waiting")
+        .values(status="running")
+    )
+    if engine_claimed.rowcount != 1:
+        db.rollback()
+        raise BizError(409, "引擎等待态已变化，无法审批")
+    db.commit()
     result = get_engine().resume(
         graph_name_for(run.version_id, run.thread_id),
         graph,
@@ -244,6 +262,47 @@ def resume_approval(
     )
     _mirror(db, run, result)
     return {"run": run, "result": result}
+
+
+def cancel_waiting_run(db: Session, *, thread_id: str, user) -> WorkflowRun:
+    """仅取消人工等待中的运行；不打断执行中节点，不删除检查点。"""
+    service.require_management(user)
+    run = db.execute(select(WorkflowRun).where(WorkflowRun.thread_id == thread_id)).scalar_one_or_none()
+    if run is None:
+        raise BizError(404, "运行实例不存在")
+    if run.status != "waiting":
+        raise BizError(409, f"仅等待中的运行可取消，当前 {run.status}")
+    changed = db.execute(
+        update(WorkflowRun)
+        .where(WorkflowRun.id == run.id, WorkflowRun.status == "waiting")
+        .values(status="cancelled", finished_at=datetime.now(), error=None)
+    )
+    if changed.rowcount != 1:
+        db.rollback()
+        raise BizError(409, "等待态已被其他操作占用")
+    engine_changed = db.execute(
+        update(WorkflowEngineRun)
+        .where(WorkflowEngineRun.thread_id == thread_id, WorkflowEngineRun.status == "waiting")
+        .values(status="cancelled", finished_at=datetime.now(), error=None)
+    )
+    if engine_changed.rowcount != 1:
+        db.rollback()
+        raise BizError(409, "引擎等待态已变化，无法取消")
+    step = db.execute(
+        select(WorkflowRunStep)
+        .where(WorkflowRunStep.run_id == run.id, WorkflowRunStep.status == "waiting")
+        .order_by(WorkflowRunStep.id.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if step is not None:
+        step.output_json = {
+            **(step.output_json or {}),
+            "cancelled_by": user.id,
+            "cancelled_at": datetime.now().isoformat(),
+        }
+    db.commit()
+    db.refresh(run)
+    return run
 
 
 # ---- 查询 ----

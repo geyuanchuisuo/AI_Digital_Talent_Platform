@@ -296,3 +296,13 @@ def approve_run(
             "error": result.error,
         }
     )
+
+
+@router.post("/runs/{thread_id}/cancel", summary="取消人工等待中的运行（管理侧）")
+def cancel_run(
+    thread_id: str,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    run = run_service.cancel_waiting_run(db, thread_id=thread_id, user=user)
+    return ok({"run_id": run.id, "thread_id": run.thread_id, "status": run.status})
