@@ -63,7 +63,7 @@
 | D05 | D | P1 | 流程定义、版本、审核发布/停用/回滚 | × | backend/app/modules/workflows/{models,service,router}.py | 代码存在；完整运行闭环待验证 | 权限、版本锁定、审核人与提交人隔离及回滚验收 |
 | D06 | D | P1 | 五类业务节点适配器及人工审批实现 | × | backend/app/modules/workflows/nodes/business.py:160；human_approval.py | 五类执行器/审批 interrupt 已有代码，不等于五类真实业务全链通过；C/D 身份衔接待联调 | 实际服务输入/输出、错误和授权验收；员工本人触发后培训草稿节点需采用受控服务身份，不能绕过管理员服务门禁 |
 | D07 | D/B/C | P0 | 解析/测评/知识入库三类业务事件到流程的完整接线 |  | backend/app/modules/assessments/service.py；workflows/run_service.py；C 的 20261109-112028 发布登记 | C 测评生产方与 D 桥接已合入 141927c；60 项隔离测试为历史证据，真实引擎/已发布事件定义未联调，B 解析和知识生产方仍待接线 | D 复核本人/分配人身份与发布定义，B/C/D 联验三类事件、重复/招聘排除/事务失败；不能把 C 当作仍仅本地推进 |
-| D08 | D | P1 | 定时触发、取消、失败重试与重启恢复 |  | T-D18；f9c4306 状态同步改动 | 部分；最新提交仅静态验证 | 补定时启用审计、失败阶段重试、运行中取消与完整运行测试 |
+| D08 | D | P1 | 定时触发、取消、失败重试与重启恢复 | × | **T-D18**（D 记录 `UPD-D-20261109-120119-T-D18失败重试与运行取消` / `UPD-D-20261109-124723-T-D18定时触发`）：`schedule.py` 扫描器（sys_settings 开关**默认关闭**、管理侧 GET/PUT 含 interval/参与定义/执行主体、`updated_by` 落审计、daemon 线程随 lifespan 30s 一轮、到期按最近 schedule 运行判定、无执行主体只登记不执行如实可见）；`run_service.retry_failed_run`（failed→running CAS 占用 + 引擎检查点续跑，已成功节点不重执行）与 `cancel_running_run`（双侧 CAS + 节点执行前协作取消检查、取消后拒绝迟到回执与重试）；重启恢复复用 T-D04 检查点（main.py runner 启动无条件 running→pending 恢复 + `test_waiting_survives_engine_restart_and_recovery`）；完整运行= `test_manual_run_data_analysis_succeeds_and_records_steps` 真实端到端（registry 准入→副本 SQL→快照落库）；测试 `tests/D/test_workflow_schedule_t18.py` 11 例 + `test_workflow_retry_cancel_t18.py` 12 例 + `test_workflow_nodes_t17.py` 16 例 + engine/lifecycle 12 例 | 本机复跑（2026-11-11）：上述 5 文件 **exit 0 / 51 passed / 0 failed**（13.55s）；跑前按 P3 修复 4 个工作流测试文件的 A06-1 门禁会话重定向（纯测试侧：env 夹具 `monkeypatch app.database.SessionLocal` + 建空 `sys_roles`/`sys_user_roles` 表回退 `users.role`，见本轮 MASTER 记录，未改任何生产代码） | 真实 MySQL 运行验收与浏览器验收按用户口径延后归集中验收；三条业务事件端到端联调归 D07（B 生产方待接线）；schedule 与 T-D21 数字员工的定时触发接线一期未接（默认关闭口径） |
 | D09 | D | P0 | Dify 私有化及业务对接 |  | docs/updates/D/20261108-041500-T-D05部署与建应用API连通.md:11、13 | 历史记录已有 1.19.0 锁版、测试应用及 Service API 连通；本轮未复验存活，业务对接层/画布映射与升级演练未完成 | 复核部署/锁版，补业务应用、发布回滚/权限、画布与业务运行；不再把版本锁定/测试应用误写为未做 |
 | D10 | D | P0 | 可视化节点/连线画布与 Dify 对接 |  | workflows/page.tsx:467 当前 JSON 整图；T-D16待做 | 缺口 | 真实可视化编辑/校验/回传/版本对账，不能只交 JSON 输入框 |
 | D11 | D | P1 | Skills 组件库与版本发布 | × | **T-D19**（D 记录 `UPD-D-20261109-133022-T-D19-Skills组件库`）：`backend/app/modules/workflows/skills_{router,service}.py`（组件受控生命周期：创建→审核→发布→引用，含 schema/参数/工具绑定）；`main.py:217-220` 注册 `/api/workflows/skills`；`tests/D/test_workflow_skills_t19.py` 10 例，定向 **10 passed**、`tests/D/` 全量 **177 passed / 12 skipped** | 隔离测试已达（SQLite 夹具）；当时 `test_models_structure.py` 3 处失败为 **C_0006 预存在问题**（归属 C，与 Skills 无关，D 已如实登记）；真实 MySQL 与浏览器未验 | 编排引用与审计的真实联调验收；与 D05 流程定义联验版本引用与停用后行为 |
@@ -178,3 +178,29 @@
 **两行共同边界**：均为隔离库测试已达（真实 MySQL 迁移只在隔离库/临时空库演练，主验收库 `ai_talent` 未应用 `A_0012`/`A_0013`）；真实浏览器与人工验收未做；A03 的 A 记录中「原样全量 exit 1（唯一失败为已登记 B/D 向量串扰）」以 deselect 后 exit 0 作为发布门禁，**不把原样 exit 1 写成通过**；A11 记录中的 safe-delete 护栏 `SystemExit` 环境失败已由 A 如实定性为非代码回归。
 
 **补登后 A 线路未打 × 的条目**：A02（A02-2 待 D 契约）、A05/A07/A09/A12/A14（待 A 回传）、A15（已打 ×，待与 A03 联调）。
+
+---
+
+## 2026-11-11 第五轮补登（D08 + P3 测试侧修复，基线 `57c7d07`）
+
+> **为什么补**：按用户「同步云端仓库分支和主分支，然后继续」指令推进 D08 时，复跑发现 P1-P9 清单的 **P3 族仍在**——A06-1 统一门禁 `require_management_guard`（`backend/app/core/auth/scope.py:295`）内部固定开 `app.database.SessionLocal`（真实库）按 `user.id` 重查角色，D 域 SQLite 替身环境缺 `sys_user_roles` 绑定与用户行，`get_role_codes` 查询异常/查无此人 → 兜底 `("personal",)` → 整族 403（`UPD-MASTER-20261110-203044` 记录 72 例）。本轮按该清单的「D 测试改用真实库种子 / 契约替身」选项完成测试侧修复，D08 四项「下一步」核实在 T-D18 已全部实现，台账行补 ×。
+
+**P3 修复（纯测试侧，零生产代码改动，11 文件 +123/-8）**：
+
+| 修复手段 | 适用文件 |
+| --- | --- |
+| env/db 夹具 `monkeypatch.setattr("app.database.SessionLocal", factory)` 把门禁内部会话重定向到测试库 | `test_workflow_{lifecycle,models,nodes_t17,retry_cancel_t18,schedule_t18,skills_t19}.py`、`test_dashboard_{t22,t23}.py`、`test_digital_t21.py`、`test_ai_platform_t20.py`（10 文件；`test_reports_td11.py` 原有 `reports_service.SessionLocal` patch 已覆盖其自有门禁） |
+| 建表清单补 `SysRole.__table__` / `SysUserRole.__table__`（空表使 `get_role_codes` 的 sys_user_roles 查询**成功返回空** → 回退 `users.role`，替身用户 role 字段生效） | 同上 11 文件 |
+| 补种子 User 行（`db.get(User, uid)` 须命中才能回退角色） | `test_reports_td11.py`（id=2/4/5 hr/hr/personal）、`test_workflow_models.py`（id=9001 hr，对应 `_Actor(9001)`） |
+| 订正 A06-3 统一拒绝文案的过时断言（`"403"/"管理侧"` → `DENY_MESSAGE`「无权访问该资源」，REQ-02 口径） | `test_dashboard_t22.py::test_personal_forbidden` |
+
+**验证（真实退出码，本机 SQLite，无外部依赖）**：
+
+| 项 | 结果 |
+| --- | --- |
+| 修复文件逐一单跑 | workflow 五件套 **51/51**；dashboard_t22 **12/12**；models+reports **20/20**；digital/skills/ai_platform/t23 全过 |
+| **tests/D 全量**（`pytest tests/D/ -q --ignore=tests/D/test_etl_pgsql.py`，修复前 53 failed / 171 passed） | **exit 0，224 passed / 12 skipped / 0 failed**（295.09s）；12 skipped 为标记跳过的集成/条件用例，非失败 |
+| `test_etl_pgsql.py`（真实 MySQL→PG 集成，本机 PG 未起） | 未跑，沿用户口径归集中验收 |
+| 改动边界 | 仅 `tests/D/**` 与本表，未触碰 `backend/app/**` 生产代码、未改 `ownership.json`、未动他人文件 |
+
+**修复后 P3 状态**：**测试侧收口**（tests/D 全绿）。P3 建议的另一选项「公共门禁提供可注入 db 的入口」留 A 评估（可选加固，非必需）；`reports/service.py` 自有门禁经既有 patch 覆盖，无需改动。

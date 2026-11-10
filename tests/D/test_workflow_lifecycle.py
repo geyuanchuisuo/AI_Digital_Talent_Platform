@@ -16,6 +16,8 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.errors import BizError
 from app.models import (
+    SysRole,
+    SysUserRole,
     User,
     WorkflowDefinition,
     WorkflowDefinitionVersion,
@@ -27,8 +29,12 @@ from app.modules.workflows import service
 
 # conftest 自动加载（SQLite 编译规则）；本文件全部同步用例
 
+# sys_roles/sys_user_roles 建空表：get_role_codes 的 sys_user_roles 查询须成功返回空
+# 才回退 users.role（P3 修复，见 UPD-MASTER-20261110-203044；缺表=查询异常=一律 personal）。
 WF_TABLES = (
     User.__table__,
+    SysRole.__table__,
+    SysUserRole.__table__,
     WorkflowDefinition.__table__,
     WorkflowDefinitionVersion.__table__,
     WorkflowNode.__table__,
@@ -38,10 +44,13 @@ WF_TABLES = (
 
 
 @pytest.fixture()
-def db(tmp_path: Path):
+def db(tmp_path: Path, monkeypatch):
     engine = create_engine(f"sqlite:///{tmp_path / 'wf_lifecycle.db'}")
     WorkflowDefinition.__table__.metadata.create_all(engine, tables=WF_TABLES)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
+    # 门禁 require_management_guard 内部开 app.database.SessionLocal（真实库）——
+    # 重定向到本测试库，角色判定走替身用户（P3 修复）。
+    monkeypatch.setattr("app.database.SessionLocal", factory)
     with factory() as session:
         yield session
     engine.dispose()
