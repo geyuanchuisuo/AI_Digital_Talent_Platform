@@ -1,6 +1,6 @@
 # 原 PRD 全员统一执行跟踪表
 
-维护人：MASTER；核对日期：2026-11-09；本轮源码核对快照：`141927c`；初始发布快照：`f9c4306`。基础为 [原始 PRD](../../PRD-2026-AI数字化人才平台.md) 必达要求，细化按 [冻结需求 V2.6](../../需求文档.md)。本表是全员执行入口，不替代需求正文，不删减原始业务/技术/质量/服务要求。本轮核验及来源映射见 [核验记录](20261109-执行跟踪表核验.md)。
+维护人：MASTER；核对日期：2026-11-09（首轮）/ **2026-11-10 17:3x（第二轮补登）**；本轮源码核对快照：`141927c`；初始发布快照：`f9c4306`；**第二轮补登基线：`7721a60`（`gitea/Lon` = `gitea/master` = 本地 `Lon` = `master`，四 ref 一致）**。基础为 [原始 PRD](../../PRD-2026-AI数字化人才平台.md) 必达要求，细化按 [冻结需求 V2.6](../../需求文档.md)。本表是全员执行入口，不替代需求正文，不删减原始业务/技术/质量/服务要求。首轮核验及来源映射见 [核验记录](20261109-执行跟踪表核验.md)；**第二轮补登见 [本文件末尾的「2026-11-10 第二轮补登」节**。
 
 ## 标记与执行规则
 
@@ -15,13 +15,13 @@
 | ID | 牵头/配合 | 优先级 | 必达条目 | 已实现 | 源码或交接证据 | 接入/验证边界 | 下一步/通过条件 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | A01 | A | P1 | 岗位维护、版本号递增与多岗位申请基础 | × | backend/app/service/job_profile_service.py:80；backend/app/modules/recruitment/service.py:155 | 基础代码已接入；不包含 A08 的完整申请输入快照，也不代表招聘全链验收 | 验证双岗位互不影响、关闭/重开、对外字段与权限；完整申请快照按 A08 补齐 |
-| A02 | A | P0 | AI 综合匹配评分与人工推进 |  | backend/app/service/match_engine.py:300；仍硬门槛返回0/NULL、0.7/0.3 | 偏差待修复 | 消除旧算法替代；缺失资料待核实，内部建议不自动推进/淘汰 |
+| A02 | A | P0 | AI 综合匹配评分与人工推进 | 部分 | **A02-1**（`5eb81c7`）：删除 `evaluate()` 硬淘汰提前返回分支，新增 `classify_rule_gaps()` / `build_rule_review_text()`，`hard_fail` 恒 False、不符项/待核实进 `misses` 并随 Prompt C 输入交模型；`match.txt` 改为「所有候选人都进 prompt，不符项/待核实仅作参考，不得据此扣为 0-39 分」；定向三文件 **exit 0 / 33 passed** | A02-1 子单元已交付（A 记录 `UPD-A-20261110-1100-A02-1取消硬门槛自动淘汰`）；**A02 整行未完成**——旧算法替代未消除，综合分 `overall_score` 仍待 D 的 `PROMPT_C_SCHEMA` 契约（A→D 正式请求 `20261110-D-A02-2-PromptC综合分契约.md` 仍打开） | A02-2：消除旧算法替代 + 综合分口径；缺失资料待核实、内部建议不自动推进/淘汰；低分不自动淘汰、硬条件不符仍显示 |
 | A03 | A/B | P0 | 批次开始时冻结档案版本、匹配输入与历史快照 |  | backend/app/service/match_service.py:127；backend/app/tasks/match_worker.py:101；screen_worker.py:100 | 部分：批次保存岗位配置与人员 ID，执行时仍读当前档案；结果输入保存见 A15。批次档案冻结不是仅待测试，而是尚缺接入实现 | 批次开始绑定 B 正式版本/内容，排队期间修改档案不影响本批；重试和历史回读不读取新版本 |
 | A04 | A | P1 | 人工复核、分数与推进结论分离 | × | backend/app/service/{match_service,screen_service}.py | 代码存在；整体新评分口径待联调 | 结合 A02 验证刷新、重试、阈值与人工结论不覆盖 |
 | A05 | D/A | P1 | 岗位缺口预警的判断、触发及通知 |  | docs/modules/D/通知契约.md:22；backend/app/modules/notifications/producers.py:206 | 已有缺口统计/通知封装，未找到预警生产函数业务调用；D 为预警生产方，A 提供需求/录用事实；储备推荐见 A09 | D 牵头阈值、触发/解除、去重及通知投递；A 交付授权需求与人工录用口径 |
-| A06 | A | P0 | 员工/候选人身份与完整组织/角色/行/字段权限 |  | backend/app/core/auth/scope.py；目前 hr 可看全量，盘点 admin/hr 门禁 | 部分基础实现 | 补部门经理/管理层/培训职责权限，逐入口/任务/导出拒绝越权 |
+| A06 | A | P0 | 员工/候选人身份与完整组织/角色/行/字段权限 | × | **A06-1** `backend/app/core/auth/scope.py`（`account_is_management` 聚合 `sys_user_roles`，角色/职责门禁，`2eca164`）；**A06-2** `users.department_id` + `resolve_data_scope` 部门行级过滤 + 账号花名册过滤（`6ee1ebe`）；**A06-3** 字段级权限白名单 + 序列化裁剪（`e9e8015`）；**A06-4** 系统管理域 CRUD 路由整域接 `require_roles` 门禁（`78d946e`）；**A06-5** `assessments/service.py`、`interviews/ai_router.py` 内联 `ADMIN_ROLES` 行级判定统一迁移到 A06 角色门禁（`55a9010`） | 五个子单元全部交付，**A06 整行收口**（A 记录 `UPD-A-20261110-1430-A06-5跨模块行级判定迁移`）；C 域 `test_a06_c_module_gates.py` 12 例 exit 0 | 部门经理/管理层/培训职责权限的逐入口/任务/导出拒绝越权负例仍待验收；8 skipped 为 Milvus 19532 不可达（环境退化） |
 | A07 | A | P1 | 员工邀请激活、候选人验证注册/找回/会话撤权 |  | 统一需求 §3；预置账号不等价完整身份交付 | 未获完整实现证据 | 建立完整流程及负例；密码/验证码/停用/撤权分别验收 |
-| A08 | A/B/C | P1 | 独立申请的岗位/JD、简历内容快照及历史引用 |  | backend/app/modules/recruitment/models.py:164；service.py:155 | 当前保存岗位版本号/原件 ID，不等于申请时内容快照与完整面试/邀约引用 | 按 F01 冻结申请输入，更新岗位/JD/档案后历史申请内容不变，对外仅显示获准字段 |
+| A08 | A/B/C | P1 | 独立申请的岗位/JD、简历内容快照及历史引用 | × | **A08**（`729fc60`）：`Application.input_snapshot_json` + `input_snapshot_at`；新迁移 `A_0011_app_snapshot`（挂 `A_0010` 成单 head）；`capture_application_input_snapshot` 纯读值拷贝（job_profile / jd_publication / talent_profile / resume_file / parsed_resume 五段 + `missing_sources`，原文 sha256+长度固定）；列表按 `account_is_management` 分流、个人侧强制 `talent_profile_id = AccountScope.person_id`、出参 6 字段白名单 `_application_public_out`、未确认终态结果置 None；新增 `GET /applications/{id}/input-snapshot` 挂 `require_roles("system_admin","hr")`；定向 **exit 0 / 22 passed** | 已交付（A 记录 `UPD-A-20261110-1644-A08申请输入快照与对外字段分级`）；原文不整段复制（hash+长度）、缺源容错不阻断创建、面试/邀约引用不重复冻结（C 外键已承载）；主验收库 `ai_talent` 的 `A_0010`/`A_0011` 尚未补齐 |
 | A09 | A/B/D | P1 | 岗位缺口对应的储备人才推荐 |  | 统一需求 F03、原 PRD §2.3；基础检索/匹配不等于自动形成授权推荐闭环 | 未获完整实现证据；与 D 负责的预警生产 A05 分开跟踪 | A 牵头招聘推荐规则，B 供授权档案，D 接预警流程；推荐有依据且不自动推进/淘汰 |
 | A10 | A | P1 | 项目、项目群与项目人才需求基础接口 | × | backend/app/modules/recruitment/models.py:69；router.py:36；service.py:44 | 模型及创建/列表/需求维护已有代码；完整权限、审批及统计另验 | 按 F01 验证项目归属、需求人数与缺口口径、重复提交及权限；审批见 A11 |
 | A11 | A | P1 | 岗位/人才需求审批及审批记录 |  | 统一需求 §4/F01；backend/app/modules/recruitment/service.py:111 仅需求更新 | 未找到完整审批链；状态字段或修改记录不等于审批 | 冻结提交/审批职责、合法流转与版本，补审批记录和越权/重复批准反例 |
@@ -75,7 +75,7 @@
 | D17 | D | P1 | SSE 任务进度端点 | × | backend/app/core/tasks/events.py；main.py已挂载 | 代码实现；权限/重连/终态运行验证待做 | 验证Last-Event-ID边界及降级，不宣称逐事件历史重放 |
 | D18 | D/A/B/C | P1 | 通知服务基础 | × | backend/app/modules/notifications/ | 模型/路由/生产方函数存在；各事件投递非全部闭环 | 逐事件核对接收权限、幂等、失败重试及生产方接线 |
 | D19 | D/A | P1 | 双端真实工作台与缺口告警 |  | T-D22/23/24未完整完成 | 缺口 | 真实数量经授权结果服务读取；可回到业务记录核对 |
-| D20 | D/A | P2 | 数字员工/企业微信与三类只读场景（V2.6细化） |  | T-D21未完成 | 待实现 | 按已确认场景/权限接入，外发与高影响变更按审批规则 |
+| D20 | D/A | P2 | 数字员工/企业微信与三类只读场景（V2.6细化） | × | **T-D21**（`52b6d24`）：`backend/app/modules/workflows/digital/` 新增 models（MemberImAccount / DigitalTask / DigitalOutboundRequest 三 ORM + 枚举白名单）、service（三类 collector 全只读：analytics 快照近 24h / parse+screen 队列计数 / workflow waiting + 培训逾期）、router（`/api/workflows/digital` 10 端点）；新迁移 `D_0012_digital_employee` 挂 `D_0011` 成单 head、83 表基线；`main.py` 注册 router（A 公共入口，跨模块）；新增 `tests/D/test_digital_t21.py` **15 例**；新建 [数字员工契约](../../modules/D/数字员工契约.md) v1.0 | 已交付（D 记录 `UPD-D-20261110-024500-T-D21数字员工纯站内版`，`pytest tests/D/test_digital_t21.py` **15 passed**、D 域全量 224 passed / 12 skipped）；**用户 2026-11-10 clarify 选定「方案一纯站内」**——一期不依赖任何 IM 平台凭据，三类只读场景端到端终点是入库 + 站内通知，全程不调 IM API；`member_im_accounts` 一期 manual 登记，channel 预留 wecom/dingtalk/feishu；外发红线已固化（request_outbound 只落 pending、decide_outbound 通过只置 approved 且四眼 403/重复 409、mark_outbound_sent 仅 approved 可置 sent） | 联调与业务验收未达；IM 平台凭据到位后补 oauth 绑定与 adapter（表结构不变）；一期定时未接线 |
 | D21 | D | P1 | 独立 Embedding 适配与1024维校验 | × | backend/app/core/embedding_client.py:109、158；统一需求 §1 | 百炼 text-embedding-v3 适配已有实现；本轮未调用真实服务，不据此称离线推理已交付 | 验证批量/查询向量、维度、失败与凭据隔离；本地推理按 G05 独立验收 |
 | D22 | D/B | P1 | 百炼 gte-rerank 与私有化 bge-reranker 重排 |  | 统一需求 §1；本轮应用源码检索未找到实际重排调用 | 原表漏列；一期必备，不能以 Embedding/Milvus 替代 | 在授权召回后真实重排，保留版本/分数及失败语义；私有化验证本地切换和离线依赖 |
 | D23 | D | P1 | 同快照 DOCX/PDF 文本与数据表导出基础 | × | backend/app/modules/reports/service.py:44、122、176 | 文档导出已有实现，图表目前转成数据表；图形导出仍在 D16，不能把本行当完整报告验收 | 验证不重新问数、中文/长表、下载授权与同快照；待 D16 补图形后共同验收 |
@@ -128,3 +128,22 @@
 回传格式：`条目ID / 提交 / 实现状态 / 接入状态 / 验证环境与真实命令 / 预期与实际 / 证据 / 未测 / 下个检查点`。部分能力必须说明缺哪一部分，不自行打 ×。Master 依据实际源码与结果决定标记；需求取代、阻塞解除和验收关闭均留链接。表中旧任务卡的“仅白名单/固定测评/画布非必需”等缩减口径按冻结需求失效处理，不能再按旧卡降低完成条件。
 
 本表不是一次性的“完成率”汇总：P0 先看 A02/A06/B02/B07/B08/C08/D02/D07/D09/D10/D14，避免继续铺页面却保留关键偏差。D07 等近期持续变化的条目需按更新主干重新核对，不能用本快照阻止已经获得授权的进展。
+
+---
+
+## 2026-11-10 第二轮补登（基线 `7721a60`）
+
+> **为什么补**：本表自 2026-11-09 首轮核验（快照 `141927c`）后未再更新，而 A/D 已在 11-10 上午至下午连续发布多个闭环到远端 master。本轮 MASTER 先完成云仓与本地全量同步（`7721a60`，见 [1732 收口记录](../../updates/MASTER/20261110-173200-云仓本地全量同步与分支清理收口.md)），再按 `git log --all` 与各角色 `docs/updates/<角色>/` 最新记录逐条回填。**只补登记、不改业务代码、不改写他人验证结论。**
+
+**补登范围**：仅列 `141927c` 之后已进主干、但表内仍留空或状态过时的条目。其余条目状态与首轮一致，未复跑测试、不重复登记。
+
+| 条目 | 补登内容 | 依据 |
+| --- | --- | --- |
+| **A02** | 由「空白·偏差待修复」改为「**部分**」：A02-1 子单元已交付（`5eb81c7`），`hard_fail` 恒 False、不符项/待核实进 `misses` 并随 Prompt C 交模型；但 **A02 整行未完成**，旧算法替代未消除、综合分 `overall_score` 仍被 D 的 `PROMPT_C_SCHEMA` 契约阻塞 | A 记录 `UPD-A-20261110-1100-A02-1取消硬门槛自动淘汰`；A→D 正式请求 `20261110-D-A02-2-PromptC综合分契约.md` 仍打开 |
+| **A06** | 由「部分基础实现」改为「**×，整行收口**」：五个子单元全部交付并已推 master——A06-1 角色/职责门禁（`2eca164`）、A06-2 `users.department_id` + 部门行级过滤（`6ee1ebe`）、A06-3 字段级权限白名单 + 序列化裁剪（`e9e8015`）、A06-4 系统管理域 CRUD 路由整域接 `require_roles`（`78d946e`）、A06-5 `assessments`/`interviews` 内联 `ADMIN_ROLES` 行级判定统一迁移到 A06 角色门禁（`55a9010`） | A 记录 `UPD-A-20261110-1430-A06-5跨模块行级判定迁移`；C 记录 `20261110-144533-发布登记-635055e.md`、`20261110-150929-master检查-A06-5行级判定收口合入.md` |
+| **A08** | 由「空白」改为「**×**」：`Application.input_snapshot_json` + `input_snapshot_at`、新迁移 `A_0011_app_snapshot`（挂 `A_0010` 成单 head）、`capture_application_input_snapshot` 五段纯读值拷贝 + `missing_sources`、列表按 `account_is_management` 分流 + 个人侧强制 `talent_profile_id = AccountScope.person_id` + 6 字段白名单 `_application_public_out` + 未确认终态结果置 None、`GET /applications/{id}/input-snapshot` 挂 `require_roles("system_admin","hr")`；定向 **exit 0 / 22 passed** | A 记录 `UPD-A-20261110-1644-A08申请输入快照与对外字段分级`；提交 `729fc60` |
+| **D20** | 由「T-D21 未完成·待实现」改为「**×**」：`backend/app/modules/workflows/digital/` 新增三 ORM + 枚举白名单、三类 collector 全只读、`/api/workflows/digital` 10 端点；新迁移 `D_0012_digital_employee` 挂 `D_0011` 成单 head、83 表基线；`main.py` 注册 router（A 公共入口，跨模块）；`tests/D/test_digital_t21.py` **15 例**；新建 [数字员工契约](../../modules/D/数字员工契约.md) v1.0 | D 记录 `UPD-D-20261110-024500-T-D21数字员工纯站内版`；提交 `52b6d24`；**用户 2026-11-10 clarify 选定「方案一纯站内」** |
+
+**补登未覆盖、仍需各角色回传的条目**（本轮只读核对，未获完整实现证据，故不打 ×）：A03 批次开始冻结档案版本（T-A42 只固定了模型/Prompt 版本与请求级幂等，**不等于** A03 的批次档案冻结语义，两者不可混同）、A11 审批链、A12 真实 AI JD 草稿、A14 员工花名册/任职记录、C08 防挂机与可信学习证据、C09 正式九宫格确认链、C10 发布时冻结题库、D02 限流环境开关（A 已交付 D02-A 但客户模式真实 Redis 串扰未验证）、D07 三类事件完整接线、D09/D10 Dify 业务对接与画布、D14 Vanna 原生问数、B02 OCR、B07/B08 制度与档案 RAG。
+
+**遗留（与同步无关，非本次登记范围）**：A 的 `test_a06_department_scope.py` teardown 混删 id（空库首跑约 12 例假失败）；A→B/D 跨文件向量串扰请求仍打开；D 的 `PROMPT_C_SCHEMA` / `overall_score` 契约待补；主验收库 `ai_talent` 仍 stamp `D_0009_workflow_review` / 73 表，落后 head `A_0011`。
