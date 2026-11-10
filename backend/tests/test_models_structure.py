@@ -258,7 +258,12 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     "project_demands": {
         "id", "project_id", "project_group_id", "job_profile_id", "position_name",
         "headcount", "expected_start_date", "priority", "remark", "status",
-        "created_by", "created_at", "updated_at",
+        "approval_status", "approval_version", "approved_version", "approved_by",
+        "approved_at", "created_by", "created_at", "updated_at",
+    },
+    "demand_approval_records": {
+        "id", "demand_id", "demand_version", "action", "from_status", "to_status",
+        "actor_user_id", "actor_roles", "reason", "snapshot_json", "created_at",
     },
     "jd_publications": {
         "id", "job_profile_id", "job_profile_version", "title",
@@ -540,9 +545,11 @@ def ddl(model) -> str:
 
 
 def test_exactly_70_tables_and_no_phase2_table():
-    assert len(TABLE_NAMES) == 84
-    assert len(MODEL_CLASSES) == 84
-    assert len(Base.metadata.tables) == 84
+    # 一期表数不在测试里写死：以 EXPECTED_COLUMNS 为唯一基线，新增一期表只需
+    # 同步基线条目（历史上硬编码 76/84 曾造成新基线全量假失败）。
+    assert len(TABLE_NAMES) == len(set(TABLE_NAMES)) == len(MODEL_CLASSES)
+    assert len(TABLE_NAMES) == len(EXPECTED_COLUMNS)
+    assert set(Base.metadata.tables) == set(EXPECTED_COLUMNS)
     assert set(TABLE_NAMES) == set(EXPECTED_COLUMNS)
     # D-7 缓办：一期不建 llm_score_cache
     assert "llm_score_cache" not in Base.metadata.tables
