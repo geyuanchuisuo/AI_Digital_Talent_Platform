@@ -1,6 +1,6 @@
 # 开发计划 · Todolist · 板块 A
 
-> 版本：v0.1.19　|　日期：2026-11-10 14:00　|　身份：A　|　分支：`feature/A/continuation`　|　开工基线：四 ref **`6ee1ebe`**（A06-2 发布后对齐基线）
+> 版本：v0.1.20　|　日期：2026-11-10 14:30　|　身份：A　|　分支：`feature/A/continuation`　|　开工基线：四 ref **`e9e8015`**（A06-3 发布后对齐基线）
 > 上游：`docs/需求文档.md` **V2.6（2026-11-07 已冻结）**、`docs/源码接入与需求决策.md`、`docs/四人分工与试行方案.md` §2、`docs/技术框架.md`、**`docs/modules/MASTER/原PRD统一执行跟踪表.md`（全员统一执行入口）**、`tasks/A.md`、`docs/modules/A/设计方案.md` v0.1.1、`.collaboration/ownership.json`。
 > 用法：按 M1 → M6 顺序；每项满足「验收点」才勾选，勾选必须写实际命令/结果/证据落点；编号 `T-Axx` 供沟通引用。进度同步 `docs/modules/A/开发日志.md` Layer 3/4 与 `docs/updates/A/` 交接记录。
 > ⚠️ 本表是台账，**不是完成声明**；`[x]` 只表示「有实证且已登记」。Master 统一执行表口径：`×` 仅代表代码已实现，不等于接入/业务验收；本表 `[x]` 同理不代表浏览器/客户验收完成，人工验收单列在文末「未收口清单」。
@@ -103,6 +103,7 @@
 | [D 模型任务与评分版本契约](../../requests/A/20261106-D-模型任务与评分版本契约.md) | D | 待响应（**U-05 已催办**，2026-11-07） | Agnes 验证结论、模型/Prompt 版本标识、任务状态约定 |
 | [C 人工面试引用契约](../../requests/A/20261106-C-人工面试引用契约.md) | C | 已回（C 分支 58baaf7「明确人工面试引用契约并支持创建幂等键」，M6 联调核对） | — |
 | [D→A 工作流/RBAC/站内通知契约](../../requests/D/REQ-A-20261106-workflow-rbac-notification-contract.md) | D → **A**（本方待响应） | A 待响应（站内事件清单 **U-02 已确认：以 D 请求清单为准**，含招聘阶段变化与面试安排、课程指派与报名审批、候补递补、必修提醒/逾期、Agent 审批待办与运行失败；面试邀约/改期留二期） | A 按已确认清单响应契约，不删既有事件、不扩大集合 |
+| [B/D 全量测试跨文件向量串扰](../../requests/A/20261110-BD-全量测试跨文件向量串扰.md) | **A → B/D** | 待响应（2026-11-10 14:40 发出）：`test_full_pipeline_success` 与 `test_milvus_store_unit.py` 状态串扰，实证与 A06-5 无因果关系 | B/D 定位 `1001` 来源并隔离模块级状态；A 不越界代改测试、不删弱断言 |
 
 > 维护人在自己的 `docs/updates/<角色>/` 新增响应并链接回请求；请求方不得替对方改代码，也不得把「待响应」写成「已实现」。
 
@@ -129,6 +130,7 @@
 - v0.1.16 / v0.1.17（2026-11-10 11:40 / 12:00）：A06-1 角色门禁（`2eca164`）、A06-4 系统管理域 CRUD 路由（`78d946e`，含 `deps.py` 漏 import 修复）两个闭环已发布，详见 [1140 记录](../../updates/A/20261110-1140-A06角色门禁.md) · [1200 记录](../../updates/A/20261110-1200-A06-4系统管理域CRUD路由.md)（append-only 补登，不回改历史快照）。
 - v0.1.18（2026-11-10 13:30）：用户「继续，一个一个跑完」。开工 `fetch` 后四 ref 全部 `78d946e`、祖先复核 exit 0、工作区干净。跑通 **A06-2「`users.department_id` + 部门行级过滤」**：新增可空列 + 幂等 ALTER 迁移 `A_0009`（链 head `D_0012 → A_0009`）；`scope.py` 新增 `resolve_data_scope` / `get_visible_department_ids` / `apply_department_filter` 三个可复用基础；新增 `system/account_router.py`（`GET /api/system/accounts` 部门行级过滤 + `PUT /{id}/department` 仅 system_admin，审计 + 脱敏）；`main.py` 路由 18 → 19；`EXPECTED_COLUMNS["users"]` 同步新列。定向 **11 passed**；首次后端全量 **2 例失败定性为基线列清单未同步**（非代码回归），补齐后**串行全量复跑 exit 0，812 用例 / 811 passed / 1 skipped**；`tsc` exit 0、`diff --check` 0、6 个改动 py `py_compile` 0 错。台账回填 A06 映射 / 状态快照 / 未收口清单。**A06-3 字段级权限待跑**。证据：[1330 记录](../../updates/A/20261110-1330-A06-2部门行级过滤.md)。
 - v0.1.19（2026-11-10 14:00）：用户「继续，一个一个跑完」。跑通 **A06-3「字段级权限白名单 + 序列化裁剪」**：`scope.py` 新增 `SENSITIVE_FIELDS`（硬底线，白名单不可覆盖）/`ACCOUNT_BASE_FIELDS`/`FIELD_POLICIES`/`resolve_visible_fields`（deny-by-default）/`filter_columns`/`serialize_fields`；`account_router.py` 两处出参改走字段裁剪（与 A06-2 行级过滤叠加）。新增 `test_a06_field_scope.py` **12 passed**，A06 四文件合并 **40 passed**。首次全量 1 例 `test_full_pipeline_success` 假失败（隔离单跑 exit 0 / 1 passed，定性为 conftest 明载的时序假失败），**串行全量复跑 exit 0，824 用例 / 816 passed / 8 skipped / 0 failed**。`pytest -rs` 实证多出的 7 个 skip 全因 **Milvus 19532 不可达**（环境退化，非代码回归），A 未重启服务、登记待人工恢复。**A06 四个 P0 子单元全部交付**，仅剩 assessments/interviews 内联 `ADMIN_ROLES` 行级判定迁移（C 归属）。台账升 **v0.1.19**。证据：[1400 记录](../../updates/A/20261110-1400-A06-3字段级权限.md)。
+- v0.1.20（2026-11-10 14:30）：用户「继续，一个一个跑完」。跑通 **A06-5「assessments/interviews 内联 `ADMIN_ROLES` 行级判定迁移」**（跨 C 归属，A06 整行最后一项）：`assessments/service.py::is_admin` 改走 `scope.account_is_management`（签名不变，兼容 `interviews`/`training` 复用），修复 `system_admin` 被误拒 + 非标准 `"admin"` 被误放行；`interviews/ai_router.py` 7 端点 8 处内联判断统一为 `_is_management(db,user)`，业务逻辑与 403 文案零改动。新增 `test_a06_c_module_gates.py` **12 passed**。**全量原样跑多次均 1 failed / 827 passed / 8 skipped**，唯一失败 `test_full_pipeline_success` 经实证为 **B/D 归属测试间的既有跨文件串扰**（零 A06 测试的两文件组合即复现、t13 单文件 13 passed、该用例隔离单跑 1 passed；A 试过 conftest 单例隔离与隔离库清脏数据均无效且已回滚/未留改动）；门禁改以「**deselect 该既有用例后全量 exit 0，827 passed / 8 skipped / 1 deselected** + 该用例隔离单跑 exit 0」为证据，已发 [跨包请求](../../requests/A/20261110-BD-全量测试跨文件向量串扰.md) 并登记未收口清单，**不把全量 exit 1 写成通过**。**A06 五个子单元全部交付、整行收口**；跨归属走 `collab.integration=1` 并透明登记。台账升 **v0.1.20**。证据：[1430 记录](../../updates/A/20261110-1430-A06-5跨模块行级判定迁移.md)。
 
 ## M3-V2.6 · 招聘域重排（需求冻结后按 V2.6 口径，2026-11-07）
 
@@ -145,9 +147,39 @@
 
 ---
 
-## 状态快照（v0.1.19，2026-11-10 14:00）· 当前活状态锚点
+## 状态快照（v0.1.20，2026-11-10 14:30）· 当前活状态锚点
 
-> 本节为**活状态锚点**，覆盖下方 v0.1.18 / v0.1.17 / v0.1.15 历史快照。权威顺序：`docs/updates/A/` 最新记录 > 根 `更新记录.md` 尾部 > `git log` > 本表。
+> 本节为**活状态锚点**，覆盖下方 v0.1.19 / v0.1.18 / v0.1.17 / v0.1.15 历史快照。权威顺序：`docs/updates/A/` 最新记录 > 根 `更新记录.md` 尾部 > `git log` > 本表。
+
+- v0.1.20（2026-11-10 14:30）：用户「继续，一个一个跑完」。跑通 **A06-5「assessments/interviews 内联 `ADMIN_ROLES` 行级判定迁移」**（A06 整行最后一项，**跨 C 归属**）：`assessments/service.py` 的 `is_admin` 改走 `scope.account_is_management`（修复 `system_admin` 被误拒、非标准 `"admin"` 被误放行的真实漏洞，签名不变以兼容 `interviews`/`training` 复用）；`interviews/ai_router.py` 7 端点 8 处内联判断统一为 `_is_management(db,user)`，业务逻辑与错误消息零改动。**A06 五个子单元全部交付，A06 整行收口**。证据：[1430 记录](../../updates/A/20261110-1430-A06-5跨模块行级判定迁移.md)。
+
+### 基线与结构
+
+| 项 | 当前值 |
+|---|---|
+| 分支 / HEAD | 开工 `fetch` 后四 ref 全部 `e9e8015`，ahead/behind 0，祖先复核 exit 0，工作区干净；远端仅 `master_YB`（独立根历史，不并入）有更新。最终 hash 以远端为准 |
+| 迁移链 | 单 head **`A_0009_users_department_id (head)`**（本单元只改代码、不加列/表） |
+| 表 | **84 张 / 模型 84**；路由 **19 个** `include_router`（均无新增） |
+| 运行态 | 后端 8101 / 前端 3101 / MySQL 3308 正常；**Milvus 19532 仍不可达**（沿用 A06-3 实证，7 个向量集成测试被环境 skip）；A 未重启任何服务 |
+
+### 测试门禁（真实退出码）
+
+| 项 | 结果 |
+|---|---|
+| 定向 `test_a06_c_module_gates.py` | **exit 0，12 passed**（is_admin 四角色 + 非标准 admin 拒绝 + require_admin 403 消息不变 + HTTP 端到端 200/403/401 + 行级过滤） |
+| 后端全量（隔离库 `ai_talent_a_probe`，**明确 deselect 1 例既有用例**） | **exit 0，827 passed / 8 skipped / 1 deselected / 0 failed** |
+| 被 deselect 用例隔离单跑 | **exit 0 / 1 passed**（重复 3 次一致）；原样全量仍为 `1 failed / 827 passed / 8 skipped`，定性见下 |
+| ⚠️ 既有跨文件串扰（非本单元回归） | `test_full_pipeline_success` 在**零 A06 测试**的「`test_milvus_store_unit.py` + `test_parse_integration_t13.py`」两文件组合下即复现（34 passed / 1 failed）；t13 单文件 exit 0 / 13 passed。A 试过 conftest 单例隔离（无效、已回滚）与隔离库清脏数据（无效），**不越界改 B/D 测试**，已发 [跨包请求](../../requests/A/20261110-BD-全量测试跨文件向量串扰.md) |
+| `tsc --noEmit` | **exit 0**（A 侧零前端改动） |
+| 静态 | `diff --check` 0、3 个改动 py `py_compile` 0 错；`git diff` 逐行核对仅权限判定变化；C 归属文件 + UNASSIGNED test 走本地 `collab.integration=1` 整合模式（警告放行、透明登记） |
+
+> 纪律：禁用 `pytest | tail`；一律重定向日志 + 单独 `echo $?`；`--basetemp` 用项目内 `.pytest_tmp_A_*`。主库 `ai_talent` 的 `alembic_version` 超前于实际 schema，只读取证未处理，重建需用户授权。
+
+---
+
+## 状态快照（v0.1.19，2026-11-10 14:00）· 历史
+
+> 本节为历史快照，被上方 v0.1.20 覆盖。权威顺序：`docs/updates/A/` 最新记录 > 根 `更新记录.md` 尾部 > `git log` > 本表。
 
 - v0.1.19（2026-11-10 14:00）：用户「继续，一个一个跑完」。跑通 **A06-3「字段级权限白名单 + 序列化裁剪」**（A06 P0 收口子单元）：`scope.py` 新增 `SENSITIVE_FIELDS`（password_hash 等硬底线，白名单不可覆盖）、`ACCOUNT_BASE_FIELDS`、`FIELD_POLICIES`（system_admin 全量 / dept_manager 基础字段）、`resolve_visible_fields`（deny-by-default）、`filter_columns` / `serialize_fields`；`account_router.py` 两处出参改走字段裁剪（与 A06-2 行级过滤叠加，互不破坏）。**A06 四个 P0 子单元全部交付**，仅剩 assessments/interviews 内联 `ADMIN_ROLES` 行级判定迁移（C 归属文件，需跨归属整合）。证据：[1400 记录](../../updates/A/20261110-1400-A06-3字段级权限.md)。
 
@@ -241,7 +273,7 @@
 | ID | 优先级 | 状态 | 下一步 |
 |---|---|---|---|
 | A02 | P0 | **A02-1 已交付** + 新基线复验（794 用例全绿）。**A02-2 未完成**：分数仍是 `0.7/0.3` 向量混合 + `40/30/15/15` 加权 | A02-2 需 D 先改 `PROMPT_C_SCHEMA`（已发 [请求](../../requests/A/20261110-D-A02-2-PromptC综合分契约.md)），之后 A 改模型综合分 |
-| A06 | P0 | **A06-1 + A06-2 + A06-3 + A06-4 四个 P0 子单元全部交付**：角色门禁、部门行级（`users.department_id` + `resolve_data_scope`/`apply_department_filter` + `/api/system/accounts`）、字段级（`SENSITIVE_FIELDS`/`FIELD_POLICIES`/`serialize_fields`）、系统管理域 CRUD 路由。**A06 整行仅剩**：assessments/interviews 内联 `ADMIN_ROLES` 行级判定迁移（C 归属文件，需跨归属整合） | assessments/interviews 内联 `ADMIN_ROLES` 行级判定迁移；其余按执行表「通过条件」接入/验收 |
+| A06 | P0 | ✅ **A06 整行收口**：A06-1 角色门禁、A06-2 部门行级、A06-3 字段级、A06-4 系统管理域 CRUD 路由、A06-5 跨模块（assessments/interviews）内联 `ADMIN_ROLES` 迁移，**五个子单元全部交付发布**。修复 `system_admin` 被旧 `{"admin","hr"}` 字符串判断误拒、非标准 `"admin"` 被误放行的真实漏洞 | 按执行表「通过条件」逐条接入/验收（人工/浏览器点击流排最后） |
 | D02（A/D） | P0 | **A 侧开关已交付**（`RATE_LIMIT_ENABLED`，默认 false 演示豁免；true 只豁免 `/api/health`） | 客户模式真实 Redis 多环境串扰复验未做 |
 | A03 / A08 / A11 / A12 / A14 | P1 | 空白或未获完整实现证据 | 批次档案冻结、申请输入快照、审批链、真实 AI JD 草稿、员工花名册 |
 | A01 / A04 / A10 / A13 / A15 | P1 | `×`（代码已实现） | 按执行表「通过条件」逐条接入/验收，**A 不替 Master 改表** |
@@ -296,6 +328,7 @@
 | 简历上传 file upload | 人工 | IAB 不支持文件上传，必须用户手动验收 |
 | `/analytics` 运行时缺陷复验 | 人工 | [A 发出的请求](../../requests/A/20261109-D-analytics页运行时缺陷.md) 待 D 修后复验关闭（T-A02 阻塞项） |
 | **Milvus 19532 不可达** | 环境（需人工） | 2026-11-10 14:00 全量实测 `MilvusStoreError: Fail connecting to server on localhost:19532`，`test_vectors_integration_t05.py` 7 例被环境 skip；服务恢复后补跑 7 例向量集成测试。A 按边界未重启容器/服务 |
+| **全量 pytest 跨文件向量串扰** | 协作（B/D） | `test_full_pipeline_success` 在零 A06 测试的两文件组合下即复现；A 已实证与 A06-5 无因果关系、试过两种 A 归属内修复均无效并回滚，**不删弱有效断言、不越界改 B/D 测试**。已发 [跨包请求](../../requests/A/20261110-BD-全量测试跨文件向量串扰.md)，待 B/D 修复后 A 复跑全量并关闭。当前门禁以「deselect 该用例后全量 exit 0 + 该用例隔离单跑 exit 0」为证据 |
 | 主验收库 `ai_talent` schema 偏差 | 需授权 | stamp 已到 `C_0007` 但实际缺列/外键；重建或补迁移需用户明确授权 |
 | `next build` / Agnes / 干净客户环境 | 未验证 | `next build` 受运行环境拦截记为未验证；Agnes `agnes-3.0-flash` 待 D 验证 |
 | C 的 `REQ-C-20261109-121506` 关闭 | 对方 | A 已受理并交付证据；C 需在干净空库复跑 `upgrade head` 到 `C_0007` 并回填 `alembic current` 后自行关闭 |
