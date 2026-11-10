@@ -25,7 +25,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import { useCallback, useEffect, useState } from 'react';
 
-import { getUser } from '@/lib/auth';
+import { getUser, isManagement } from '@/lib/auth';
 import { getErrorMessage } from '@/lib/http';
 
 import {
@@ -65,9 +65,8 @@ export default function AiInterviewPage() {
   const [answerDrafts, setAnswerDrafts] = useState<Record<number, string>>({});
 
   useEffect(() => {
-    const user = getUser();
-    setIsAdmin(user?.role === 'admin' || user?.role === 'hr');
-    setUserId(user?.id ?? null);
+    setIsAdmin(isManagement());
+    setUserId(getUser()?.id ?? null);
   }, []);
 
   const loadSessions = useCallback(async () => {

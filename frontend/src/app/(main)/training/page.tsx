@@ -33,7 +33,7 @@ import type { ColumnsType } from 'antd/es/table';
 import type { Dayjs } from 'dayjs';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { getUser } from '@/lib/auth';
+import { getUser, isManagement } from '@/lib/auth';
 import { getErrorMessage } from '@/lib/http';
 
 import {
@@ -1225,8 +1225,7 @@ export default function TrainingPage() {
   const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
-    const role = getUser()?.role;
-    setIsAdmin(role === 'admin' || role === 'hr');
+    setIsAdmin(isManagement());
   }, []);
 
   return (
