@@ -80,8 +80,14 @@ def submit_review(db: Session, review_id: int, user) -> InventoryReview:
     review = db.get(InventoryReview, review_id)
     if not review:
         raise BizError(404, "复核不存在")
-    if not (review.performance_score and review.potential_hr_score):
-        raise BizError(400, "提交前需填齐绩效分与 HR 潜力分")
+    if review.status == "confirmed":
+        raise BizError(400, "已确认复核不可再提交，请新建复核")
+    if not review.performance_score:
+        raise BizError(400, "提交前需填齐绩效分")
+    if not review.potential_manager_score:
+        raise BizError(400, "提交前需完成经理初评")
+    if not review.potential_hr_score:
+        raise BizError(400, "提交前需填齐 HR 潜力分")
     review.grid_cell = grid_cell(review.performance_score, review.potential_hr_score)
     review.status = "submitted"
     _event(db, review_id=review.id, event_type="submitted", operator_id=user.id)
@@ -89,12 +95,29 @@ def submit_review(db: Session, review_id: int, user) -> InventoryReview:
 
 
 def confirm_review(db: Session, review_id: int, user) -> InventoryReview:
+    """HR 批准确认：强制「已提交 + 完整绩效 + 经理初评 + HR 潜力」状态链。
+
+    不允许把 draft 直接置 confirmed，也不允许重复确认；九宫格按绩效 × HR 潜力
+    重算，确认人记入 reviewer_hr_id 并留审计事件。
+    """
     _require_admin(user)
     review = db.get(InventoryReview, review_id)
     if not review:
         raise BizError(404, "复核不存在")
+    if review.status == "confirmed":
+        raise BizError(400, "复核已确认，不可重复确认")
+    if review.status != "submitted":
+        raise BizError(400, "仅已提交的复核可确认，请先提交")
+    if not review.performance_score:
+        raise BizError(400, "确认前需填齐绩效分")
+    if not review.potential_manager_score:
+        raise BizError(400, "确认前需完成经理初评")
+    if not review.potential_hr_score:
+        raise BizError(400, "确认前需填齐 HR 潜力分")
+    review.grid_cell = grid_cell(review.performance_score, review.potential_hr_score)
     review.status = "confirmed"
     review.confirmed_at = datetime.now()
+    review.reviewer_hr_id = user.id
     _event(db, review_id=review.id, event_type="confirmed", operator_id=user.id)
     return review
 

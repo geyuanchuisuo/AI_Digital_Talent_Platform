@@ -27,7 +27,7 @@ AI 面试间：`ai_interview_sessions`、`ai_interview_questions`、`ai_intervie
 关键字段与语义：
 
 - 题目：岗位、维度、维度类型（professional/general）、难度（easy/medium/hard）、题型（single_choice/short_answer）、题干、选项、标准答案、参考要点、评分说明、状态（pending/approved/disabled）。
-- 方案：用途（recruitment/employee）、岗位及岗位版本、`dimensions_json`（名称/类型/权重，权重合计 100）、目标题量、总分线、难度结构、状态、`version`；`mode`（adaptive 默认 / fixed 兼容）、`strategy_json`（自适应冻结策略）、`bank_snapshot_json`（发布时题库快照：题目 id、数量与冻结时间）。
+- 方案：用途（recruitment/employee）、岗位及岗位版本、`dimensions_json`（名称/类型/权重，权重合计 100）、目标题量、总分线、难度结构、状态、`version`；`mode`（adaptive 默认 / fixed 兼容）、`strategy_json`（自适应冻结策略）、`bank_snapshot_json`（发布时题库快照：题目 id、数量、冻结时间与题目全文/答案/评分版本快照 `questions`）。
 - 试卷：固定模式方案版本对应的冻结快照（题目全文、维度题量、满分、评分规则、总分线）；同一方案版本只生成一套试卷。自适应模式无试卷。
 - 分配：plan/paper 版本（自适应的 `paper_id` 为空）、`mode`、策略快照、目标题量、答题人 user_id、talent_profile_id（B 契约映射，可空）、状态、公开版本、答案开放标记、幂等键、复测序号。
 - 选题留痕：自适应逐题记录 `sequence_no`、题目快照、维度/难度、选题理由（覆盖/配额/回退、期望与实际难度、上一题得分）与当次策略快照；同一任务内题目不重复。
@@ -43,7 +43,7 @@ AI 面试间：`ai_interview_sessions`、`ai_interview_questions`、`ai_intervie
 - 培训计划：员工 user_id、目标岗位、来源（ai/manual）、状态（draft/assigned）、证据快照、计划版本；项目保存课程快照，不随课程后续编辑回写；`training_plan_versions` 保存历史快照。
 - 学习记录：按计划项+员工唯一，状态 not_started/learning/completed，备注、自报时间；完成仅代表自报，不等于正式完成。
 - 学习证据：`evidence_type` 仅 `attendance`（本人该课程真实出勤）/`assessment`（本人已通过的员工测评）/`study_session`（服务端签发的一次性学习会话凭证）；`score` 与 `verified_by` 只能由服务端可信来源计算（`system.attendance`/`system.assessment`/`system.study_session`），客户端不可直传；`learning_record_id + evidence_key` 唯一，阻止同一来源重复计入与凭证重放。
-- 成长事件：追加式记录测评完成、培训分配、课程完成。
+- 成长事件：追加式记录测评完成、培训分配、课程自报完成（`course_completed`，`self_reported=true`）与正式完成（`course_formally_completed`，`self_reported=false`，引用计划版本与可信证据分/验证人）；正式完成仅在 `formal_completed` 0→1 时追加一次，重复确认不重复写入。
 
 ## 3. 固定与自适应测评及计分规则
 
@@ -60,7 +60,7 @@ AI 面试间：`ai_interview_sessions`、`ai_interview_questions`、`ai_intervie
 自适应模式（默认，用户 2026-11-07 裁决）：
 
 8. 策略冻结：发布时校验并冻结 `strategy_json`：最少/目标/最多题量（`min ≤ 目标 ≤ max`，`min` 不少于维度数，`max ≤ 200`）、起始难度、是否按表现升降难度、评级档位（必须含 0 分档）。不提前冻结每名考生的全部题目。
-9. 题库快照：发布时把方案维度内全部 `approved` 题目 id 与数量冻结进 `bank_snapshot_json`；可用题量少于目标题量或某维度无题时拒绝发布。后续题库变化不影响已发布方案；答题时仍排除已停用题目。
+9. 题库快照：发布时把方案维度内全部 `approved` 题目 id、数量与题目全文/答案/评分版本快照（`questions` 映射）冻结进 `bank_snapshot_json`；可用题量少于目标题量或某维度无题时拒绝发布。出题与评分读冻结快照，发布后改题重审不影响旧方案；答题时仍按当前题库状态排除已停用题目。仅有 id 快照的历史方案回退读当前题库内容。
 10. 选题：先覆盖未作答维度；再按权重配额缺口选维度；难度取该维度上一题得分 ≥70 升一档、否则降一档（无历史时用起始难度），目标难度无题时就近回退；同难度候选按「同岗位优先 + 任务 id 稳定哈希」排序，实现千人千卷且同一任务可复现。每次选题写入 `assessment_selections` 留痕，同任务不重复出题。
 11. 出题与交卷：`next-question` 幂等，返回当前未答题目；单选保存即确定性评分，用于调整下一题难度；简答保持待评分。结束条件为达到最多题量、或已达最少题量且覆盖全部维度并达到目标题量；题库耗尽时返回 `bank_exhausted`，由本人交卷。未作答题目交卷时按 0 分计。
 12. 能力分析：结果按维度分生成雷达数据、维度档位、强项/短板、总分评级与摘要，存入 `ability_json`；评级档位默认「优秀≥90、良好≥80、合格≥70、待提升≥60、不合格<60」，可由方案策略覆盖，默认档位待 HR 确认。
@@ -118,7 +118,7 @@ AI 面试间 `/api/ai-interviews`：
 
 盘点 `/api/inventory`（F10 九宫格/人才池）：
 
-- `POST /reviews`、`GET /reviews`、`GET /reviews/{id}`、`PATCH /reviews/{id}`、`POST /reviews/{id}/submit`、`POST /reviews/{id}/confirm`（管理员创建盘点；绩效+HR 潜力计算 `grid_cell`；提交/确认）
+- `POST /reviews`、`GET /reviews`、`GET /reviews/{id}`、`PATCH /reviews/{id}`、`POST /reviews/{id}/submit`、`POST /reviews/{id}/confirm`（管理员创建盘点；绩效+HR 潜力计算 `grid_cell`；提交需绩效/经理初评/HR 潜力齐全，确认仅对已提交复核生效并强制完整状态链、记确认人 `reviewer_hr_id`，已确认不可重复确认或修改）
 - `POST /pools`、`GET /pools`、`POST /pools/{id}/decide`（人才池提名/审批：nominated/approved/rejected/removed）
 - `POST /reviews/{id}/disputes`、`POST /disputes/{id}/respond`（员工异议、HR 回复）
 - `PUT /reviews/{id}/idp`（个人发展计划，review 唯一）
@@ -157,6 +157,7 @@ AI 面试间 `/api/ai-interviews`：
 ## 8. 本轮实现与验证状态（2026-11-09 更新）
 
 - 已实现：`backend/app/modules/assessments`（模型/自适应策略与选题/评分/服务/路由/registry/模型出题）、`interviews`（人工面试 + AI 面试间）、`training`（课程/计划/评价 + 报名审批/候补/名额上限/超时释放 + 学习证据 + 到期/逾期/延期）、`inventory`（F10 九宫格/人才池/异议/IDP/匿名汇总/导出审计）四域与 32 张表；前端 `frontend/src/app/(main)/{assessments,interviews,target,training,inventory}` 页面、类型与接口封装，含自适应逐题答题、能力雷达、员工评价、管理员期次/反馈汇总、`/inventory`（盘点/人才池/汇总/异议/IDP）、`/interviews/ai`（会话/题目/逐题作答）、`/training/enrollments`（报名审批/候补/超时释放/学习证据）、培训计划到期日录入与管理员延期、课程名额维护与盘点 CSV 导出入口。
+- C09/C10/C13 缺口关闭（2026-11-11）：**C09** `inventory/service.py` 确认状态链——`submit_review` 需绩效/经理初评/HR 潜力齐全，`confirm_review` 仅对 `submitted` 生效、强制完整状态链、重算九宫格、记 `reviewer_hr_id`，已确认不可重复确认或修改（前端 UI 早已按 draft→提交、submitted→确认  gating，本轮使后端与之一致）。**C10** `_publish_adaptive` 把题目全文/答案/评分版本冻结进 `bank_snapshot_json.questions`，`next_question` 出题与评分读冻结快照（仍按当前状态排除停用题；仅有 id 的历史方案回退当前内容），发布后改题重审不影响旧方案。**C13** `confirm_formal_completion` 在 `formal_completed` 0→1 时追加 `course_formally_completed` 成长事件（`self_reported=false`，引用计划版本/可信证据分与验证人），重复确认不重复追加。九宫格 4/3 档位映射仍为一期 agreed 标准规则；F10 设计稿的「阈值配置版本/未批准不产出正式评级」超出本期简化模型，未在本轮超建（见交接剩余范围）。已验证：`tests/C` 全量 **71 项通过**（新增 C09 五例、C10 两例、C13 一例；SQLite + 注入式替身），前端 `pnpm run typecheck` exit 0；本轮仅改后端，未重跑 `build`，真实 MySQL/模型/浏览器联调仍未验证。
 - 学习证据可信化（2026-11-09，C08）：`submit_evidence` 不再接收客户端 `score`/`verified_by`（DTO 严格字段，直传返回 422），三类证据的分数与验证人由服务端计算：`attendance` 读本人该课程真实出勤（100 分）、`assessment` 读本人已通过员工测评（100 分，招聘测评不计）、`study_session` 凭服务端 HMAC 签名的一次性会话券兑换并按服务端时间差计有效分钟数（累计/45 分钟折算）。`evidence_key`（出勤 id/测评结果版本/会话 nonce）同记录唯一，重复提交或凭证重放返回 400；`confirm_formal_completion` 只认 `system.*` 验证人的证据且最高分须 ≥60。迁移 `C_0007_learning_evidence_key` 新增该列与唯一约束。
 - 时间列：C 域 32 张表统一使用公共 `CrossDbUpdatedAtMixin`（2026-11-09 收敛，删除自建 `CTimestampMixin`；列结构与 DDL 等价，无需迁移）。
 - application_id 契约（2026-11-07 对接 A 的 M3）：`interview_rounds.application_id` 与 `ai_interview_sessions.application_id` 已对齐 A 的 `applications.id`（`PK_TYPE`，MySQL 下 BIGINT UNSIGNED）并加数据库级外键（RESTRICT，申请不物理删除），迁移 `C_0004_application_fk`。语义：`applications` 为同人多岗位独立申请，C 侧仅引用其主键，不复制其状态机。**2026-11-09 改挂**：`C_0004` 的 `down_revision` 由 `A_0007_scope_grants` 改为 `B_0002_merge_workflow_review`（master 合入 A_0008/B_0001/B_0002/D_0001~D_0009 后原挂点会造成双 head；迁移从未在任何库执行，改挂安全）。新增 `C_0005_plan_item_due_date`（`training_plan_items.due_date DATE NULL`）与 `C_0006_course_capacity`（`training_courses.capacity INT NULL`，报名名额上限）与 `C_0007_learning_evidence_key`（`training_learning_evidence.evidence_key VARCHAR(100) NOT NULL` + `uk_evidence_record_key`，历史行回填 `legacy:<id>`），当前单头 `C_0007_learning_evidence_key`。

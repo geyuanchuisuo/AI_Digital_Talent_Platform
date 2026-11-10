@@ -45,13 +45,65 @@ class InventoryApiTest(unittest.TestCase):
         data = r3.json()["data"]
         self.assertNotIn("grid_cell", data)
 
+    def _create_review(self, **scores):
+        payload = {"employee_user_id": self.emp.id, "cycle_name": "2026H1"}
+        payload.update(scores)
+        r = self._post("/api/inventory/reviews", payload, self.admin)
+        self.assertEqual(r.status_code, 200)
+        return r.json()["data"]["id"]
+
+    def test_confirm_rejects_draft_without_submit(self):
+        rid = self._create_review(performance_score=5, potential_manager_score=4, potential_hr_score=4)
+        r = self.h.client.post(f"/api/inventory/reviews/{rid}/confirm", headers=Harness.headers(self.admin))
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("提交", r.json()["message"])
+
+    def test_submit_requires_manager_initial_review(self):
+        rid = self._create_review(performance_score=5, potential_hr_score=4)
+        r = self.h.client.post(f"/api/inventory/reviews/{rid}/submit", headers=Harness.headers(self.admin))
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("经理初评", r.json()["message"])
+
+    def test_submit_requires_performance_score(self):
+        rid = self._create_review(potential_manager_score=4, potential_hr_score=4)
+        r = self.h.client.post(f"/api/inventory/reviews/{rid}/submit", headers=Harness.headers(self.admin))
+        self.assertEqual(r.status_code, 400)
+
+    def test_confirm_chain_success_and_no_reconfirm(self):
+        rid = self._create_review(performance_score=5, potential_manager_score=4, potential_hr_score=3)
+        s = self.h.client.post(f"/api/inventory/reviews/{rid}/submit", headers=Harness.headers(self.admin))
+        self.assertEqual(s.status_code, 200)
+        after_submit = self.h.client.get(
+            f"/api/inventory/reviews/{rid}", headers=Harness.headers(self.admin)).json()["data"]
+        self.assertEqual(after_submit["status"], "submitted")
+        c = self.h.client.post(f"/api/inventory/reviews/{rid}/confirm", headers=Harness.headers(self.admin))
+        self.assertEqual(c.status_code, 200)
+        data = self.h.client.get(
+            f"/api/inventory/reviews/{rid}", headers=Harness.headers(self.admin)).json()["data"]
+        self.assertEqual(data["status"], "confirmed")
+        self.assertEqual(data["grid_cell"], "hi-mid")
+        self.assertEqual(data["reviewer_hr_id"], self.admin.id)
+        self.assertIsNotNone(data["confirmed_at"])
+        again = self.h.client.post(f"/api/inventory/reviews/{rid}/confirm", headers=Harness.headers(self.admin))
+        self.assertEqual(again.status_code, 400)
+
+    def test_confirmed_review_cannot_be_modified(self):
+        rid = self._create_review(performance_score=5, potential_manager_score=4, potential_hr_score=4)
+        self.h.client.post(f"/api/inventory/reviews/{rid}/submit", headers=Harness.headers(self.admin))
+        self.h.client.post(f"/api/inventory/reviews/{rid}/confirm", headers=Harness.headers(self.admin))
+        patch = self.h.client.patch(
+            f"/api/inventory/reviews/{rid}", json={"performance_score": 1},
+            headers=Harness.headers(self.admin))
+        self.assertEqual(patch.status_code, 400)
+
     def test_dispute_idp_and_summary(self):
         rid = self._post(
             "/api/inventory/reviews",
             {"employee_user_id": self.emp.id, "cycle_name": "2026H1",
-             "performance_score": 5, "potential_hr_score": 5},
+             "performance_score": 5, "potential_manager_score": 4, "potential_hr_score": 5},
             self.admin,
         ).json()["data"]["id"]
+        self.h.client.post(f"/api/inventory/reviews/{rid}/submit", headers=Harness.headers(self.admin))
         self.h.client.post(f"/api/inventory/reviews/{rid}/confirm", headers=Harness.headers(self.admin))
         # 异议
         d = self.h.client.post(
@@ -80,9 +132,10 @@ class InventoryApiTest(unittest.TestCase):
         rid = self._post(
             "/api/inventory/reviews",
             {"employee_user_id": self.emp.id, "cycle_name": "2026H1",
-             "performance_score": 5, "potential_hr_score": 5},
+             "performance_score": 5, "potential_manager_score": 4, "potential_hr_score": 5},
             self.admin,
         ).json()["data"]["id"]
+        self.h.client.post(f"/api/inventory/reviews/{rid}/submit", headers=Harness.headers(self.admin))
         self.h.client.post(f"/api/inventory/reviews/{rid}/confirm", headers=Harness.headers(self.admin))
         r = self.h.client.get(
             "/api/inventory/summary/export?cycle_name=2026H1", headers=Harness.headers(self.admin))
@@ -341,6 +394,45 @@ class LearningEvidenceTest(unittest.TestCase):
             f"/api/training/learning-records/{self.record_id}/study-sessions",
             headers=Harness.headers(self.emp))
         self.assertEqual(r3.status_code, 200)
+
+    def test_formal_completion_appends_growth_event_once(self):
+        from sqlalchemy import select
+        from app.modules.training.models import TrainingGrowthEvent
+
+        session = self.h.client.post(
+            f"/api/training/courses/{self.course_id}/sessions",
+            json={"instructor_name": "讲师", "starts_at": "2026-11-09T09:00:00",
+                  "ends_at": "2026-11-09T10:00:00"},
+            headers=Harness.headers(self.admin)).json()["data"]["id"]
+        self.h.client.post(
+            f"/api/training/sessions/{session}/attendance",
+            json={"employee_user_id": self.emp.id}, headers=Harness.headers(self.admin))
+        self.h.client.post(
+            "/api/training/learning-evidence",
+            json={"learning_record_id": self.record_id, "evidence_type": "attendance"},
+            headers=Harness.headers(self.emp))
+        self.assertEqual(self._confirm().status_code, 200)
+
+        def _formal_events():
+            db = self.h.session()
+            try:
+                return list(db.scalars(select(TrainingGrowthEvent).where(
+                    TrainingGrowthEvent.employee_user_id == self.emp.id,
+                    TrainingGrowthEvent.event_type == "course_formally_completed")))
+            finally:
+                db.close()
+
+        events = _formal_events()
+        self.assertEqual(len(events), 1)
+        ev = events[0]
+        self.assertEqual(ev.ref_type, "training_plan_item")
+        self.assertFalse(ev.payload_json["self_reported"])
+        self.assertEqual(ev.payload_json["evidence_score"], 100.0)
+        self.assertIn("system.attendance", ev.payload_json["evidence_providers"])
+        self.assertEqual(ev.payload_json["learning_record_id"], self.record_id)
+        # 重复确认不重复追加成长事件
+        self.assertEqual(self._confirm().status_code, 200)
+        self.assertEqual(len(_formal_events()), 1)
 
 
 
