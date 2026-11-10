@@ -62,11 +62,27 @@ def _evidence_input(db: Session, talent_profile_id: int) -> dict:
 
 
 def _verdict_for(score: float | None, snapshot: dict) -> str:
+    """三档**内部参考标签**（V2.6 §5）。两档化 + 人工三态属 A02-2/M5 范围，本轮不动。
+
+    T-A34 三处口径修复：
+    1. 阈值**必须来自批次快照**，不设来源示例默认值（V2.6 §5「具体阈值由管理员
+       配置，不设置来源示例默认值」）。旧实现 `snapshot.get(..., 75/60)` 在快照
+       损坏或缺字段时会静默按示例值判定，改为显式 `KeyError`，交由批次失败/重试
+       路径暴露数据问题。
+    2. `score is None`（评分失败）**不得计为「不满足条件」**（V2.6 §5「评分失败
+       单独显示，不计为不满足条件」）。A02-1 之后引擎恒返回分数；该分支若真出现，
+       抛错让批次失败并保留重试入口，不伪装成内部标签 `rejected`。
+    3. 达线判定保持 `>=`（**含等于**，T-A34 验收点），由下方反例测试固化。
+    """
     if score is None:
-        return "rejected"
-    if score >= float(snapshot.get("pass_threshold", 75)):
+        raise ValueError(
+            "评分失败（score=None）不得写入内部参考标签；批次按失败处理并保留重试入口"
+        )
+    pass_threshold = float(snapshot["pass_threshold"])
+    pending_threshold = float(snapshot["pending_threshold"])
+    if score >= pass_threshold:
         return "passed"
-    if score >= float(snapshot.get("pending_threshold", 60)):
+    if score >= pending_threshold:
         return "pending"
     return "rejected"
 
@@ -92,6 +108,16 @@ def handle_screen_batch(batch_id: int) -> None:
 
 def _run_batch(db: Session, batch: ScreenBatch) -> None:
     snapshot = dict(batch.config_snapshot_json or {})
+    # T-A34（V2.6 §5）：阈值必须来自管理员配置的批次快照，禁止静默套用示例默认值。
+    # 放在调用 LLM 之前校验，避免损坏快照消耗整批模型调用后才暴露问题。
+    missing_thresholds = [
+        key for key in ("pass_threshold", "pending_threshold") if key not in snapshot
+    ]
+    if missing_thresholds:
+        raise ValueError(
+            f"筛选批次 {batch.id} 配置快照缺少阈值字段 {missing_thresholds}，"
+            "拒绝按示例默认值判定（V2.6 §5）"
+        )
     scope = dict(batch.scope_json or {})
     resolved_ids: list[int] = scope.get("resolved_ids") or []
     # 断点续跑：已写结果的成员直接跳过（retry 只补缺）

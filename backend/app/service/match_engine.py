@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
@@ -67,6 +68,34 @@ RULE_REVIEW_NOTICE = (
     "以下规则层核对结果仅作参考，不是淘汰结论：不符项与证据缺失仍须给出评分与依据，"
     "缺失证据须标注待核实，不得推断为「没有」或据此判为显著不匹配。"
 )
+
+#: V2.6 §5「年龄、性别不参与本版岗位评分」。即便上游把更多画像字段塞进 profile dict，
+#: 也不得进入 Prompt C 输入。键名归一化（只留小写字母数字）后比对，覆盖
+#: `age` / `Age` / `birth_date` / `birthDate` 等写法；直接身份标识一并不送入模型。
+PROTECTED_PROFILE_KEYS: frozenset[str] = frozenset(
+    {
+        "age", "gender", "sex", "birth_date", "birthday", "date_of_birth", "dob",
+        "marital_status", "ethnicity", "nationality", "religion", "political_status",
+        "id_number", "id_card", "phone", "email",
+    }
+)
+_PROTECTED_NORMALIZED = frozenset(
+    re.sub(r"[^a-z0-9]", "", key.lower()) for key in PROTECTED_PROFILE_KEYS
+)
+
+
+def sanitize_profile_for_prompt(profile: Mapping[str, Any]) -> dict[str, Any]:
+    """剔除 V2.6 §5 禁止参与评分的个人属性（年龄/性别/直接身份标识）。
+
+    只作用于**送给 Prompt C 的画像视图**：返回新 dict、不改入参；`hard_gate`
+    的学历/年限/技能与 `_profile_similarity` 的向量状态均为允许字段，不受影响。
+    本函数使「不参与评分」成为可验证的运行态约束，而非仅靠上游不传字段的约定。
+    """
+    return {
+        key: value
+        for key, value in profile.items()
+        if re.sub(r"[^a-z0-9]", "", str(key).lower()) not in _PROTECTED_NORMALIZED
+    }
 
 
 @dataclass
@@ -359,9 +388,12 @@ def evaluate(
 
     # A02-1（V2.6 §5）：规则层核对结果只作「不符项 / 待核实」提示，**不再提前淘汰**。
     # 所有候选人都进 Prompt C，包括硬条件不符与资料缺失者；分数不再置 NULL/0。
+    # T-A34（V2.6 §5）：年龄/性别等受保护属性不参与本版岗位评分——先净化画像视图，
+    # 再拼 Prompt C 输入；规则层与向量侧仍读原始 profile 的允许字段。
+    prompt_profile = sanitize_profile_for_prompt(profile)
     # —— Prompt C 四维评分（temperature=0，chat_json 内置结构化重试）——
     user_text = (
-        f"【候选人画像摘要】\n{build_candidate_summary(profile)}\n\n"
+        f"【候选人画像摘要】\n{build_candidate_summary(prompt_profile)}\n\n"
         f"【岗位条件】\n{build_job_summary(job)}\n\n"
         f"{build_rule_review_text(reasons)}"
     )
@@ -455,8 +487,10 @@ def _dedup(items: Sequence[str]) -> list[str]:
 
 __all__ = [
     "EngineResult",
+    "PROTECTED_PROFILE_KEYS",
     "VECTOR_DEGRADED_NOTE",
     "build_candidate_summary",
+    "sanitize_profile_for_prompt",
     "build_job_summary",
     "build_job_vector_text",
     "build_rule_review_text",
