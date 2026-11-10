@@ -141,11 +141,11 @@
 
 ---
 
-## 状态快照（v0.1.16，2026-11-10 11:40）
+## 状态快照（v0.1.17，2026-11-10 12:00）
 
 > 本节为**活状态锚点**，覆盖上方按时间线写的历史台账。权威顺序：`docs/updates/A/` 最新记录 > 根 `更新记录.md` 尾部 > `git log` > 本表。
 
-- v0.1.16（2026-11-10 11:40）：用户「继续」。开工 `fetch` 后四 ref 全部 `393ebd0`、无新更新、祖先复核 exit 0；跑通 **A06-1 角色/职责门禁**（Master 执行表 A06 P0 子单元）：`core/auth/scope.py` 新增 `get_role_codes`/`account_is_management`（聚合 `sys_user_roles`，修复 `system_admin` 被 `can_view_all_persons`/`ADMIN_ROLES` 双重误拒）、`api/deps.py` 新增 `require_roles`/`ManagementDep`；`workflows`/`inventory`/`reports` 导出入口统一改用角色门禁；新增 `test_a06_rbac_gates.py` **10 passed**。后端全量 **794 用例 / 793 passed / 1 skipped / 0 failed**（较基线 +10）；前端 29 文件 / 131 用例、tsc 全绿；`diff --check` 0、275 个 py AST 0 错。**A06 整行未完成**：部门行级（`users.department_id` 缺失）、字段级、系统管理域 router 待建。证据：[1140 记录](../../updates/A/20261110-1140-A06角色门禁.md)。
+- v0.1.17（2026-11-10 12:00）：用户「继续」。在 A06-1 基础上跑通 **A06-4 系统管理域 CRUD 路由**（Master 执行表 A06 P0 子单元）：新增 `app/modules/system/router.py` 暴露 `/api/system`（部门/角色/菜单/权限/账号绑定/操作日志），整域接 `require_roles("system_admin")`（A06-1 角色门禁在真实 HTTP 边界端到端生效）；`main.py` 路由 **17 → 18**；**修复 `deps.py` 漏 import `DENY_MESSAGE` 隐患**（A06-1 时只测 service 层未触发 FastAPI 依赖，本次暴露并修复）；新增 `test_a06_system_router.py` **7 passed**（门禁 401/403 + 部门 CRUD 往返 + 权限矩阵 + 账号绑定 + 操作日志只读）。后端全量复验中；前端零改动按门禁复跑；`diff --check` 0、276 个 py AST 0 错。**A06 整行未完成**：部门行级（`users.department_id` 缺失）、字段级、assessments/interviews 内联 `ADMIN_ROLES` 行级判定迁移。证据：[1140 记录](../../updates/A/20261110-1140-A06角色门禁.md) · [1200 记录](../../updates/A/20261110-1200-A06-4系统管理域CRUD路由.md)。
 
 ### 基线与结构
 
@@ -154,19 +154,20 @@
 | 分支 / HEAD | 开工 `fetch` 后四 ref 全部 `393ebd0`，ahead/behind 0，祖先复核 exit 0，工作区干净；远端**无新更新**。按用户 10:39 口径执行本轮闭环，最终 hash 以远端为准；详见 [1140 记录](../../updates/A/20261110-1140-A06角色门禁.md) |
 | 迁移链 | 单 head **`D_0012_digital_employee (head)`**（`C_0001` 空库修复在新链下复验通过） |
 | 表 | **84 张 / 模型 84** |
-| 路由 | `backend/app/main.py` **17 个** `include_router` |
+| 路由 | `backend/app/main.py` **18 个** `include_router`（A06-4 新增 `system_router`） |
 | 运行态 | 后端 8101 / 前端 3101 / MySQL 3308 / Milvus 19532，容器 `aitalent_main-*`；**本轮未重启** |
 
 ### 测试门禁（真实退出码）
 
 | 项 | 结果 |
 |---|---|
-| 后端全量（隔离库 `ai_talent_a_probe`，补种子后） | **exit 0**，**794 用例 / 793 passed / 1 skipped / 0 failed / 0 error**（A06-1 新增 10 例） |
-| 前端 `npm test` | **exit 0**，29 文件 / 131 用例（前端代码零改动，按门禁复跑） |
+| 后端全量（隔离库 `ai_talent_a_probe`，补种子后） | **exit 0**，**801 用例 / 800 passed / 1 skipped / 0 failed / 0 error**（A06-1 +10、A06-4 +7） |
+| 前端 `npm test` | **exit 0**，29 文件 / 131 用例（前端代码零改动，本轮复跑） |
 | `tsc --noEmit` | **exit 0** |
 | A06-1 定向 `test_a06_rbac_gates.py` | **exit 0，10 passed**（角色聚合 + 入口越权拒绝端到端） |
+| A06-4 定向 `test_a06_system_router.py` | **exit 0，7 passed**（门禁 401/403 + 部门 CRUD 往返 + 权限矩阵 + 账号绑定 + 操作日志只读） |
 | 受影响既有门禁测试 | **exit 0**（`test_account_scope.py` / `test_auth_integration_t07.py` / `test_auth_unit.py` 无回归） |
-| 静态 | `diff --check` **exit 0**；**275** 个受控 backend py 文件 AST 0 错；17 个 `include_router`；84 表 / 模型 84；单 head `D_0012`；改动文件均非 B/C/D 归属 |
+| 静态 | `diff --check` **exit 0**；**276** 个受控 backend py 文件 AST 0 错；18 个 `include_router`；84 表 / 模型 84；单 head `D_0012`；改动文件均属 A / UNASSIGNED，无需 `collab.integration` |
 
 > 纪律：禁用 `pytest | tail`；一律重定向日志 + 单独 `echo $?`；`--basetemp` 用项目内 `.pytest_tmp_A_*`。主库 `ai_talent` 的 `alembic_version` 超前于实际 schema，只读取证未处理，重建需用户授权。
 
@@ -175,7 +176,7 @@
 | ID | 优先级 | 状态 | 下一步 |
 |---|---|---|---|
 | A02 | P0 | **A02-1 已交付** + 新基线复验（794 用例全绿）。**A02-2 未完成**：分数仍是 `0.7/0.3` 向量混合 + `40/30/15/15` 加权 | A02-2 需 D 先改 `PROMPT_C_SCHEMA`（已发 [请求](../../requests/A/20261110-D-A02-2-PromptC综合分契约.md)），之后 A 改模型综合分 |
-| A06 | P0 | **A06-1 角色/职责门禁已交付**（本轮，见上）；**A06 整行未完成**：部门行级、字段级、系统管理域 router | A06-2/3/4 见映射表主行 |
+| A06 | P0 | **A06-1 + A06-4 已交付**：角色门禁 + 系统管理域 CRUD 路由（`/api/system` 整域接 `require_roles("system_admin")`，含部门/角色/菜单/权限/账号绑定/操作日志）；修复 `deps.py` 漏 import `DENY_MESSAGE` 隐患。**A06 整行未完成**：部门行级（`users.department_id` 缺失）、字段级、assessments/interviews 内联 `ADMIN_ROLES` 行级判定迁移 | A06-2：补 `users.department_id` + 部门行级过滤；A06-3：字段级权限白名单 + 序列化裁剪 |
 | D02（A/D） | P0 | **A 侧开关已交付**（`RATE_LIMIT_ENABLED`，默认 false 演示豁免；true 只豁免 `/api/health`） | 客户模式真实 Redis 多环境串扰复验未做 |
 | A03 / A08 / A11 / A12 / A14 | P1 | 空白或未获完整实现证据 | 批次档案冻结、申请输入快照、审批链、真实 AI JD 草稿、员工花名册 |
 | A01 / A04 / A10 / A13 / A15 | P1 | `×`（代码已实现） | 按执行表「通过条件」逐条接入/验收，**A 不替 Master 改表** |

@@ -196,6 +196,12 @@ from app.modules.analytics.router import router as analytics_router  # noqa: E40
 
 app.include_router(analytics_router)
 
+# A 系统管理域（A06-4）：/api/system 部门/角色/菜单/权限/账号绑定/操作日志，
+# 整域接 require_roles("system_admin")（A06-1 角色门禁），hr/dept_manager/personal 一律 403
+from app.modules.system.router import router as system_router  # noqa: E402
+
+app.include_router(system_router)
+
 # D 报告导出（T-D11）：/api/reports/snapshots/{id}/export 同快照 DOCX/PDF（2026-11-08 直接落地）
 from app.modules.reports.router import router as reports_router  # noqa: E402
 
