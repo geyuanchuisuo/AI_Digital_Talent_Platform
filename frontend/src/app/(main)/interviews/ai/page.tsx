@@ -99,7 +99,8 @@ export default function AiInterviewPage() {
   };
 
   const submitCreate = async () => {
-    const values = await createForm.validateFields();
+    const values = await createForm.validateFields().catch(() => null);
+    if (!values) return;
     try {
       await createSession(values);
       message.success('面试已创建');
@@ -113,7 +114,8 @@ export default function AiInterviewPage() {
 
   const submitQuestion = async () => {
     if (!current) return;
-    const values = await questionForm.validateFields();
+    const values = await questionForm.validateFields().catch(() => null);
+    if (!values) return;
     try {
       await addQuestion(current.id, values);
       message.success('题目已添加');

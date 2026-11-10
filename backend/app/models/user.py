@@ -43,6 +43,7 @@ class User(PKMixin, UpdatedAtMixin, Base):
         String(20), nullable=False, default="hr", server_default=str_default("hr")
     )
     person_id: Mapped[int | None] = mapped_column(PK_TYPE, nullable=True)
+    department_id: Mapped[int | None] = mapped_column(PK_TYPE, nullable=True)
     is_active: Mapped[int] = mapped_column(
         BOOL_TYPE, nullable=False, default=1, server_default=num_default(1)
     )

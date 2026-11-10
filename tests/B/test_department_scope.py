@@ -14,13 +14,14 @@ def test_real_role_department_and_expired_grants_are_applied(db,monkeypatch):
     from app.models.talent import TalentProfile
     from app.database import SessionLocal
     meta=MetaData()
-    for cls in [SysRole,SysUserRole,SysDepartment,UserScopeGrant]:
+    from app.models.user import User
+    for cls in [SysRole,SysUserRole,SysDepartment,UserScopeGrant,User]:
         table=cls.__table__.to_metadata(meta)
         for col in table.columns:
-            if col.primary_key:col.type=Integer()
+            if col.primary_key or col.name=='is_active':col.type=Integer()
             if col.name=='updated_at':col.server_default=DefaultClause(text('CURRENT_TIMESTAMP'))
     meta.create_all(db.get_bind())
-    db.add_all([SysDepartment(id=10,name='本部'),SysDepartment(id=20,name='外部'),
+    db.add_all([User(id=5,username='synthetic_scope',password_hash='unit-test',role='hr',person_id=101,department_id=10),SysDepartment(id=10,name='本部'),SysDepartment(id=20,name='外部'),
         SysRole(id=1,code='limited',name='部门管理',data_scope='dept'),
         SysUserRole(user_id=5,role_id=1),
         TalentProfile(id=101,name='本人',department_id=10),

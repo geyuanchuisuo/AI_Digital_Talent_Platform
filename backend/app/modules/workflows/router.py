@@ -18,7 +18,7 @@ from app.api.deps import CurrentUser
 from app.core.errors import BizError
 from app.core.response import ok
 from app.database import get_db
-from app.modules.workflows import run_service, service
+from app.modules.workflows import run_service, schedule, service
 from app.modules.workflows.models import (
     NODE_TYPE_LABELS,
     NODE_TYPES,
@@ -306,3 +306,74 @@ def cancel_run(
 ):
     run = run_service.cancel_waiting_run(db, thread_id=thread_id, user=user)
     return ok({"run_id": run.id, "thread_id": run.thread_id, "status": run.status})
+
+
+@router.post("/runs/{thread_id}/cancel-running", summary="取消运行中的运行（管理侧；协作式中断，执行中节点不打断）")
+def cancel_running(
+    thread_id: str,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    run = run_service.cancel_running_run(db, thread_id=thread_id, user=user)
+    return ok({"run_id": run.id, "thread_id": run.thread_id, "status": run.status})
+
+
+@router.post("/runs/{thread_id}/retry", summary="失败阶段重试（管理侧；从失败检查点续跑，已成功节点不重执行）")
+def retry_run(
+    thread_id: str,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    outcome = run_service.retry_failed_run(db, thread_id=thread_id, user=user)
+    run, result = outcome["run"], outcome["result"]
+    return ok(
+        {
+            "run_id": run.id,
+            "thread_id": run.thread_id,
+            "status": run.status,
+            "engine_status": result.status,
+            "interrupt": result.interrupt if result.status == "waiting" else None,
+            "error": result.error,
+        }
+    )
+
+
+# ---- 定时触发（T-D18 验收④）：默认关闭，管理员启用并配置参与定义与执行主体 ----
+
+@router.get("/schedule-settings", summary="定时触发配置（管理侧；默认关闭）")
+def get_schedule_settings(
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    service.require_management(user)
+    return ok(schedule.schedule_settings(db))
+
+
+@router.put("/schedule-settings", summary="更新定时触发配置（管理侧；启停/间隔/参与定义/执行主体）")
+def put_schedule_settings(
+    body: dict,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    enabled = body.get("enabled")
+    if not isinstance(enabled, bool):
+        raise BizError(422, "enabled 必填（布尔）")
+    interval = body.get("interval_minutes")
+    if interval is not None and not isinstance(interval, int):
+        raise BizError(422, "interval_minutes 须为整数分钟")
+    codes = body.get("definition_codes")
+    if codes is not None:
+        if not isinstance(codes, list) or any(not isinstance(c, str) for c in codes):
+            raise BizError(422, "definition_codes 须为字符串数组")
+    actor_id = body.get("actor_user_id")
+    if actor_id is not None and not isinstance(actor_id, int):
+        raise BizError(422, "actor_user_id 须为整数")
+    settings = schedule.update_schedule_settings(
+        db,
+        enabled=enabled,
+        interval_minutes=interval,
+        definition_codes=codes,
+        user=user,
+        actor_user_id=actor_id,
+    )
+    return ok(settings)

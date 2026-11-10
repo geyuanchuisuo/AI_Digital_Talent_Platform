@@ -10,6 +10,9 @@ def test_upload_capabilities_require_management_scope(client):
 
 def test_capabilities_follow_enabled_ocr_and_the_deployment_whitelist(client, monkeypatch):
     client.app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=7, role='hr', person_id=None)
+    # This endpoint/options unit test supplies a synthetic authenticated manager;
+    # real persisted A06 role/department mapping is covered by the scope tests.
+    monkeypatch.setattr('app.core.auth.scope._management_range', lambda *a: (True, (), None, ()))
     monkeypatch.setattr(settings, 'upload_allowed_ext', 'pdf,docx,png,jpg,jpeg')
     monkeypatch.setattr(settings, 'upload_max_mb', 12)
     monkeypatch.setattr(settings, 'ocr_enabled', True)

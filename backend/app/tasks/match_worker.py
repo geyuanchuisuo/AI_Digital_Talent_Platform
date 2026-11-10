@@ -6,7 +6,9 @@
 2. **降级不失败（D-B）**：Milvus/Embedding 任一不可用 → `experience=llm`、
    `vector_similarity=null`（写入 `dimension_scores_json.vector_similarity`）、
    批次 `vector_degraded=1`，照常 done；
-3. 硬淘汰 `score=0`（参与置底排序），`hard_failed` 汇总到批次行（done 时按结果表重算）。
+3. **A02-1（V2.6 §5）不再有硬淘汰**：规则层不符项/待核实项只进 `misses`，
+   所有候选人都进 Prompt C 并拿到分数；`hard_fail` 恒 0、`hard_failed` 恒 0。
+   原 `score=0` 置底分支已从 `match_engine.evaluate` 移除，DB 字段保留兼容历史行。
 """
 
 from __future__ import annotations
@@ -19,8 +21,8 @@ from sqlalchemy.orm import Session
 
 from app.dao import match as match_dao
 from app.models import MatchBatch, ParsedResume
-from app.config import settings
 from app.service import match_engine
+from app.service.screen_service import resolve_batch_model_versions
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +88,8 @@ def _job_vector(snapshot: dict) -> tuple[list[float] | None, bool]:
 
 def _run_batch(db: Session, batch: MatchBatch) -> None:
     snapshot = dict(batch.config_snapshot_json or {})
+    # T-A42：整批共用快照固定的模型/Prompt 版本（与 screen_worker 同口径）。
+    model_version, prompt_version = resolve_batch_model_versions(snapshot, logger=logger)
     scope = dict(batch.talent_scope_json or {})
     resolved_ids: list[int] = scope.get("resolved_ids") or []
     written = match_dao.result_talent_ids(db, batch.id)
@@ -130,8 +134,8 @@ def _run_batch(db: Session, batch: MatchBatch) -> None:
         dimension_scores = {**result.dimension_scores, "vector_similarity": result.vector_similarity}
         match_dao.create_result(
             db,
-            model_version=settings.llm_model,
-            prompt_version=settings.prompt_version,
+            model_version=model_version,
+            prompt_version=prompt_version,
             attempt=1,
             profile_input_snapshot_json=profile_input,
             match_batch_id=batch.id,

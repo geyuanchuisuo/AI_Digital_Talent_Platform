@@ -171,3 +171,13 @@ export function approveRun(threadId: string, approved: boolean, note: string) {
 export function cancelRun(threadId: string) {
   return post(`/workflows/runs/${encodeURIComponent(threadId)}/cancel`, {});
 }
+
+export function cancelRunningRun(threadId: string) {
+  return post(`/workflows/runs/${encodeURIComponent(threadId)}/cancel-running`, {});
+}
+
+export function retryRun(threadId: string) {
+  return post<{ run_id: number; thread_id: string; status: string }>(
+    `/workflows/runs/${encodeURIComponent(threadId)}/retry`, {},
+  );
+}

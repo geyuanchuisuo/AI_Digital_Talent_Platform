@@ -1,6 +1,11 @@
-"""招聘域路由（M3-V2.6）：人才需求/项目/项目群 CRUD、申请与五阶段状态机、JD 投放。
+"""招聘域路由（M3-V2.6，A08）：人才需求/项目/项目群 CRUD、申请与五阶段状态机、JD 投放。
 
 由 main.py `include_router(router)` 注册；统一返回体与鉴权沿用 core 约定。
+
+A08 对外分级（需求 §73）：`GET /applications` 对管理侧维持全字段，对个人侧
+强制把范围收窄到 `AccountScope.person_id`（忽略前端伪造的 talent_profile_id），
+且只返回已获准的对外字段；未经 HR 确认的终态结果一律不外露。完整输入快照
+只经 `GET /applications/{id}/input-snapshot`（管理侧角色门禁）返回。
 """
 
 from __future__ import annotations
@@ -10,7 +15,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.api.deps import CurrentUser
+from app.api.deps import CurrentUser, require_roles
+from app.core.auth.scope import account_is_management, get_account_scope
 from app.core.errors import BizError
 from app.core.response import ok
 from app.database import get_db
@@ -28,6 +34,9 @@ from app.modules.recruitment.schemas import (
 )
 
 router = APIRouter(prefix="/api/recruitment", tags=["recruitment"])
+
+# A08：完整输入快照属内部资料（含档案/解析结果），仅管理侧可读。
+_GATE_SNAPSHOT = Depends(require_roles("system_admin", "hr"))
 
 
 # ---- 项目群 ----
@@ -188,13 +197,19 @@ def list_applications(
 ):
     if external_stage is not None and external_stage not in EXTERNAL_STAGES:
         raise BizError(400, f"external_stage 仅支持 {' / '.join(EXTERNAL_STAGES)}")
+    is_management = account_is_management(db, user)
+    if not is_management:
+        # 个人侧：忽略前端传入的 talent_profile_id，后端 AccountScope 是最终授权点。
+        scope = get_account_scope(user)
+        if scope.person_id is None:
+            return ok(PageData(items=[], total=0, page=page, page_size=page_size).model_dump())
+        talent_profile_id = scope.person_id
     rows, total = recruitment_service.list_applications(
         db, talent_profile_id=talent_profile_id, job_profile_id=job_profile_id,
         external_stage=external_stage, offset=(page - 1) * page_size, limit=page_size,
     )
-    return ok(
-        PageData(items=[_application_out(r) for r in rows], total=total, page=page, page_size=page_size).model_dump()
-    )
+    items = [_application_out(r) if is_management else _application_public_out(r) for r in rows]
+    return ok(PageData(items=items, total=total, page=page, page_size=page_size).model_dump())
 
 
 @router.patch("/applications/{application_id}/stage", summary="人工推进内部阶段（对外阶段自动映射；终态写结果类别）")
@@ -217,6 +232,38 @@ def set_application_stage(
 def confirm_application_result(application_id: int, user: CurrentUser, db: Annotated[Session, Depends(get_db)] = None):
     row = recruitment_service.confirm_application_result(db, application_id, user_id=user.id)
     return ok(_application_out(row))
+
+
+@router.get(
+    "/applications/{application_id}/input-snapshot",
+    summary="管理侧只读：创建申请时冻结的岗位/JD/档案/简历输入快照",
+)
+def get_application_input_snapshot(
+    application_id: int,
+    user: CurrentUser,
+    _gate: Annotated[tuple[str, ...], _GATE_SNAPSHOT],
+    db: Annotated[Session, Depends(get_db)] = None,
+):
+    return ok(recruitment_service.get_application_input_snapshot(db, application_id))
+
+
+def _application_public_out(row) -> dict:
+    """个人侧获准字段（V2.6 §73）：只有对外阶段与经 HR 确认的结果类别。
+
+    内部阶段、推进原因/操作人、岗位版本、简历原件 id、内部评分与评价一律不返回；
+    终态结果在 HR 确认前把 result_category 置空，避免「待确认」却被读出录用/未录用。
+    """
+    from app.modules.recruitment.models import TERMINAL_STAGES
+
+    published = row.result_confirmed_by is not None and row.internal_stage in TERMINAL_STAGES
+    return {
+        "id": row.id,
+        "job_profile_id": row.job_profile_id,
+        "external_stage": row.external_stage,
+        "result_category": row.result_category if published else None,
+        "result_published": published,
+        "stage_updated_at": row.stage_updated_at.isoformat(timespec="seconds") if row.stage_updated_at else None,
+    }
 
 
 def _application_out(row) -> dict:

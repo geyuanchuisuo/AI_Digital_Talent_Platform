@@ -48,6 +48,14 @@ def test_terminal_semantics_result_categories():
 
 
 def test_five_recruitment_tables_registered():
+    """五张招聘表在 `TABLE_NAMES` 与实际 ORM 元数据中双注册。
+
+    一期表数会随 B/C/D 各自新增而增长（76 → 84，D 的 T-D19~D21 新增 8 表），
+    故不再硬编码总数（2026-11-10 并发更新时曾因此产生 1 例基线失败）。
+    改为「清单无重复 + 与 ORM 元数据集合完全一致」，既能发现漏注册、
+    也能发现重复注册，比固定数字更严格；具体表数看 `app/models/__init__.py`。
+    """
     for t in ("project_groups", "projects", "project_demands", "jd_publications", "applications"):
         assert t in TABLE_NAMES and t in Base.metadata.tables
-    assert len(TABLE_NAMES) == 76  # …64 + 6 workflow 表(T-D14)
+    assert len(TABLE_NAMES) == len(set(TABLE_NAMES)), "TABLE_NAMES 存在重复表"
+    assert set(TABLE_NAMES) == set(Base.metadata.tables), "注册表与实际 ORM 元数据不一致"

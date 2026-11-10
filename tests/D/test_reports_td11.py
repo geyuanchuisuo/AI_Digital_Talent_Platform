@@ -84,6 +84,20 @@ def env(tmp_path, monkeypatch):
     )
     Base.metadata.create_all(engine, tables=CORE_TABLES)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
+    # Align fixture authentication with the shared A06 database.
+    from app.models import SysRole, SysUserRole, UserScopeGrant
+    Base.metadata.create_all(engine, tables=[SysRole.__table__, SysUserRole.__table__, UserScopeGrant.__table__])
+    monkeypatch.setattr('app.database.SessionLocal', factory)
+    from app.models import User as ScopeUser
+    ScopeUser.__table__.create(factory.kw['bind'], checkfirst=True)
+    with factory() as scope_db:
+        for key, value in list(globals().items()):
+            if key.startswith('U_') and isinstance(getattr(value, 'id', None), int) and hasattr(value, 'role'):
+                if scope_db.get(ScopeUser, value.id) is None:
+                    scope_db.add(ScopeUser(id=value.id, username='scope_fixture_'+str(value.id),
+                        password_hash='test-only', role=value.role, person_id=getattr(value, 'person_id', None)))
+        scope_db.commit()
+
     seed_metric_registry(engine)
 
     monkeypatch.setattr(service, "_replica_engine", engine)

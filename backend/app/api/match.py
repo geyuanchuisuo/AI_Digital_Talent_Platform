@@ -34,7 +34,11 @@ def create_match_batch(
 ):
     """岗位向量在批次内只算一次；Milvus/Embedding 不可用时降级执行（vector_degraded=1），不 503。"""
     data = match_service.create_batch(
-        db, payload.job_profile_id, payload.scope.model_dump(exclude_none=True), user_id=user.id
+        db,
+        payload.job_profile_id,
+        payload.scope.model_dump(exclude_none=True),
+        user_id=user.id,
+        idempotency_key=payload.idempotency_key,
     )
     return ok(MatchBatchCreatedData.model_validate(data).model_dump(), status_code=202)
 

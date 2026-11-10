@@ -128,6 +128,23 @@ class WorkflowEngine:
             return self._finish(graph_name, thread_id, exc, None)
         return self._finish(graph_name, thread_id, None, raw)
 
+    def retry(self, graph_name: str, builder: Any, thread_id: str) -> EngineRunResult:
+        """从失败检查点续跑（T-D18 失败阶段重试）。
+
+        langgraph `invoke(None, config)` 语义：从最近检查点唤醒待执行任务——
+        已成功节点不重执行（vars 检查点承载），只重跑失败节点及其后继；已完结
+        的 thread 再续跑为空操作（不执行任何节点）。调用方须先把业务/引擎双侧
+        状态转回 running（failed→running 仅经受控 retry 入口），本方法只负责
+        执行与终态登记。
+        """
+        compiled = self.compile(graph_name, builder)
+        try:
+            raw = compiled.invoke(None, self._config(thread_id))
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("引擎重试失败 graph=%s thread=%s", graph_name, thread_id)
+            return self._finish(graph_name, thread_id, exc, None)
+        return self._finish(graph_name, thread_id, None, raw)
+
     def state(self, graph_name: str, builder: Any, thread_id: str) -> dict:
         """检查点状态（含 next 节点与 pending interrupt），供运行追踪/接管 UI。"""
         compiled = self.compile(graph_name, builder)

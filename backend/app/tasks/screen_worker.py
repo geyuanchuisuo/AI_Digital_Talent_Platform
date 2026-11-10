@@ -11,6 +11,10 @@
    快照内画像已软删/不存在 → 跳过不写行（done 后由详情接口计 `skipped_deleted`）。
 5. **done 时按结果表重算三档计数**（防漂移）；`total` 保持快照值。
 6. 异常 → 批次 `failed` + error，可 retry（断点续跑：已写行保留）。
+7. **A02-1（V2.6 §5）不再有硬淘汰**：硬条件不符/资料缺失者照样进 Prompt C 拿分，
+   不符项与待核实项进 `misses`；`hard_fail` 恒 0、不再写 `score=NULL`。
+   三档 `verdict` 仍是**内部参考标签**，不改申请状态、不自动推进/淘汰；人工结论
+   独立存 `manual_verdict*`（两档标签与人工三态对齐属 A02-2/M5 范围）。
 """
 
 from __future__ import annotations
@@ -23,9 +27,8 @@ from sqlalchemy.orm import Session
 
 from app.dao import screen as screen_dao
 from app.models import ParsedResume, ScreenBatch
-from app.config import settings
 from app.service import match_engine
-from app.service.screen_service import build_config_snapshot
+from app.service.screen_service import build_config_snapshot, resolve_batch_model_versions
 
 logger = logging.getLogger(__name__)
 
@@ -58,11 +61,27 @@ def _evidence_input(db: Session, talent_profile_id: int) -> dict:
 
 
 def _verdict_for(score: float | None, snapshot: dict) -> str:
+    """三档**内部参考标签**（V2.6 §5）。两档化 + 人工三态属 A02-2/M5 范围，本轮不动。
+
+    T-A34 三处口径修复：
+    1. 阈值**必须来自批次快照**，不设来源示例默认值（V2.6 §5「具体阈值由管理员
+       配置，不设置来源示例默认值」）。旧实现 `snapshot.get(..., 75/60)` 在快照
+       损坏或缺字段时会静默按示例值判定，改为显式 `KeyError`，交由批次失败/重试
+       路径暴露数据问题。
+    2. `score is None`（评分失败）**不得计为「不满足条件」**（V2.6 §5「评分失败
+       单独显示，不计为不满足条件」）。A02-1 之后引擎恒返回分数；该分支若真出现，
+       抛错让批次失败并保留重试入口，不伪装成内部标签 `rejected`。
+    3. 达线判定保持 `>=`（**含等于**，T-A34 验收点），由下方反例测试固化。
+    """
     if score is None:
-        return "rejected"
-    if score >= float(snapshot.get("pass_threshold", 75)):
+        raise ValueError(
+            "评分失败（score=None）不得写入内部参考标签；批次按失败处理并保留重试入口"
+        )
+    pass_threshold = float(snapshot["pass_threshold"])
+    pending_threshold = float(snapshot["pending_threshold"])
+    if score >= pass_threshold:
         return "passed"
-    if score >= float(snapshot.get("pending_threshold", 60)):
+    if score >= pending_threshold:
         return "pending"
     return "rejected"
 
@@ -88,6 +107,18 @@ def handle_screen_batch(batch_id: int) -> None:
 
 def _run_batch(db: Session, batch: ScreenBatch) -> None:
     snapshot = dict(batch.config_snapshot_json or {})
+    # T-A34（V2.6 §5）：阈值必须来自管理员配置的批次快照，禁止静默套用示例默认值。
+    # 放在调用 LLM 之前校验，避免损坏快照消耗整批模型调用后才暴露问题。
+    missing_thresholds = [
+        key for key in ("pass_threshold", "pending_threshold") if key not in snapshot
+    ]
+    if missing_thresholds:
+        raise ValueError(
+            f"筛选批次 {batch.id} 配置快照缺少阈值字段 {missing_thresholds}，"
+            "拒绝按示例默认值判定（V2.6 §5）"
+        )
+    # T-A42：整批共用快照固定的模型/Prompt 版本，retry 补缺也不受运行时配置变更影响。
+    model_version, prompt_version = resolve_batch_model_versions(snapshot, logger=logger)
     scope = dict(batch.scope_json or {})
     resolved_ids: list[int] = scope.get("resolved_ids") or []
     # 断点续跑：已写结果的成员直接跳过（retry 只补缺）
@@ -127,8 +158,8 @@ def _run_batch(db: Session, batch: ScreenBatch) -> None:
         score = None if result.score is None else round(float(result.score), 2)
         screen_dao.create_result(
             db,
-            model_version=settings.llm_model,
-            prompt_version=settings.prompt_version,
+            model_version=model_version,
+            prompt_version=prompt_version,
             attempt=1,
             profile_input_snapshot_json=profile_input,
             screen_batch_id=batch.id,

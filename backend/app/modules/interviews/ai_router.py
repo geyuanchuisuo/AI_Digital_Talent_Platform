@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser
+from app.core.auth.scope import account_is_management
 from app.core.errors import BizError
 from app.core.llm_client import LLMError
 from app.core.response import ok
@@ -23,6 +24,8 @@ from app.modules.interviews.ai_models import (
 
 router = APIRouter(prefix="/api/ai-interviews", tags=["ai-interviews"])
 
+# 历史常量保留仅为兼容外部 import；管理侧判定统一走 A06 角色门禁（scope.py）。
+# 旧值 {"admin", "hr"} 会误拒 system_admin、误放非标准 "admin"。
 ADMIN_ROLES = {"admin", "hr"}
 
 
@@ -42,13 +45,19 @@ class AnswerSubmit(BaseModel):
     answer_text: str = Field(min_length=1)
 
 
+def _is_management(db: Session, user) -> bool:
+    """A06 统一角色门禁：每个端点只算一次，供纯管理门与「本人 or 管理」行级判定共用。"""
+    return account_is_management(db, user)
+
+
 def _event(db, session_id, event_type, operator_id=None, note=None):
     db.add(AiInterviewEvent(session_id=session_id, event_type=event_type, operator_id=operator_id, note=note))
 
 
 @router.post("/sessions")
 def create_session(payload: SessionCreate, user: CurrentUser, db: Session = Depends(get_db)):
-    if user.role not in ADMIN_ROLES:
+    is_admin = _is_management(db, user)
+    if not is_admin:
         raise BizError(403, "仅管理员可创建 AI 面试")
     session = AiInterviewSession(**payload.model_dump())
     db.add(session)
@@ -60,8 +69,9 @@ def create_session(payload: SessionCreate, user: CurrentUser, db: Session = Depe
 
 @router.get("/sessions")
 def list_sessions(user: CurrentUser, db: Session = Depends(get_db), candidate_user_id: int | None = None):
+    is_admin = _is_management(db, user)
     stmt = select(AiInterviewSession).order_by(AiInterviewSession.id.desc())
-    if user.role not in ADMIN_ROLES:
+    if not is_admin:
         stmt = stmt.where(AiInterviewSession.candidate_user_id == user.id)
     elif candidate_user_id is not None:
         stmt = stmt.where(AiInterviewSession.candidate_user_id == candidate_user_id)
@@ -76,10 +86,11 @@ def list_sessions(user: CurrentUser, db: Session = Depends(get_db), candidate_us
 
 @router.post("/sessions/{session_id}/start")
 def start_session(session_id: int, user: CurrentUser, db: Session = Depends(get_db)):
+    is_admin = _is_management(db, user)
     session = db.get(AiInterviewSession, session_id)
     if not session:
         raise BizError(404, "面试不存在")
-    if session.candidate_user_id and session.candidate_user_id != user.id and user.role not in ADMIN_ROLES:
+    if session.candidate_user_id and session.candidate_user_id != user.id and not is_admin:
         raise BizError(403, "无权操作他人面试")
     if session.status != "pending":
         raise BizError(400, "仅 pending 状态可开始")
@@ -92,10 +103,11 @@ def start_session(session_id: int, user: CurrentUser, db: Session = Depends(get_
 
 @router.post("/sessions/{session_id}/questions")
 def add_question(session_id: int, payload: QuestionCreate, user: CurrentUser, db: Session = Depends(get_db)):
+    is_admin = _is_management(db, user)
     session = db.get(AiInterviewSession, session_id)
     if not session:
         raise BizError(404, "面试不存在")
-    if user.role not in ADMIN_ROLES:
+    if not is_admin:
         raise BizError(403, "仅管理员可出题")
     max_seq = db.execute(
         select(AiInterviewQuestion.sequence_no).where(AiInterviewQuestion.session_id == session_id)
@@ -112,10 +124,11 @@ def add_question(session_id: int, payload: QuestionCreate, user: CurrentUser, db
 
 @router.get("/sessions/{session_id}/questions")
 def list_questions(session_id: int, user: CurrentUser, db: Session = Depends(get_db)):
+    is_admin = _is_management(db, user)
     session = db.get(AiInterviewSession, session_id)
     if not session:
         raise BizError(404, "面试不存在")
-    if session.candidate_user_id and session.candidate_user_id != user.id and user.role not in ADMIN_ROLES:
+    if session.candidate_user_id and session.candidate_user_id != user.id and not is_admin:
         raise BizError(403, "无权查看")
     rows = db.execute(
         select(AiInterviewQuestion).where(AiInterviewQuestion.session_id == session_id)
@@ -124,7 +137,7 @@ def list_questions(session_id: int, user: CurrentUser, db: Session = Depends(get
     return ok([
         {"id": q.id, "sequence_no": q.sequence_no, "question_text": q.question_text,
          "question_type": q.question_type, "status": q.status,
-         "answer_text": q.answer_text if (user.role in ADMIN_ROLES or q.status != "pending") else None,
+         "answer_text": q.answer_text if (is_admin or q.status != "pending") else None,
          "ai_score": q.ai_score, "ai_feedback": q.ai_feedback_json}
         for q in rows
     ])
@@ -132,11 +145,12 @@ def list_questions(session_id: int, user: CurrentUser, db: Session = Depends(get
 
 @router.post("/questions/{question_id}/answer")
 def submit_answer(question_id: int, payload: AnswerSubmit, user: CurrentUser, db: Session = Depends(get_db)):
+    is_admin = _is_management(db, user)
     question = db.get(AiInterviewQuestion, question_id)
     if not question:
         raise BizError(404, "题目不存在")
     session = db.get(AiInterviewSession, question.session_id)
-    if not session or (session.candidate_user_id and session.candidate_user_id != user.id and user.role not in ADMIN_ROLES):
+    if not session or (session.candidate_user_id and session.candidate_user_id != user.id and not is_admin):
         raise BizError(403, "无权作答")
     if question.status not in ("pending", "failed"):
         raise BizError(400, "该题已评分")
@@ -172,10 +186,11 @@ def retry_judge(question_id: int, user: CurrentUser, db: Session = Depends(get_d
 
 @router.post("/sessions/{session_id}/finish")
 def finish_session(session_id: int, user: CurrentUser, db: Session = Depends(get_db)):
+    is_admin = _is_management(db, user)
     session = db.get(AiInterviewSession, session_id)
     if not session:
         raise BizError(404, "面试不存在")
-    if user.role not in ADMIN_ROLES and session.candidate_user_id != user.id:
+    if not is_admin and session.candidate_user_id != user.id:
         raise BizError(403, "无权结束")
     rows = db.execute(
         select(AiInterviewQuestion).where(AiInterviewQuestion.session_id == session_id)

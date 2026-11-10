@@ -4,8 +4,10 @@
 - scope 为 `all / filter / upload_batch`（无 all_unscreened、多 filter）；
 - worker `use_vector=True`：岗位向量**批次内算一次**；Milvus/Embedding 不可用 →
   **降级执行并置批次 `vector_degraded=1`，不 503 不失败**（§4.2）；
-- 硬淘汰 `score=0` 参与置底排序；`hard_failed` 汇总到批次行；
-- 名次查询时计算（`hard_fail ASC, score DESC, talent_profile_id ASC` + 行号），不持久化。
+- A02-1（V2.6 §5）：不再有硬淘汰 `score=0`；规则层不符项只进 `misses`，
+  所有候选人均有分；`hard_fail` 字段保留兼容历史数据但恒 0，`hard_failed` 恒 0；
+- 名次查询时计算（`hard_fail ASC, score DESC, talent_profile_id ASC` + 行号），不持久化；
+  由于 `hard_fail` 恒 0，实际按分数排序，不因规则层不符项被置底。
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from datetime import datetime
 from typing import Any, Mapping
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.errors import BizError
@@ -22,7 +25,7 @@ from app.dao import job_profiles as job_dao
 from app.dao import match as match_dao
 from app.models import MatchBatch, ParsedResume, ResumeFile, TalentProfile, TalentTag
 from app.service import match_engine
-from app.service.screen_service import build_config_snapshot
+from app.service.screen_service import build_config_snapshot, normalize_idempotency_key
 
 logger = logging.getLogger(__name__)
 
@@ -89,19 +92,44 @@ def resolve_talent_ids(db: Session, scope: Mapping[str, Any]) -> list[int]:
     return sorted(set(db.execute(stmt).scalars().all()))
 
 
-def _profile_gate_input(row: TalentProfile) -> dict[str, Any]:
+
+def _find_batch_by_key(db: Session, job_profile_id: int, key: str) -> MatchBatch | None:
+    """T-A42：与 screen_service 同构，幂等键限定在同一岗位内。"""
+    return db.execute(
+        select(MatchBatch)
+        .where(MatchBatch.job_profile_id == job_profile_id)
+        .where(MatchBatch.idempotency_key == key)
+        .order_by(MatchBatch.id.asc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+def _replay_payload(db: Session, batch: MatchBatch) -> dict[str, Any]:
+    resolved_ids = list(dict(batch.talent_scope_json or {}).get("resolved_ids") or [])
+    profiles = match_dao.list_profiles_by_ids(db, resolved_ids)
     return {
-        "talent_profile_id": row.id,
-        "degree": row.degree,
-        "work_years": float(row.work_years) if row.work_years is not None else None,
-        "skills_json": list(row.skills_json or []),
-        "vector_status": row.vector_status,
+        "batch_id": batch.id,
+        "total": batch.total,
+        "status": batch.status,
+        "estimated_llm_calls": sum(1 for tid in resolved_ids if profiles.get(tid) is not None),
     }
 
 
 def create_batch(
-    db: Session, job_profile_id: int, scope: Mapping[str, Any], *, user_id: int
+    db: Session,
+    job_profile_id: int,
+    scope: Mapping[str, Any],
+    *,
+    user_id: int,
+    idempotency_key: str | None = None,
 ) -> dict[str, Any]:
+    """T-A42：显式 `idempotency_key` 命中已有批次时直接返回原批次，不新建、不重圈人。"""
+    key = normalize_idempotency_key(idempotency_key)
+    if key is not None:
+        existing = _find_batch_by_key(db, job_profile_id, key)
+        if existing is not None:
+            return _replay_payload(db, existing)
+
     job = job_dao.get(db, job_profile_id)
     if job is None:
         raise BizError(404, JOB_NOT_FOUND)
@@ -115,26 +143,28 @@ def create_batch(
 
     snapshot = build_config_snapshot(job)
     profiles = match_dao.list_profiles_by_ids(db, resolved_ids)
-    estimated = 0
-    for talent_id in resolved_ids:
-        row = profiles.get(talent_id)
-        if row is None:
-            continue
-        reasons, _, _ = match_engine.hard_gate(snapshot, _profile_gate_input(row))
-        if not reasons:
-            estimated += 1
+    # A02-1：所有人都会进 Prompt C，不再用 hard_gate 折减预估调用数
+    estimated = sum(1 for talent_id in resolved_ids if profiles.get(talent_id) is not None)
 
-    batch = match_dao.create_batch(
-        db,
-        job_profile_id=job_profile_id,
-        job_profile_version=job.version,
-        config_snapshot_json=snapshot,
-        talent_scope_json={**normalized_scope, "resolved_ids": resolved_ids},
-        status="pending",
-        total=len(resolved_ids),
-        created_by=user_id,
-    )
-    db.commit()
+    try:
+        batch = match_dao.create_batch(
+            db,
+            job_profile_id=job_profile_id,
+            job_profile_version=job.version,
+            config_snapshot_json=snapshot,
+            talent_scope_json={**normalized_scope, "resolved_ids": resolved_ids},
+            status="pending",
+            total=len(resolved_ids),
+            created_by=user_id,
+            idempotency_key=key,
+        )
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = _find_batch_by_key(db, job_profile_id, key) if key is not None else None
+        if existing is not None:
+            return _replay_payload(db, existing)
+        raise
     db.refresh(batch)
     return {
         "batch_id": batch.id,

@@ -44,6 +44,7 @@ import {
   fetchMyAssignments,
   fetchPlans,
   fetchQuestions,
+  generateQuestionDrafts,
   getAssignment,
   getResult,
   manualScore,
@@ -55,6 +56,8 @@ import {
   saveAnswer,
   startAssignment,
   submitAssignment,
+  updatePlan,
+  updateQuestion,
 } from './api';
 import type {
   AnswerScoreRow,
@@ -221,7 +224,7 @@ function AnswerDrawer({
     }
   };
 
-  const handleSubmit = async () => {
+  const doSubmit = async () => {
     if (!assignmentId) return;
     setSubmitting(true);
     try {
@@ -239,6 +242,29 @@ function AnswerDrawer({
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleSubmit = () => {
+    if (!assignmentId || !detail) return;
+    let unanswered = 0;
+    if (detail.assignment.mode === 'fixed') {
+      unanswered = detail.questions.filter(
+        (q) => !q.answer || (!q.answer.selected_option && !(q.answer.answer_text ?? '').trim()),
+      ).length;
+    } else if (next && !next.done) {
+      unanswered = Math.max(0, next.target_question_count - next.answered_count);
+    }
+    if (unanswered > 0) {
+      Modal.confirm({
+        title: '确认交卷？',
+        content: `还有 ${unanswered} 题未作答，未答题目按 0 分计入。`,
+        okText: '确认交卷',
+        cancelText: '继续作答',
+        onOk: () => doSubmit(),
+      });
+      return;
+    }
+    void doSubmit();
   };
 
   const handleRetry = async () => {
@@ -278,7 +304,7 @@ function AnswerDrawer({
             <Button onClick={() => void viewResult()}>查看结果与复习</Button>
           )}
           {editable && (
-            <Button type="primary" loading={submitting} onClick={() => void handleSubmit()}>
+            <Button type="primary" loading={submitting} onClick={handleSubmit}>
               交卷
             </Button>
           )}
@@ -513,7 +539,11 @@ function QuestionAdmin() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState<AssessmentQuestion | null>(null);
+  const [genOpen, setGenOpen] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [form] = Form.useForm<QuestionPayload & { options_text?: string }>();
+  const [genForm] = Form.useForm();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -532,20 +562,66 @@ function QuestionAdmin() {
     void load();
   }, [load]);
 
+  const openCreate = () => {
+    setEditing(null);
+    form.resetFields();
+    setModalOpen(true);
+  };
+
+  const openEdit = (row: AssessmentQuestion) => {
+    setEditing(row);
+    form.setFieldsValue({
+      dimension_name: row.dimension_name,
+      dimension_type: row.dimension_type,
+      difficulty: row.difficulty,
+      question_type: row.question_type,
+      stem: row.stem,
+      options_text: row.options.join('\n'),
+      correct_answer: row.correct_answer ?? undefined,
+      reference_points: row.reference_points ?? undefined,
+      scoring_guideline: row.scoring_guideline ?? undefined,
+    });
+    setModalOpen(true);
+  };
+
   const submit = async () => {
-    const values = await form.validateFields();
+    const values = await form.validateFields().catch(() => null);
+    if (!values) return;
     const options = values.options_text
       ? values.options_text.split('\n').map((item) => item.trim()).filter(Boolean)
       : undefined;
     const { options_text: _optionsText, ...questionValues } = values;
     try {
-      await createQuestion({ ...questionValues, options });
-      message.success('题目已创建，待审核');
+      if (editing) {
+        await updateQuestion(editing.id, { ...questionValues, options });
+        message.success('题目已更新，重新进入待审核');
+      } else {
+        await createQuestion({ ...questionValues, options });
+        message.success('题目已创建，待审核');
+      }
       setModalOpen(false);
+      setEditing(null);
       form.resetFields();
       void load();
     } catch (error) {
       message.error(getErrorMessage(error));
+    }
+  };
+
+  const submitGen = async () => {
+    const values = await genForm.validateFields().catch(() => null);
+    if (!values) return;
+    setGenerating(true);
+    try {
+      const generated = await generateQuestionDrafts(values);
+      message.success(`已生成 ${generated.length} 道待审核题目，请审核后入库`);
+      setGenOpen(false);
+      genForm.resetFields();
+      void load();
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    } finally {
+      setGenerating(false);
     }
   };
 
@@ -563,25 +639,27 @@ function QuestionAdmin() {
     {
       title: '操作',
       key: 'action',
-      width: 90,
-      render: (_, row) =>
-        row.status !== 'approved' ? (
-          <a
-            onClick={async () => {
-              try {
-                await approveQuestion(row.id);
-                message.success('已审核通过');
-                void load();
-              } catch (error) {
-                message.error(getErrorMessage(error));
-              }
-            }}
-          >
-            审核通过
-          </a>
-        ) : (
-          '—'
-        ),
+      width: 130,
+      render: (_, row) => (
+        <Space size={8}>
+          <a onClick={() => openEdit(row)}>编辑</a>
+          {row.status !== 'approved' && (
+            <a
+              onClick={async () => {
+                try {
+                  await approveQuestion(row.id);
+                  message.success('已审核通过');
+                  void load();
+                } catch (error) {
+                  message.error(getErrorMessage(error));
+                }
+              }}
+            >
+              审核通过
+            </a>
+          )}
+        </Space>
+      ),
     },
   ];
 
@@ -589,9 +667,12 @@ function QuestionAdmin() {
     <Card
       title="题库"
       extra={
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
-          新建题目
-        </Button>
+        <Space>
+          <Button onClick={() => setGenOpen(true)}>AI 生成题目</Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+            新建题目
+          </Button>
+        </Space>
       }
     >
       <Table
@@ -601,7 +682,15 @@ function QuestionAdmin() {
         dataSource={rows}
         pagination={{ current: page, pageSize: PAGE_SIZE, total, onChange: setPage, showSizeChanger: false }}
       />
-      <Modal title="新建题目" open={modalOpen} onOk={() => void submit()} onCancel={() => setModalOpen(false)}>
+      <Modal
+        title={editing ? `编辑题目 #${editing.id}` : '新建题目'}
+        open={modalOpen}
+        onOk={() => void submit()}
+        onCancel={() => {
+          setModalOpen(false);
+          setEditing(null);
+        }}
+      >
         <Form form={form} layout="vertical" initialValues={{ dimension_type: 'professional', difficulty: 'medium', question_type: 'single_choice' }}>
           <Form.Item name="dimension_name" label="考核维度" rules={[{ required: true }]}>
             <Input placeholder="如：数据库基础" />
@@ -634,6 +723,43 @@ function QuestionAdmin() {
           </Form.Item>
         </Form>
       </Modal>
+      <Modal
+        title="AI 生成题目"
+        open={genOpen}
+        confirmLoading={generating}
+        onOk={() => void submitGen()}
+        onCancel={() => setGenOpen(false)}
+      >
+        <Form
+          form={genForm}
+          layout="vertical"
+          initialValues={{ dimension_type: 'professional', difficulty: 'medium', question_type: 'single_choice', count: 1 }}
+        >
+          <Form.Item name="dimension_name" label="考核维度" rules={[{ required: true }]}>
+            <Input placeholder="如：数据库基础" />
+          </Form.Item>
+          <Space size={8} style={{ display: 'flex' }}>
+            <Form.Item name="dimension_type" label="维度类型" style={{ flex: 1 }}>
+              <Select options={[{ value: 'professional', label: '专业' }, { value: 'general', label: '通用' }]} />
+            </Form.Item>
+            <Form.Item name="difficulty" label="难度" style={{ flex: 1 }}>
+              <Select options={['easy', 'medium', 'hard'].map((v) => ({ value: v, label: v }))} />
+            </Form.Item>
+            <Form.Item name="question_type" label="题型" style={{ flex: 1 }}>
+              <Select options={[{ value: 'single_choice', label: '单选' }, { value: 'short_answer', label: '简答' }]} />
+            </Form.Item>
+            <Form.Item name="count" label="数量" style={{ flex: 1 }}>
+              <InputNumber min={1} max={5} style={{ width: '100%' }} />
+            </Form.Item>
+          </Space>
+          <Form.Item name="job_title" label="岗位名称（可选，用于贴合岗位语境）">
+            <Input />
+          </Form.Item>
+          <Typography.Text type="secondary">
+            由模型生成草稿，状态为待审核，需人工审核通过后才会进入组卷范围。
+          </Typography.Text>
+        </Form>
+      </Modal>
     </Card>
   );
 }
@@ -644,6 +770,7 @@ function PlanAdmin() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState<AssessmentPlan | null>(null);
   const [form] = Form.useForm();
 
   const load = useCallback(async () => {
@@ -664,7 +791,8 @@ function PlanAdmin() {
   }, [load]);
 
   const submit = async () => {
-    const values = await form.validateFields();
+    const values = await form.validateFields().catch(() => null);
+    if (!values) return;
     const dimensions = (values.dimensions_text as string)
       .split('\n')
       .map((line) => line.trim())
@@ -673,31 +801,62 @@ function PlanAdmin() {
         const [name, type, weight] = line.split(/[,，]/).map((item) => item.trim());
         return { name, type: type || 'professional', weight: Number(weight) };
       });
+    const strategy =
+      values.mode === 'adaptive'
+        ? {
+            min_question_count: values.min_question_count,
+            max_question_count: values.max_question_count,
+            start_difficulty: values.start_difficulty,
+          }
+        : undefined;
     try {
-      await createPlan({
-        purpose: values.purpose,
-        job_id: values.job_id,
-        job_title: values.job_title,
-        total_question_count: values.total_question_count,
-        pass_score: values.pass_score,
-        dimensions,
-        mode: values.mode,
-        strategy:
-          values.mode === 'adaptive'
-            ? {
-                min_question_count: values.min_question_count,
-                max_question_count: values.max_question_count,
-                start_difficulty: values.start_difficulty,
-              }
-            : undefined,
-      });
-      message.success('方案已创建（草稿）');
+      if (editing) {
+        await updatePlan(editing.id, {
+          job_title: values.job_title,
+          total_question_count: values.total_question_count,
+          pass_score: values.pass_score,
+          dimensions,
+          mode: values.mode,
+          strategy,
+        });
+        message.success('方案已更新');
+      } else {
+        await createPlan({
+          purpose: values.purpose,
+          job_id: values.job_id,
+          job_title: values.job_title,
+          total_question_count: values.total_question_count,
+          pass_score: values.pass_score,
+          dimensions,
+          mode: values.mode,
+          strategy,
+        });
+        message.success('方案已创建（草稿）');
+      }
       setModalOpen(false);
+      setEditing(null);
       form.resetFields();
       void load();
     } catch (error) {
       message.error(getErrorMessage(error));
     }
+  };
+
+  const openEdit = (row: AssessmentPlan) => {
+    setEditing(row);
+    form.setFieldsValue({
+      purpose: row.purpose,
+      job_id: row.job_id,
+      job_title: row.job_title,
+      dimensions_text: row.dimensions.map((d) => `${d.name},${d.type},${d.weight}`).join('\n'),
+      mode: row.mode,
+      total_question_count: row.total_question_count,
+      pass_score: row.pass_score,
+      min_question_count: row.strategy?.min_question_count,
+      max_question_count: row.strategy?.max_question_count,
+      start_difficulty: row.strategy?.start_difficulty ?? 'medium',
+    });
+    setModalOpen(true);
   };
 
   const publish = async (id: number) => {
@@ -733,10 +892,13 @@ function PlanAdmin() {
     {
       title: '操作',
       key: 'action',
-      width: 110,
+      width: 130,
       render: (_, row) =>
         row.status === 'draft' ? (
-          <a onClick={() => void publish(row.id)}>发布</a>
+          <Space size={8}>
+            <a onClick={() => openEdit(row)}>编辑</a>
+            <a onClick={() => void publish(row.id)}>发布</a>
+          </Space>
         ) : row.mode === 'adaptive' ? (
           <Typography.Text type="secondary">题库 {row.bank_snapshot?.question_count ?? '—'}</Typography.Text>
         ) : (
@@ -749,7 +911,15 @@ function PlanAdmin() {
     <Card
       title="测评方案"
       extra={
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
+        <Button
+          type="primary"
+          icon={<PlusOutlined />}
+          onClick={() => {
+            setEditing(null);
+            form.resetFields();
+            setModalOpen(true);
+          }}
+        >
           新建方案
         </Button>
       }
@@ -761,7 +931,16 @@ function PlanAdmin() {
         dataSource={rows}
         pagination={{ current: page, pageSize: PAGE_SIZE, total, onChange: setPage, showSizeChanger: false }}
       />
-      <Modal title="新建测评方案" open={modalOpen} width={620} onOk={() => void submit()} onCancel={() => setModalOpen(false)}>
+      <Modal
+        title={editing ? `编辑方案 #${editing.id}` : '新建测评方案'}
+        open={modalOpen}
+        width={620}
+        onOk={() => void submit()}
+        onCancel={() => {
+          setModalOpen(false);
+          setEditing(null);
+        }}
+      >
         <Form
           form={form}
           layout="vertical"
@@ -778,10 +957,10 @@ function PlanAdmin() {
         >
           <Space size={8} style={{ display: 'flex' }}>
             <Form.Item name="purpose" label="用途" style={{ flex: 1 }}>
-              <Select options={[{ value: 'recruitment', label: '招聘测评' }, { value: 'employee', label: '员工测评' }]} />
+              <Select disabled={!!editing} options={[{ value: 'recruitment', label: '招聘测评' }, { value: 'employee', label: '员工测评' }]} />
             </Form.Item>
             <Form.Item name="job_id" label="岗位 ID" style={{ flex: 1 }} rules={[{ required: true }]}>
-              <InputNumber min={1} style={{ width: '100%' }} />
+              <InputNumber min={1} disabled={!!editing} style={{ width: '100%' }} />
             </Form.Item>
             <Form.Item name="job_title" label="岗位名称" style={{ flex: 2 }} rules={[{ required: true }]}>
               <Input />
@@ -881,7 +1060,8 @@ function AssignmentAdmin() {
   };
 
   const submitAssign = async () => {
-    const values = await form.validateFields();
+    const values = await form.validateFields().catch(() => null);
+    if (!values) return;
     try {
       await assignAssessment({
         plan_id: values.plan_id,
@@ -1104,12 +1284,12 @@ export default function AssessmentsPage() {
   ];
 
   return (
-    <Card title="固定岗位测评">
+    <Card title="岗位测评">
       <Alert
         type="info"
         showIcon
         style={{ marginBottom: 16 }}
-        message="一期测评按岗位固定标准与固定题量组卷，不做自适应升降难度；招聘成绩由管理员确认公布。"
+        message="测评按方案组卷：固定卷按既定题目，自适应卷按作答表现动态调整难度；招聘测评成绩需管理员确认公布后可见。"
       />
       <Tabs items={items} />
     </Card>

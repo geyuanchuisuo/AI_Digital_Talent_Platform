@@ -76,6 +76,22 @@ class InterviewFlowTest(unittest.TestCase):
         )
         self.assertEqual(early.status_code, 400)
 
+        # 未开展不能标记已完成（需求：没有开展的面试不允许标记已完成反馈）
+        premature = self.client.patch(
+            f"/api/interviews/rounds/{round_id}",
+            json={"status": "completed"},
+            headers=self.harness.headers(self.admin),
+        )
+        self.assertEqual(premature.status_code, 400)
+
+        started = self.client.patch(
+            f"/api/interviews/rounds/{round_id}",
+            json={"status": "in_progress"},
+            headers=self.harness.headers(self.admin),
+        )
+        self.assertEqual(started.status_code, 200)
+        self.assertEqual(started.json()["data"]["status"], "in_progress")
+
         completed = self.client.patch(
             f"/api/interviews/rounds/{round_id}",
             json={"status": "completed"},
@@ -122,6 +138,7 @@ class InterviewFlowTest(unittest.TestCase):
         ).json()["data"]
         event_types = [event["event_type"] for event in detail["events"]]
         self.assertIn("created", event_types)
+        self.assertIn("started", event_types)
         self.assertIn("completed", event_types)
         self.assertIn("rescheduled", event_types)
 

@@ -66,7 +66,7 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     "parse_attempts": {"id", "parse_task_id", "attempt_no", "status", "stage", "error_message", "started_at", "finished_at", "trace_json"},
     "users": {
         "id", "username", "password_hash", "display_name", "role", "person_id",
-        "is_active", "last_login_at", "created_at", "updated_at",
+        "department_id", "is_active", "last_login_at", "created_at", "updated_at",
     },
     "sys_settings": {
         "id", "setting_key", "setting_value", "value_type", "description",
@@ -112,6 +112,7 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "scope_json", "status", "progress", "total", "passed", "pending_count",
         "rejected", "started_at", "heartbeat_at", "error", "retry_count",
         "vector_degraded", "created_by", "created_at", "finished_at",
+        "idempotency_key",  # T-A42 请求级幂等键（可空）
     },
     "screen_results": {
         "id", "screen_batch_id", "job_profile_id", "talent_profile_id", "hard_fail",
@@ -125,6 +126,7 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "talent_scope_json", "status", "progress", "total", "hard_failed",
         "started_at", "heartbeat_at", "error", "retry_count", "vector_degraded",
         "created_by", "created_at", "finished_at",
+        "idempotency_key",  # T-A42 请求级幂等键（可空）
     },
     "match_results": {
         "id", "match_batch_id", "talent_profile_id", "score", "hard_fail",
@@ -265,13 +267,15 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "id", "talent_profile_id", "job_profile_id", "job_profile_version",
         "resume_file_id", "internal_stage", "external_stage", "result_category",
         "result_confirmed_by", "stage_reason", "stage_updated_by",
-        "stage_updated_at", "closed_at", "created_by", "created_at", "updated_at",
+        "stage_updated_at", "closed_at", "input_snapshot_json", "input_snapshot_at",
+        "created_by", "created_at", "updated_at",
     },
     "talent_profile_questions": {"id", "person_id", "profile_version", "asked_by", "status", "snapshot_json", "created_at"},
     "training_courses": {
         "id", "title", "description", "material_url", "dimension_names_json",
         "status", "version", "feedback_note", "feedback_note_at", "capacity",
         "created_by", "updated_by", "created_at", "updated_at",
+        "capacity",  # C_0006_course_capacity（课程名额上限）
     },
     "training_sessions": {
         "id", "course_id", "instructor_name", "starts_at", "ends_at",
@@ -298,7 +302,8 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     },
     "training_plan_items": {
         "id", "plan_id", "plan_version", "course_id", "course_snapshot_json",
-        "dimension_name", "reason", "sort_order", "created_at", "updated_at", "due_date",
+        "dimension_name", "reason", "sort_order", "created_at", "updated_at",
+        "due_date",  # C_0005_plan_item_due_date（F09 必修到期/逾期/延期）
     },
     "training_plan_versions": {
         "id", "plan_id", "version", "status", "snapshot_json", "note",
@@ -312,6 +317,7 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     "training_learning_evidence": {
         "id", "learning_record_id", "employee_user_id", "evidence_type", "evidence_key",
         "payload_json", "score", "verified_by", "created_at", "updated_at",
+        "evidence_key",  # C_0007_learning_evidence_key（可信来源键，防重放）
     },
     "training_enrollments": {
         "id", "course_id", "employee_user_id", "priority", "status",
@@ -406,6 +412,44 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "output_json", "error", "started_at", "finished_at",
         "created_at", "updated_at",
     },
+    "workflow_skills": {
+        "id", "code", "name", "description", "tool", "output_parser",
+        "created_at", "updated_at",
+    },
+    "workflow_skill_versions": {
+        "id", "skill_id", "version", "status", "prompt_template",
+        "params_json_schema", "note", "created_by",
+        "submitted_by", "submitted_at", "review_note",
+        "published_by", "published_at", "created_at", "updated_at",
+    },
+    "ai_providers": {
+        "id", "name", "provider_type", "base_url", "model", "api_key",
+        "enabled", "is_default", "timeout_seconds", "note", "updated_by",
+        "created_at", "updated_at",
+    },
+    "ai_prompt_versions": {
+        "id", "name", "version", "status", "content", "note", "created_by",
+        "published_by", "published_at", "created_at", "updated_at",
+    },
+    "ai_call_logs": {
+        "id", "provider_name", "model", "purpose", "result", "latency_ms",
+        "prompt_tokens", "completion_tokens", "error", "actor_user_id",
+        "created_at", "updated_at",
+    },
+    "member_im_accounts": {
+        "id", "user_id", "channel", "im_user_id", "source", "enabled", "note",
+        "created_at", "updated_at",
+    },
+    "digital_tasks": {
+        "id", "task_type", "status", "idempotency_key", "trigger", "triggered_by",
+        "notify_admin_ids", "result_json", "summary", "error", "started_at",
+        "finished_at", "created_at", "updated_at",
+    },
+    "digital_outbound_requests": {
+        "id", "task_id", "channel", "target_im_user_id", "content", "status",
+        "requested_by", "decided_by", "decided_at", "decision_note", "sent_at",
+        "created_at", "updated_at",
+    },
 }
 
 EXPECTED_UNIQUE: dict[str, set[str]] = {
@@ -416,6 +460,8 @@ EXPECTED_UNIQUE: dict[str, set[str]] = {
     "parsed_resumes": {"uk_parsed_resume_file"},
     "talent_tags": {"uk_profile_tag"},
     "talent_duplicates": {"uk_parsed_resume"},
+    "screen_batches": {"uk_screen_batch_idem"},  # T-A42 (job_profile_id, idempotency_key)
+    "match_batches": {"uk_match_batch_idem"},    # T-A42 (job_profile_id, idempotency_key)
     "screen_results": {"uk_screen_batch_talent"},
     "match_results": {"uk_match_batch_talent"},
     # ---- C 模块唯一键（来自 app/modules/*/models.py，2026-11-07 注册时提取）----
@@ -448,6 +494,12 @@ EXPECTED_UNIQUE: dict[str, set[str]] = {
     "workflow_edges": {"uk_workflow_edge"},
     "workflow_runs": {"uk_workflow_runs_thread"},
     "workflow_run_steps": {"uk_workflow_step_attempt"},
+    "workflow_skills": {"uk_workflow_skills_code"},
+    "workflow_skill_versions": {"uk_workflow_skill_version"},
+    "ai_providers": {"uk_ai_providers_name"},
+    "ai_prompt_versions": {"uk_ai_prompt_versions"},
+    "member_im_accounts": {"uk_member_im_user_channel"},
+    "digital_tasks": {"uk_digital_tasks_idem"},
 }
 
 EXPECTED_INDEXES: dict[str, set[str]] = {
@@ -472,6 +524,12 @@ EXPECTED_INDEXES: dict[str, set[str]] = {
     "workflow_nodes": {"idx_workflow_nodes_version"},
     "workflow_edges": {"idx_workflow_edges_version"},
     "workflow_runs": {"idx_workflow_runs_status", "idx_workflow_runs_definition"},
+    "workflow_skill_versions": {"idx_wsv_skill_status"},
+    "ai_prompt_versions": {"idx_aip_name_status"},
+    "ai_call_logs": {"idx_aic_created", "idx_aic_purpose"},
+    "member_im_accounts": {"idx_mia_user"},
+    "digital_tasks": {"idx_dt_type_status"},
+    "digital_outbound_requests": {"idx_dor_status", "idx_dor_task"},
 }
 
 
@@ -480,9 +538,9 @@ def ddl(model) -> str:
 
 
 def test_exactly_70_tables_and_no_phase2_table():
-    assert len(TABLE_NAMES) == 76
-    assert len(MODEL_CLASSES) == 76
-    assert len(Base.metadata.tables) == 76
+    assert len(TABLE_NAMES) == 84
+    assert len(MODEL_CLASSES) == 84
+    assert len(Base.metadata.tables) == 84
     assert set(TABLE_NAMES) == set(EXPECTED_COLUMNS)
     # D-7 缓办：一期不建 llm_score_cache
     assert "llm_score_cache" not in Base.metadata.tables
@@ -554,6 +612,13 @@ def test_unique_constraints_by_name():
     assert unique_cols("talent_duplicates", "uk_parsed_resume") == ("parsed_resume_id",)
     assert unique_cols("screen_results", "uk_screen_batch_talent") == (
         "screen_batch_id", "talent_profile_id",
+    )
+    # T-A42：组合唯一，NULL 键允许无限多行（不传键＝行为零变化）
+    assert unique_cols("screen_batches", "uk_screen_batch_idem") == (
+        "job_profile_id", "idempotency_key",
+    )
+    assert unique_cols("match_batches", "uk_match_batch_idem") == (
+        "job_profile_id", "idempotency_key",
     )
     assert unique_cols("match_results", "uk_match_batch_talent") == (
         "match_batch_id", "talent_profile_id",
@@ -694,13 +759,25 @@ def test_json_columns_are_mutable():
 
 
 def test_no_physical_foreign_keys():
-    """仅允许 C_0004 明确接入的申请外键，其他一致性仍由 service 保证。"""
+    """§1：不建物理外键，一致性由 service 层同事务保证。
+
+    例外（用户 2026-11-07 逐项对接裁决「方案 1：加外键 + 新迁移」）：
+    `C_0004_application_fk` 为 C 的 `interview_rounds` / `ai_interview_sessions`
+    的 `application_id` 建立指向 A 的 `applications.id` 的外键，防止误删申请
+    连带丢失面试记录。该外键已随 master 发布并在 MySQL 空库实测存在（见
+    `docs/updates/A/20261110-1000-C_0001空库迁移修复与结构基线同步.md`
+    受理记录）。除此之外一律不允许物理外键；
+    若后续要维持零物理外键基线，需回退 C_0004，A 不在此擅自裁决。
+
+    断言形式沿用 B 集成版的「实际集合恰好等于白名单」，除拦截新增外键外
+    也能发现已裁决外键被误删（A 原版逐条 assert 只能拦截前者）。
+    """
     actual = {
         (table.name, key.parent.name, key.target_fullname)
         for table in Base.metadata.tables.values()
         for key in table.foreign_keys
     }
     assert actual == {
-        ('interview_rounds', 'application_id', 'applications.id'),
-        ('ai_interview_sessions', 'application_id', 'applications.id'),
+        ("interview_rounds", "application_id", "applications.id"),
+        ("ai_interview_sessions", "application_id", "applications.id"),
     }

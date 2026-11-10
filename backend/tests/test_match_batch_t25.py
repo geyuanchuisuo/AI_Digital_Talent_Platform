@@ -3,7 +3,7 @@
 覆盖 todolist T-25 验收点：
 1. POST 202（filter/upload_batch/all 范围 + 成员快照 + estimated_llm_calls）；
 2. worker use_vector=True：岗位向量批次内只算一次（embed_one 恰 1 次）；逐人调 LLM；
-3. 硬淘汰 score=0、hard_failed 汇总、名次置底；rank 查询时计算（offset+行号）；
+3. A02-1：规则层不符项不隐藏候选人、不置 0 分；rank 查询时计算（offset+行号）；
 4. **Milvus 停机 → 批次照常 done、similarity 全 null、vector_degraded=1、名次稳定**；
 5. retry：结果行数与名次不变、retry_count 递增；
 6. 结果详情（四维分 + vector_similarity + hits/misses + reason）；
@@ -213,7 +213,7 @@ def test_create_filter_scope_and_worker(env, fakes, client, auth):
     job_id = env.make_job()
     unique_tag = f"专属标签{uuid4().hex[:8]}"  # 中文标签原样存储，天然唯一（真实遗留画像没有）
     p1, name1 = env.make_profile(work_years=Decimal("5.0"))  # 达标
-    p2, _ = env.make_profile(work_years=Decimal("1.0"))  # 硬淘汰样本（不进圈定也不影响）
+    p2, _ = env.make_profile(work_years=Decimal("1.0"))  # 年限不符样本（A02-1 起仍会评分）
     env.make_parsed(p1)
     env.make_parsed(p2)
     env.make_tag(p1, unique_tag)
@@ -266,11 +266,11 @@ def test_create_filter_scope_and_worker(env, fakes, client, auth):
     assert detail["reason"] == "技能高度重合"
 
 
-def test_hard_fail_zero_and_ranking(env, fakes, client, auth):
-    """硬淘汰 score=0 置底 + hard_failed 汇总 + rank 计算含 offset。"""
+def test_rule_gaps_do_not_hide_candidate_and_ranking(env, fakes, client, auth):
+    """A02-1（V2.6 §5）：硬条件不符者仍显示、有分、不符项可见；rank 含 offset。"""
     job_id = env.make_job()
-    p_low, name_low = env.make_profile(degree="大专")  # 硬淘汰
-    p_mid, name_mid = env.make_profile(work_years=Decimal("4.0"))  # 通过，分数较低
+    p_low, name_low = env.make_profile(degree="大专")  # 学历不符，但不再淘汰
+    p_mid, name_mid = env.make_profile(work_years=Decimal("4.0"))
     p_top, name_top = env.make_profile(work_years=Decimal("9.0"), skills_json=["python", "mysql", "redis", "milvus"])
     upload_batch = uuid4().hex[:26].upper()
     env.make_parsed(p_low, batch_id=upload_batch)
@@ -287,16 +287,25 @@ def test_hard_fail_zero_and_ranking(env, fakes, client, auth):
 
     handle_match_batch(batch_id)
     batch = _batch_row(batch_id)
-    assert batch.status == "done" and batch.hard_failed == 1
+    assert batch.status == "done" and batch.hard_failed == 0
+    assert fakes.calls["llm"] == 3  # A02-1：三名候选人都进 Prompt C
 
     resp = client.get(f"/api/match/batches/{batch_id}/results", headers=auth)
     items = resp.json()["data"]["items"]
     assert [item["rank"] for item in items] == [1, 2, 3]
-    # p_top 与 p_mid 的 LLM 分相同、相似度都 1.0 → 并列 75.95，按 talent_profile_id ASC
-    assert items[0]["name"] == name_mid and items[0]["score"] == 75.95
-    assert items[1]["name"] == name_top and items[1]["score"] == 75.95
-    assert items[2]["name"] == name_low and items[2]["score"] == 0.0  # 硬淘汰 score=0 置底
-    assert items[2]["hard_fail"] is True and "学历" in items[2]["hard_fail_reason"]
+    # 三人 LLM 分相同、相似度都 1.0 → 并列 75.95；hard_fail 全 0 → 按 talent_profile_id ASC
+    assert items[0]["name"] == name_low and items[0]["score"] == 75.95
+    assert items[1]["name"] == name_mid and items[1]["score"] == 75.95
+    assert items[2]["name"] == name_top and items[2]["score"] == 75.95
+    assert all(item["hard_fail"] is False and item["hard_fail_reason"] is None for item in items)
+
+    # 不符项仍可见（详情），但只是展示项，不改变分数或名次
+    detail_resp = client.get(f"/api/match/results/{items[0]['result_id']}", headers=auth)
+    assert detail_resp.status_code == 200, detail_resp.text
+    assert any(
+        "不符项" in m and "学历不满足" in m
+        for m in detail_resp.json()["data"]["misses"]
+    )
 
     # offset 分页名次：第二页（page=2, size=2）的行号 = 3
     resp = client.get(

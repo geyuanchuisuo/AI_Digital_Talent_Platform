@@ -63,6 +63,8 @@ from app.modules.assessments.schemas import (
 )
 from app.modules.training.models import TrainingGrowthEvent
 
+# 历史常量保留仅为兼容外部 import；管理侧判定统一走 A06 角色门禁（scope.py）。
+# 旧值 {"admin", "hr"} 会误拒 system_admin、误放非标准 "admin"（A06-1 已修同类漏洞）。
 ADMIN_ROLES = frozenset({"admin", "hr"})
 ASSIGNMENT_STATUSES = frozenset({"assigned", "in_progress", "grading", "completed", "cancelled"})
 PLAN_STATUSES = frozenset({"draft", "published", "archived"})
@@ -74,7 +76,17 @@ Grader = Callable[[dict[str, Any], str], float]
 # ---------------------------------------------------------------- 权限
 
 def is_admin(user: User) -> bool:
-    return user.role in ADMIN_ROLES
+    """A06 统一角色门禁：system_admin / hr（经 sys_user_roles 聚合，无记录回退 users.role）。
+
+    替代原 ``user.role in ADMIN_ROLES`` 字符串判断，修复 system_admin 被误拒、
+    非标准 "admin" 被误放行的漏洞。行级「本人 or 管理」语义由调用点保留。
+    本函数被 interviews / training 的 service 共享，签名保持不变。
+    """
+    from app.core.auth.scope import account_is_management  # noqa: PLC0415 - 避免环
+    from app.database import SessionLocal  # noqa: PLC0415 - 避免环
+
+    with SessionLocal() as db:
+        return account_is_management(db, user)
 
 
 def require_admin(user: User) -> None:

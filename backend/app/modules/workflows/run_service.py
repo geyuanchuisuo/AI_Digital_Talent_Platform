@@ -173,6 +173,31 @@ def start_parse_profiled_run(
 
 # ---- 手动触发 ----
 
+def execute_registered_run(run: WorkflowRun) -> dict[str, Any] | None:
+    """对已登记的运行执行引擎并镜像状态（定时触发复用；不校验身份——登记方负责）。
+
+    运行 created_by 为空（未配置定时执行主体）时不执行引擎，运行留在 running：
+    如实失败优于静默跳过，管理员在运行列表可见并可直接取消。
+    """
+    if run.created_by is None:
+        return None
+    db = get_session_factory()()
+    run_row = db.get(WorkflowRun, run.id)
+    graph = _build(run_row, db)
+    result = get_engine().start(
+        graph_name_for(run.version_id, run.thread_id),
+        graph,
+        {"trigger": dict(run.params_json or {}), "form": {}, "vars": {}},
+        thread_id=run.thread_id,
+    )
+    waiting_node = None
+    if result.status == "waiting" and isinstance(result.interrupt, dict):
+        waiting_node = str(result.interrupt.get("node_key") or "") or None
+    db.expire(run_row)
+    _mirror(db, run_row, result, waiting_node=waiting_node)
+    return {"run": run_row, "result": result}
+
+
 def start_manual_run(
     db: Session,
     *,
@@ -396,6 +421,79 @@ def cancel_waiting_run(db: Session, *, thread_id: str, user) -> WorkflowRun:
     db.commit()
     db.refresh(run)
     return run
+
+
+def cancel_running_run(db: Session, *, thread_id: str, user) -> WorkflowRun:
+    """取消运行中的运行（T-D18）：管理侧；业务/引擎双侧条件更新置 cancelled。
+
+    协作式中断：不打断引擎线程内已在执行的节点调用，后续节点在执行前检查
+    业务状态（runtime 取消检查）停止推进；已取消运行不再被迟到回执覆盖
+    （受控白名单拒绝 cancelled←failed/succeeded）。
+    """
+    service.require_management(user)
+    run = db.execute(select(WorkflowRun).where(WorkflowRun.thread_id == thread_id)).scalar_one_or_none()
+    if run is None:
+        raise BizError(404, "运行实例不存在")
+    if run.status != "running":
+        raise BizError(409, f"仅运行中的运行可取消，当前 {run.status}")
+    changed = db.execute(
+        update(WorkflowRun)
+        .where(WorkflowRun.id == run.id, WorkflowRun.status == "running")
+        .values(status="cancelled", finished_at=datetime.now(),
+                error=f"cancelled by user {user.id}")
+    )
+    if changed.rowcount != 1:
+        db.rollback()
+        raise BizError(409, "运行态已被其他操作占用")
+    engine_changed = db.execute(
+        update(WorkflowEngineRun)
+        .where(WorkflowEngineRun.thread_id == thread_id, WorkflowEngineRun.status == "running")
+        .values(status="cancelled", finished_at=datetime.now(),
+                error=f"cancelled by user {user.id}")
+    )
+    if engine_changed.rowcount != 1:
+        db.rollback()
+        raise BizError(409, "引擎运行态已变化，无法取消")
+    db.commit()
+    db.refresh(run)
+    return run
+
+
+def retry_failed_run(db: Session, *, thread_id: str, user) -> dict[str, Any]:
+    """失败阶段重试（T-D18）：管理侧；从失败检查点续跑，已成功节点不重执行。
+
+    业务/引擎双侧 failed→running 仅经受控 retry 入口转移（CAS），再调引擎
+    retry（invoke(None) 续跑）；终态由引擎回执经受控白名单镜像回来。
+    """
+    service.require_management(user)
+    run = db.execute(select(WorkflowRun).where(WorkflowRun.thread_id == thread_id)).scalar_one_or_none()
+    if run is None:
+        raise BizError(404, "运行实例不存在")
+    if run.status != "failed":
+        raise BizError(409, f"仅失败的运行可重试，当前 {run.status}")
+    graph = _build(run, db)
+    claimed = db.execute(
+        update(WorkflowRun)
+        .where(WorkflowRun.id == run.id, WorkflowRun.status == "failed")
+        .values(status="running", error=None, finished_at=None)
+    )
+    if claimed.rowcount != 1:
+        db.rollback()
+        raise BizError(409, "失败态已被其他操作占用")
+    engine_claimed = db.execute(
+        update(WorkflowEngineRun)
+        .where(WorkflowEngineRun.thread_id == thread_id, WorkflowEngineRun.status == "failed")
+        .values(status="running", error=None, finished_at=None)
+    )
+    if engine_claimed.rowcount != 1:
+        db.rollback()
+        raise BizError(409, "引擎失败态已变化，无法重试")
+    db.commit()
+    result = get_engine().retry(
+        graph_name_for(run.version_id, run.thread_id), graph, thread_id
+    )
+    _mirror(db, run, result)
+    return {"run": run, "result": result}
 
 
 # ---- 查询 ----

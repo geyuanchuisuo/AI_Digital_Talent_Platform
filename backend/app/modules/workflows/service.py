@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.core.errors import BizError
@@ -163,11 +163,10 @@ def deprecate_version(db: Session, version_id: int) -> WorkflowDefinitionVersion
 
 
 def _require_management(user) -> None:
-    """管理侧门禁（can_view_all_persons）；router 与 service 生命周期函数共用。"""
-    from app.core.auth.scope import get_account_scope  # noqa: PLC0415 - 避免环（scope 纯函数，安全）
+    """管理侧门禁（A06 统一口径：system_admin/hr）；router 与 service 生命周期函数共用。"""
+    from app.core.auth.scope import require_management_guard  # noqa: PLC0415 - 避免环
 
-    if not get_account_scope(user).can_view_all_persons:
-        raise BizError(403, "仅管理侧可操作流程定义")
+    require_management_guard(user)
 
 
 require_management = _require_management  # router 侧公开别名（同一门禁，单一实现）
@@ -335,8 +334,9 @@ def sync_run_status(
 ) -> WorkflowRun:
     """业务侧运行状态镜像（与引擎登记同方向机）；终态落 finished_at。
 
-    与引擎 mark_status 同方向白名单：已取消的运行拒绝任何回写，迟到的
-    引擎回执不得复活业务侧状态（T-D18 等待态取消语义）。
+    与引擎 mark_status 同方向白名单：failed→running 供失败重试（T-D18），
+    已取消的运行拒绝任何回写，迟到的引擎回执不得复活业务侧状态。
+    条件 UPDATE 原子判定，取消与回执竞态按数据库行级先到先得。
     """
     if status not in RUN_STATUSES:
         raise BizError(422, "运行状态非法")
@@ -344,7 +344,7 @@ def sync_run_status(
         "running": {"waiting", "succeeded", "failed"},
         "waiting": {"running", "succeeded", "failed"},
         "succeeded": {"cancelled"},
-        "failed": {"cancelled"},
+        "failed": {"cancelled", "running"},
         "cancelled": set(),
     }
     run = db.get(WorkflowRun, run_id)
@@ -352,10 +352,19 @@ def sync_run_status(
         raise BizError(404, "运行实例不存在")
     if status not in ALLOWED.get(run.status, set()):
         return run
-    run.status = status
-    run.error = error
-    if status in RUN_TERMINAL_STATUSES:
-        run.finished_at = datetime.now()
+    # CAS 锁定源状态：读判写之间被并发改动时 rowcount=0，拒绝覆盖
+    result = db.execute(
+        update(WorkflowRun)
+        .where(
+            WorkflowRun.id == run_id,
+            WorkflowRun.status == run.status,
+        )
+        .values(
+            status=status,
+            error=error,
+            finished_at=datetime.now() if status in RUN_TERMINAL_STATUSES else None,
+        )
+    )
     db.commit()
     db.refresh(run)
     return run

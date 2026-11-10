@@ -71,6 +71,11 @@ from app.modules.analytics.models import (  # noqa: F401 (D T-D01b/T-D08/T-D09/T
     Nl2SqlAudit,
 )
 from app.modules.reports.models import SnapshotExportAudit  # noqa: F401 (D T-D11)
+from app.modules.dashboard.models import (  # noqa: F401 (D T-D20)
+    AiCallLog,
+    AiPromptVersion,
+    AiProvider,
+)
 from app.modules.workflows.models import (  # noqa: F401 (D T-D14)
     WorkflowDefinition,
     WorkflowDefinitionVersion,
@@ -78,6 +83,13 @@ from app.modules.workflows.models import (  # noqa: F401 (D T-D14)
     WorkflowNode,
     WorkflowRun,
     WorkflowRunStep,
+    WorkflowSkill,
+    WorkflowSkillVersion,
+)
+from app.modules.workflows.digital.models import (  # noqa: F401 (D T-D21)
+    MemberImAccount,
+    DigitalTask,
+    DigitalOutboundRequest,
 )
 from app.modules.recruitment.scope_models import UserScopeGrant
 from app.modules.system.models import (
@@ -189,12 +201,20 @@ MODEL_CLASSES: tuple[type[Base], ...] = (
     WorkflowEdge,
     WorkflowRun,
     WorkflowRunStep,
+    WorkflowSkill,
+    WorkflowSkillVersion,
+    AiProvider,
+    AiPromptVersion,
+    AiCallLog,
+    MemberImAccount,
+    DigitalTask,
+    DigitalOutboundRequest,
 )
 
 TABLE_NAMES: tuple[str, ...] = tuple(model.__tablename__ for model in MODEL_CLASSES)  # type: ignore[attr-defined]
 
-assert len(TABLE_NAMES) == 76, f"一期 76 张表（75 + B QA），实际 {len(TABLE_NAMES)}"
-assert len(set(TABLE_NAMES)) == 76, "表名重复"
+assert len(TABLE_NAMES) == 84, f"一期 84 张表（70 + 5 B history + 1 B QA + 2 skills + 3 中台 + 3 数字员工），实际 {len(TABLE_NAMES)}"
+assert len(set(TABLE_NAMES)) == 84, "表名重复"
 assert "llm_score_cache" not in TABLE_NAMES, "llm_score_cache 是 D-7 缓办项，一期不建"
 assert "upload_batches" not in TABLE_NAMES, (
     "批次不是实体表（决策 D-M）：靠 resume_files.upload_batch_id 聚合，"

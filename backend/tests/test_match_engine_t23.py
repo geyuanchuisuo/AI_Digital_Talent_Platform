@@ -254,21 +254,60 @@ def test_evaluate_match_degrades_when_profile_not_synced(fakes):
     assert result.vector_degraded is True  # 岗位向量缺失（如 embedding 挂）→ 降级
 
 
-def test_evaluate_hard_fail_screen_vs_match(fakes):
-    """硬淘汰：筛选 score=None；匹配 score=0 + dimensions={}；都不调 LLM。"""
+def test_evaluate_rule_gaps_do_not_eliminate_candidate(fakes):
+    """A02-1（V2.6 §5）：硬条件不符者仍显示、仍评分、不自动淘汰。
+
+    旧口径在此断言 `score=None / score=0 / dimensions={}` 且零 LLM；该行为已被
+    需求 §5「硬条件或分数线不符合者仍显示不符项与资料缺口，不自动关闭申请」废除。
+    """
     failed_profile = {**PROFILE, "degree": "大专"}
 
     screen = engine.evaluate(JOB, failed_profile, use_vector=False)
-    assert screen.hard_fail is True and screen.score is None
-    assert screen.dimension_scores == {}
-    assert "学历不满足" in screen.reason
+    assert screen.hard_fail is False and screen.hard_fail_reason is None
+    assert screen.score is not None and screen.score > 0
+    assert screen.dimension_scores  # 确实进了 Prompt C
+    assert screen.llm_called is True
+    assert any(m.startswith(engine.RULE_GAP_PREFIX) and "学历不满足" in m for m in screen.misses)
 
     match = engine.evaluate(JOB, failed_profile, use_vector=True, job_vector=[1.0] * 1024)
-    assert match.hard_fail is True and match.score == 0.0
-    assert match.dimension_scores == {}
-    assert "学历不满足" in match.hard_fail_reason
-    # LLM 未调用（chat_json 若被调会返回假件输出产生 dimension_scores）
-    assert screen.llm_called is False and match.llm_called is False
+    assert match.hard_fail is False and match.score is not None and match.score > 0
+    assert match.dimension_scores and match.llm_called is True
+    assert any(m.startswith(engine.RULE_GAP_PREFIX) and "学历不满足" in m for m in match.misses)
+
+
+def test_missing_evidence_is_pending_verification(fakes):
+    """资料缺失标「待核实」而非「不满足」，且照样评分（V2.6 §5 缺失证据不直接判不满足）。"""
+    result = engine.evaluate(
+        JOB,
+        {**PROFILE, "degree": None, "work_years": None, "skills_json": []},
+        use_vector=False,
+    )
+    assert result.hard_fail is False and result.score is not None and result.score > 0
+    assert result.llm_called is True
+    pending = [m for m in result.misses if m.startswith(engine.PENDING_VERIFICATION_PREFIX)]
+    assert any("学历缺失" in m for m in pending)
+    assert any("工作年限缺失" in m for m in pending)
+    assert any("技能列表为空" in m for m in pending)
+    assert not any(m.startswith(engine.RULE_GAP_PREFIX) for m in result.misses)
+
+
+def test_rule_review_text_is_passed_to_prompt(fakes, monkeypatch):
+    """不符项/待核实清单随 Prompt C 输入交给模型，并明确声明不是淘汰结论。"""
+    captured: dict[str, str] = {}
+
+    def spy(prompt, schema, **kwargs):
+        captured["prompt"] = prompt
+        return fake_llm_output()
+
+    monkeypatch.setattr(engine, "chat_json", spy)
+    engine.evaluate(JOB, {**PROFILE, "degree": "大专"}, use_vector=False)
+
+    text = captured["prompt"]
+    assert "不符项：学历不满足" in text
+    assert "待核实：无" in text
+    assert "不是淘汰结论" in text
+    assert "不得推断" in text
+    assert "【候选人画像摘要】" in text and "【岗位条件】" in text  # 原输入未被覆盖
 
 
 def test_evaluate_deterministic_same_input(fakes):

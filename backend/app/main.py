@@ -64,6 +64,7 @@ async def lifespan(app: FastAPI):
     from app.tasks.runner import runner
     from app.tasks.match_worker import handle_match_batch
     from app.tasks.screen_worker import handle_screen_batch
+    from app.modules.workflows import schedule as wf_schedule
 
     settings.load_runtime_overrides()
     _ensure_milvus_collection()
@@ -71,15 +72,18 @@ async def lifespan(app: FastAPI):
     runner.register("screen", handle_screen_batch)
     runner.register("match", handle_match_batch)
     runner.start()
+    wf_schedule.get_loop().start()
     logger.info(
-        "startup: env=%s task_concurrency=%s worker=%s",
+        "startup: env=%s task_concurrency=%s worker=%s wf_schedule=%s",
         settings.app_env,
         settings.task_concurrency,
         "running" if runner.is_running else "stopped",
+        "running" if wf_schedule.get_loop().is_running else "stopped",
     )
     try:
         yield
     finally:
+        wf_schedule.get_loop().stop()
         runner.stop()
         logger.info("shutdown: worker=stopped")
 
@@ -98,17 +102,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# T-D01（REQ-D-20261107-183200，2026-11-07 用户指令 D 直接落地）：Redis 限流/黑名单中间件。
-# REDIS_URL 为空 = 直通零副作用；配置后固定窗口限流 + 黑名单 403，Redis 停服降级放行。
-# 契约：docs/modules/D/缓存限流契约.md。
-# 限流豁免（2026-11-08 二次修复，升级此前的 /api/auth 豁免）：RateLimitMiddleware 的
-# 黑名单键（ratelimit:blacklist:{ip}）写在共享 Redis，其他环境（如 D 的测试）写入会
-# 把本环境全部业务请求打成 403 → 前端渲染「账号已停用」并踢回登录页（用户验收实测两轮）。
-# 单机演示无业务限流需求（限流是客户部署的验收项，V2.6 §7），故本环境全量豁免 /api；
-# 客户部署启用限流时在部署配置中移除本豁免并按环境隔离 Redis（键前缀）。
+# T-D01（REQ-D-20261107-183200）Redis 限流/黑名单中间件：REDIS_URL 为空 = 直通零副作用；
+# 配置后固定窗口限流 429 + 黑名单 403，Redis 停服降级放行。契约 docs/modules/D/缓存限流契约.md。
+# D02（Master 统一执行表，2026-11-10 A 侧交付）：把原先写死的「/api 全量豁免」改为由
+# settings.rate_limit_enabled 控制的**环境开关**。默认 False 保持演示/验收环境行为不变
+# （黑名单键 aitalent:ratelimit:blacklist:{ip} 在共享 Redis 会跨环境串扰，2026-11-08
+# 用户验收实测两轮）；客户部署置 RATE_LIMIT_ENABLED=true 并为每个环境指定独占 Redis
+# 实例/DB 号后，只豁免健康检查，限流才真正生效。D 的 RateLimitMiddleware / CacheClient
+# 实现不改（键前缀按部署侧隔离），A 不擅自改 D 归属文件。
 from app.core.cache.ratelimit import DEFAULT_EXEMPT_PATHS  # noqa: E402
 
-app.add_middleware(RateLimitMiddleware, exempt_paths=(*DEFAULT_EXEMPT_PATHS, "/api"))
+
+def rate_limit_exempt_paths() -> tuple[str, ...]:
+    """D02 环境开关：返回 RateLimitMiddleware 的豁免路径。
+
+    - 默认（演示/验收）：`DEFAULT_EXEMPT_PATHS + ("/api",)`，历史行为零变化；
+    - 客户模式（RATE_LIMIT_ENABLED=true）：只保留 `DEFAULT_EXEMPT_PATHS`
+      （当前为 `/api/health`），业务接口进入限流/黑名单/降级判定。
+
+    抽出为函数便于单测直接断言开关语义，不必重建生产 app。
+    """
+    if settings.rate_limit_enabled:
+        return DEFAULT_EXEMPT_PATHS
+    return (*DEFAULT_EXEMPT_PATHS, "/api")
+
+
+app.add_middleware(RateLimitMiddleware, exempt_paths=rate_limit_exempt_paths())
 
 # T-02：四类全局异常处理器（BizError / HTTPException / RequestValidationError / Exception）
 # 口径见 docs/统一错误码与鉴权.md v1.2 §六；request_id 由下方中间件写入 request.state。
@@ -177,6 +196,14 @@ from app.modules.analytics.router import router as analytics_router  # noqa: E40
 
 app.include_router(analytics_router)
 
+# A 系统管理域（A06-4）：/api/system 部门/角色/菜单/权限/账号绑定/操作日志，
+# 整域接 require_roles("system_admin")（A06-1 角色门禁），hr/dept_manager/personal 一律 403
+from app.modules.system.router import router as system_router  # noqa: E402
+from app.modules.system.account_router import router as account_router  # noqa: E402,A06-2
+
+app.include_router(system_router)
+app.include_router(account_router)
+
 # D 报告导出（T-D11）：/api/reports/snapshots/{id}/export 同快照 DOCX/PDF（2026-11-08 直接落地）
 from app.modules.reports.router import router as reports_router  # noqa: E402
 
@@ -186,6 +213,21 @@ app.include_router(reports_router)
 from app.modules.workflows.router import router as workflows_router  # noqa: E402
 
 app.include_router(workflows_router)
+
+# D Skills 组件库（T-D19）：/api/workflows/skills 组件受控生命周期——创建→审核→发布→引用
+from app.modules.workflows.skills_router import router as skills_router  # noqa: E402
+
+app.include_router(skills_router)
+
+# D AI 中台管理面（T-D20）：/api/ai-platform 供应商/Prompt 库/调用日志与看板
+from app.modules.dashboard.router import router as ai_platform_router  # noqa: E402
+
+app.include_router(ai_platform_router)
+
+# D 数字员工（T-D21）：/api/workflows/digital IM 绑定/三类只读任务/外发请求登记
+from app.modules.workflows.digital.router import router as digital_router  # noqa: E402
+
+app.include_router(digital_router)
 
 from app.core.tasks.events import router as task_events_router  # noqa: E402
 
