@@ -272,6 +272,7 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "id", "title", "description", "material_url", "dimension_names_json",
         "status", "version", "feedback_note", "feedback_note_at", "capacity",
         "created_by", "updated_by", "created_at", "updated_at",
+        "capacity",  # C_0006_course_capacity（课程名额上限）
     },
     "training_sessions": {
         "id", "course_id", "instructor_name", "starts_at", "ends_at",
@@ -298,7 +299,8 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     },
     "training_plan_items": {
         "id", "plan_id", "plan_version", "course_id", "course_snapshot_json",
-        "dimension_name", "reason", "sort_order", "created_at", "updated_at", "due_date",
+        "dimension_name", "reason", "sort_order", "created_at", "updated_at",
+        "due_date",  # C_0005_plan_item_due_date（F09 必修到期/逾期/延期）
     },
     "training_plan_versions": {
         "id", "plan_id", "version", "status", "snapshot_json", "note",
@@ -312,6 +314,7 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     "training_learning_evidence": {
         "id", "learning_record_id", "employee_user_id", "evidence_type", "evidence_key",
         "payload_json", "score", "verified_by", "created_at", "updated_at",
+        "evidence_key",  # C_0007_learning_evidence_key（可信来源键，防重放）
     },
     "training_enrollments": {
         "id", "course_id", "employee_user_id", "priority", "status",
@@ -694,13 +697,25 @@ def test_json_columns_are_mutable():
 
 
 def test_no_physical_foreign_keys():
-    """仅允许 C_0004 明确接入的申请外键，其他一致性仍由 service 保证。"""
+    """§1：不建物理外键，一致性由 service 层同事务保证。
+
+    例外（用户 2026-11-07 逐项对接裁决「方案 1：加外键 + 新迁移」）：
+    `C_0004_application_fk` 为 C 的 `interview_rounds` / `ai_interview_sessions`
+    的 `application_id` 建立指向 A 的 `applications.id` 的外键，防止误删申请
+    连带丢失面试记录。该外键已随 master 发布并在 MySQL 空库实测存在（见
+    `docs/updates/A/20261110-1000-C_0001空库迁移修复与结构基线同步.md`
+    受理记录）。除此之外一律不允许物理外键；
+    若后续要维持零物理外键基线，需回退 C_0004，A 不在此擅自裁决。
+
+    断言形式沿用 B 集成版的「实际集合恰好等于白名单」，除拦截新增外键外
+    也能发现已裁决外键被误删（A 原版逐条 assert 只能拦截前者）。
+    """
     actual = {
         (table.name, key.parent.name, key.target_fullname)
         for table in Base.metadata.tables.values()
         for key in table.foreign_keys
     }
     assert actual == {
-        ('interview_rounds', 'application_id', 'applications.id'),
-        ('ai_interview_sessions', 'application_id', 'applications.id'),
+        ("interview_rounds", "application_id", "applications.id"),
+        ("ai_interview_sessions", "application_id", "applications.id"),
     }
