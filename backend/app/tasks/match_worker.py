@@ -21,8 +21,8 @@ from sqlalchemy.orm import Session
 
 from app.dao import match as match_dao
 from app.models import MatchBatch, ParsedResume
-from app.config import settings
 from app.service import match_engine
+from app.service.screen_service import resolve_batch_model_versions
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +88,8 @@ def _job_vector(snapshot: dict) -> tuple[list[float] | None, bool]:
 
 def _run_batch(db: Session, batch: MatchBatch) -> None:
     snapshot = dict(batch.config_snapshot_json or {})
+    # T-A42：整批共用快照固定的模型/Prompt 版本（与 screen_worker 同口径）。
+    model_version, prompt_version = resolve_batch_model_versions(snapshot, logger=logger)
     scope = dict(batch.talent_scope_json or {})
     resolved_ids: list[int] = scope.get("resolved_ids") or []
     written = match_dao.result_talent_ids(db, batch.id)
@@ -132,8 +134,8 @@ def _run_batch(db: Session, batch: MatchBatch) -> None:
         dimension_scores = {**result.dimension_scores, "vector_similarity": result.vector_similarity}
         match_dao.create_result(
             db,
-            model_version=settings.llm_model,
-            prompt_version=settings.prompt_version,
+            model_version=model_version,
+            prompt_version=prompt_version,
             attempt=1,
             profile_input_snapshot_json=profile_input,
             match_batch_id=batch.id,
