@@ -17,7 +17,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from app.core.auth.scope import get_account_scope
+from app.core.auth.scope import account_is_management
 from app.core.errors import BizError
 from app.database import SessionLocal
 from app.modules.reports.models import SnapshotExportAudit
@@ -34,9 +34,16 @@ def _snapshot_or_404(db: Session, snapshot_id: int):
 
 
 def _check_export_permission(user, snap) -> None:
-    """导出前重新校验权限：管理侧（可看全量）或快照创建者。"""
-    scope = get_account_scope(user)
-    if scope.can_view_all_persons or snap.created_by == getattr(user, "id", None):
+    """导出前重新校验权限：管理侧（A06 角色口径 system_admin/hr）或快照创建者。
+
+    替代原 `can_view_all_persons` 判断——使 dept_manager/trainer/employee/
+    candidate/personal 即使误带管理侧数据范围也无法导出他人快照；system_admin
+    经 sys_user_roles 绑定后也能正确放行（修复原 users.role 映射误拒）。
+    """
+    with SessionLocal() as db:
+        if account_is_management(db, user):
+            return
+    if snap.created_by == getattr(user, "id", None):
         return
     raise BizError(403, _EXPORT_FORBIDDEN)
 

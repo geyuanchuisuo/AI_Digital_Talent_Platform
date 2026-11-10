@@ -17,6 +17,15 @@ from typing import Literal
 ScopeRole = Literal["admin", "hr", "personal"]
 KnowledgeScope = Literal["public", "admin"]
 
+#: 六类角色代码（与 `scripts/init_db.py::SEED_ROLES` 及 sys_roles.code 对齐；
+#: 服务端判定以 `sys_user_roles` 聚合为准，users.role 仅作无角色记录时的回退）。
+ROLE_CODES = ("system_admin", "hr", "dept_manager", "trainer", "employee", "candidate")
+
+#: 管理侧角色：系统管理员 + HR。A06 职责门禁的统一口径（替代散落的
+#: `can_view_all_persons` / `ADMIN_ROLES` 字符串判断），修复 system_admin 因
+#: users.role 映射为 personal 被误拒的漏洞。
+MANAGEMENT_ROLES = ("system_admin", "hr")
+
 #: 统一拒绝文案：不泄露对象是否存在（REQ-02 验收口径）
 DENY_MESSAGE = "无权访问该资源"
 
@@ -36,6 +45,9 @@ class AccountScope:
     knowledge_scope: KnowledgeScope
     department_ids: tuple[int, ...] = ()
     granted_scope: tuple[dict, ...] = ()
+    #: 账号生效角色代码集合（sys_user_roles 聚合；无记录时回退 users.role）。
+    #: A06 职责门禁的权威来源；默认空元组以保持既有纯函数构造向后兼容。
+    role_codes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -161,3 +173,67 @@ def _active_grant_summaries(user_id: int | None) -> tuple[dict, ...]:
         )
     except Exception:
         return ()
+
+
+def get_role_codes(db, user_id: int | None) -> tuple[str, ...]:
+    """聚合账号生效角色代码（sys_user_roles 优先；无记录则回退 users.role 简值）。
+
+    - 有 sys_user_roles 记录：取全部启用角色 code（集合去重、排序稳定）。
+    - 无记录：users.role == "hr" → ("hr",)；“personal” → ("personal",)；
+      其余（含未知/空）按 deny-by-default 映射为 ("personal",)。
+    纯查询，不写库；调用方负责事务边界。
+    """
+    if user_id is None:
+        return ("personal",)
+    try:
+        from sqlalchemy import select
+
+        from app.models import SysRole, SysUserRole, User
+
+        rows = db.execute(
+            select(SysRole.code)
+            .join(SysUserRole, SysUserRole.role_id == SysRole.id)
+            .where(SysUserRole.user_id == user_id, SysRole.status == "active")
+        ).scalars().all()
+        if rows:
+            return tuple(sorted(set(rows)))
+        user = db.get(User, user_id)
+        if user is not None:
+            r = (getattr(user, "role", "") or "").strip().lower()
+            if r in ("hr", "personal"):
+                return (r,)
+    except Exception:
+        return ("personal",)
+    return ("personal",)
+
+
+def account_is_management(db, user) -> bool:
+    """管理侧判定（A06 统一口径）：账号角色集合与 MANAGEMENT_ROLES 有交集。
+
+    替代散落的 `can_view_all_persons` 与 inventory 的 `ADMIN_ROLES` 字符串判断：
+    使 system_admin（经 sys_user_roles 绑定）也能正确获得管理侧权限，
+    而 dept_manager / trainer / employee / candidate / personal 一律非管理侧。
+    """
+    uid = getattr(user, "id", None)
+    if uid is None:
+        return False
+    return bool(set(get_role_codes(db, uid)) & set(MANAGEMENT_ROLES))
+
+
+def require_management_guard(user) -> None:
+    """管理侧门禁（无 db 可用时的兼容入口）：内部开 SessionLocal 计算。
+
+    与 workflows/inventory 既有 `_require_management` / `_require_admin` 同形；
+    统一走 account_is_management，避免各模块各自判断造成口径漂移。
+    """
+    from app.database import SessionLocal
+
+    with SessionLocal() as db:
+        if not account_is_management(db, user):
+            raise _BizForbidden()
+
+
+def _BizForbidden():
+    from app.core.errors import BizError
+
+    return BizError(403, DENY_MESSAGE)

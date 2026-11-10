@@ -16,7 +16,12 @@ from fastapi import Depends, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
-from app.core.auth.scope import AccountScope, get_account_scope
+from app.core.auth.scope import (
+    AccountScope,
+    account_is_management,
+    get_account_scope,
+    get_role_codes,
+)
 from app.core.errors import BizError
 from app.database import get_db
 from app.models import User
@@ -87,3 +92,45 @@ def get_account_scope_dep(
 
 
 AccountScopeDep = Annotated[AccountScope, Depends(get_account_scope_dep)]
+
+
+def _require_roles_dep(
+    *codes: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> tuple[str, ...]:
+    """角色门禁依赖工厂：账号生效角色（sys_user_roles 聚合）与给定角色集无交集 → 403。
+
+    用法：`Depends(require_roles("system_admin", "hr"))`。deny-by-default：未知角色
+    映射 personal，必然无交集而被拒（A06 职责门禁，统一拒绝文案不泄露对象存在性）。
+    """
+    codeset = set(codes)
+    effective = get_role_codes(db, current_user.id)
+    if not (codeset & set(effective)):
+        raise BizError(403, DENY_MESSAGE)
+    return effective
+
+
+def require_roles(*codes: str):
+    """角色门禁依赖工厂（供路由装饰用 `Depends(require_roles(...))`）。"""
+
+    def _dep(
+        current_user: Annotated[User, Depends(get_current_user)],
+        db: Annotated[Session, Depends(get_db)],
+    ) -> tuple[str, ...]:
+        return _require_roles_dep(*codes, current_user=current_user, db=db)
+
+    return _dep
+
+
+def _require_management_dep(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> User:
+    """管理侧门禁依赖：非 system_admin/hr → 403（A06 统一口径）。"""
+    if not account_is_management(db, current_user):
+        raise BizError(403, DENY_MESSAGE)
+    return current_user
+
+
+ManagementDep = Annotated[User, Depends(_require_management_dep)]

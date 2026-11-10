@@ -163,11 +163,10 @@ def deprecate_version(db: Session, version_id: int) -> WorkflowDefinitionVersion
 
 
 def _require_management(user) -> None:
-    """管理侧门禁（can_view_all_persons）；router 与 service 生命周期函数共用。"""
-    from app.core.auth.scope import get_account_scope  # noqa: PLC0415 - 避免环（scope 纯函数，安全）
+    """管理侧门禁（A06 统一口径：system_admin/hr）；router 与 service 生命周期函数共用。"""
+    from app.core.auth.scope import require_management_guard  # noqa: PLC0415 - 避免环
 
-    if not get_account_scope(user).can_view_all_persons:
-        raise BizError(403, "仅管理侧可操作流程定义")
+    require_management_guard(user)
 
 
 require_management = _require_management  # router 侧公开别名（同一门禁，单一实现）

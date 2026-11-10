@@ -18,12 +18,18 @@ from app.modules.inventory.models import (
 )
 from app.modules.inventory.scoring import grid_cell, public_safe_review, visible_summary
 
-ADMIN_ROLES = {"admin", "hr"}
+ADMIN_ROLES = {"admin", "hr"}  # 历史行级「自/他 + 管理」判定保留；纯管理门改走 A06 角色门禁
 
 
 def _require_admin(user) -> None:
-    if user.role not in ADMIN_ROLES:
-        raise BizError(403, "仅管理员可执行该操作")
+    """管理侧门禁（A06 统一口径：system_admin/hr）；替代原 `user.role in ADMIN_ROLES`。
+
+    修复 system_admin 因 users.role 映射被误拒；dept_manager/trainer/employee/
+    candidate/personal 一律非管理侧。行级「本人 or 管理」判定仍在各调用点保留。
+    """
+    from app.core.auth.scope import require_management_guard  # noqa: PLC0415 - 避免环
+
+    require_management_guard(user)
 
 
 def _event(db: Session, *, review_id: int | None, event_type: str, operator_id: int | None, note: str | None = None, payload: dict | None = None) -> None:
