@@ -66,7 +66,7 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     "parse_attempts": {"id", "parse_task_id", "attempt_no", "status", "stage", "error_message", "started_at", "finished_at", "trace_json"},
     "users": {
         "id", "username", "password_hash", "display_name", "role", "person_id",
-        "is_active", "last_login_at", "created_at", "updated_at",
+        "department_id", "is_active", "last_login_at", "created_at", "updated_at",
     },
     "sys_settings": {
         "id", "setting_key", "setting_value", "value_type", "description",

@@ -1,6 +1,6 @@
 # 开发计划 · Todolist · 板块 A
 
-> 版本：v0.1.15　|　日期：2026-11-10 11:00　|　身份：A　|　分支：`feature/A/continuation`　|　`origin/master` = **`3cb0064`**（本轮开工时四 ref 对齐基线；补齐 v0.1.14 未升的头部版本号）
+> 版本：v0.1.18　|　日期：2026-11-10 13:30　|　身份：A　|　分支：`feature/A/continuation`　|　开工基线：四 ref **`78d946e`**（A06-4 发布后对齐基线；补齐 v0.1.15~v0.1.17 头部版本号）
 > 上游：`docs/需求文档.md` **V2.6（2026-11-07 已冻结）**、`docs/源码接入与需求决策.md`、`docs/四人分工与试行方案.md` §2、`docs/技术框架.md`、**`docs/modules/MASTER/原PRD统一执行跟踪表.md`（全员统一执行入口）**、`tasks/A.md`、`docs/modules/A/设计方案.md` v0.1.1、`.collaboration/ownership.json`。
 > 用法：按 M1 → M6 顺序；每项满足「验收点」才勾选，勾选必须写实际命令/结果/证据落点；编号 `T-Axx` 供沟通引用。进度同步 `docs/modules/A/开发日志.md` Layer 3/4 与 `docs/updates/A/` 交接记录。
 > ⚠️ 本表是台账，**不是完成声明**；`[x]` 只表示「有实证且已登记」。Master 统一执行表口径：`×` 仅代表代码已实现，不等于接入/业务验收；本表 `[x]` 同理不代表浏览器/客户验收完成，人工验收单列在文末「未收口清单」。
@@ -126,6 +126,9 @@
 - v0.1.14（2026-11-10 10:50）：用户明确「继续」的新口径（拉云仓对齐→跑 A→每单元测试→拉云仓→推送→合并主 master）。本轮拉云仓 `bca345e → 2c494da`（7 提交），rebase 解决与 B 的结构断言冲突（采用 B 严格集合断言 + 保留 A 裁决依据）；新基线 76 表、单 head `B_0007`、空库 31 步、后端 761 / 前端 113 用例全绿。**跑通单元 D02-A「限流环境开关」**：`config.py` 加开关、`main.py` 抽出 `rate_limit_exempt_paths()`、两份 `.env.example` 补部署说明、5 个新用例（9 passed）覆盖 429/403/降级，默认行为零变化。客户模式真实 Redis 端到端串扰复验仍记为未验证。证据：[1050 记录](../../updates/A/20261110-1050-D02限流环境开关与云仓对齐.md)。
 - v0.1.15（2026-11-10 11:00）：用户「再拉下来检查一下，没问题继续跑」。开工 `fetch` 后四 ref 全部 `3cb0064`、无新更新、祖先复核 exit 0；跑通 **A02-1「取消硬门槛自动淘汰」**（V2.6 §5 / Master 执行表 A02 P0 子单元）：引擎删除硬淘汰提前返回、规则层结果改「不符项 / 待核实」提示并随 Prompt C 输入、两处 `estimated_llm_calls` 不再折减、`match.txt` 改全员评分口径；按新口径重写三份测试而非删弱。定向 **33 passed**、后端全量 **768 用例 / 767 passed / 1 skipped / 0 failed**、静态门禁全绿。**A02-2 未完成**：模型综合分需 D 先改 `PROMPT_C_SCHEMA`，已发 [请求](../../requests/A/20261110-D-A02-2-PromptC综合分契约.md)，A 不越界代改。台账回填 M4 / 状态快照 / 执行表 A02 映射 / 未收口清单。**发布前再 fetch 发现 `origin/master 3cb0064 → 3eed209`（23 提交，D 的 T-D18~D24 与迁移链单头收敛）**，双方零重叠、rebase 零冲突，本地 A02-1 提交 `9cfb607 → 5eb81c7`；新基线单 head `D_0012_digital_employee`、84 表 / 17 路由，已重建隔离库复验。证据：[1100 记录](../../updates/A/20261110-1100-A02-1取消硬门槛自动淘汰.md) + [1130 并发更新补记](../../updates/A/20261110-1130-并发更新合并与复验补记.md)（append-only，基线数字以补记为准）。
 
+- v0.1.16 / v0.1.17（2026-11-10 11:40 / 12:00）：A06-1 角色门禁（`2eca164`）、A06-4 系统管理域 CRUD 路由（`78d946e`，含 `deps.py` 漏 import 修复）两个闭环已发布，详见 [1140 记录](../../updates/A/20261110-1140-A06角色门禁.md) · [1200 记录](../../updates/A/20261110-1200-A06-4系统管理域CRUD路由.md)（append-only 补登，不回改历史快照）。
+- v0.1.18（2026-11-10 13:30）：用户「继续，一个一个跑完」。开工 `fetch` 后四 ref 全部 `78d946e`、祖先复核 exit 0、工作区干净。跑通 **A06-2「`users.department_id` + 部门行级过滤」**：新增可空列 + 幂等 ALTER 迁移 `A_0009`（链 head `D_0012 → A_0009`）；`scope.py` 新增 `resolve_data_scope` / `get_visible_department_ids` / `apply_department_filter` 三个可复用基础；新增 `system/account_router.py`（`GET /api/system/accounts` 部门行级过滤 + `PUT /{id}/department` 仅 system_admin，审计 + 脱敏）；`main.py` 路由 18 → 19；`EXPECTED_COLUMNS["users"]` 同步新列。定向 **11 passed**；首次后端全量 **2 例失败定性为基线列清单未同步**（非代码回归），补齐后**串行全量复跑 exit 0，812 用例 / 811 passed / 1 skipped**；`tsc` exit 0、`diff --check` 0、6 个改动 py `py_compile` 0 错。台账回填 A06 映射 / 状态快照 / 未收口清单。**A06-3 字段级权限待跑**。证据：[1330 记录](../../updates/A/20261110-1330-A06-2部门行级过滤.md)。
+
 ## M3-V2.6 · 招聘域重排（需求冻结后按 V2.6 口径，2026-11-07）
 
 > 原 M3（T-A21～T-A24）基于 V2.2 编写；冻结版 V2.6 增补 JD 生成投放（F01）、岗前培养（F05，归 C）、系统管理域表体系（F09）。以下为 A 侧重排清单，编号 T-A60x 供沟通引用。
@@ -141,9 +144,39 @@
 
 ---
 
-## 状态快照（v0.1.17，2026-11-10 12:00）
+## 状态快照（v0.1.18，2026-11-10 13:30）· 当前活状态锚点
 
-> 本节为**活状态锚点**，覆盖上方按时间线写的历史台账。权威顺序：`docs/updates/A/` 最新记录 > 根 `更新记录.md` 尾部 > `git log` > 本表。
+> 本节为**活状态锚点**，覆盖下方 v0.1.17 / v0.1.15 历史快照。权威顺序：`docs/updates/A/` 最新记录 > 根 `更新记录.md` 尾部 > `git log` > 本表。
+
+- v0.1.18（2026-11-10 13:30）：用户「继续，一个一个跑完」。在 A06-1 / A06-4 基础上跑通 **A06-2「`users.department_id` + 部门行级过滤」**（Master 执行表 A06 P0 子单元）：`User` 新增可空 `department_id` 列 + 幂等 ALTER 迁移 `A_0009_users_department_id`（挂 `D_0012`，链 head → `A_0009`）；`scope.py` 新增 `resolve_data_scope`（聚合 `sys_roles.data_scope` 取最宽松 all/dept/self）、`get_visible_department_ids`（dept 返回本部门 ∪ 跨部门授权）、`apply_department_filter`（查询叠加 `department_id IN (...)`）；新增 `system/account_router.py` 暴露 `GET /api/system/accounts`（system_admin 看全量 / dept_manager 仅看本部门，接 `require_roles` 门禁，响应剔除 `password_hash`）与 `PUT /{id}/department`（仅 system_admin，校验部门存在 + 落审计）；`main.py` 路由 **18 → 19**；`test_models_structure.EXPECTED_COLUMNS["users"]` 同步新列；新增 `test_a06_department_scope.py` **11 passed**。**全量 1 轮发现并修复 2 例基线断言过期**（users 列清单缺 `department_id`），系预期列清单未同步、非代码回归，改后串行全量复跑 exit 0。**A06 整行未完成**：字段级权限（A06-3）、assessments/interviews 内联 `ADMIN_ROLES` 行级判定迁移。证据：[1330 记录](../../updates/A/20261110-1330-A06-2部门行级过滤.md)。
+
+### 基线与结构
+
+| 项 | 当前值 |
+|---|---|
+| 分支 / HEAD | 开工 `fetch` 后四 ref 全部 `78d946e`，ahead/behind 0，祖先复核 exit 0，工作区干净；远端仅 `master_YB`（独立根历史，不并入）有更新。按用户 10:39 口径执行本轮闭环，最终 hash 以远端为准 |
+| 迁移链 | 单 head **`A_0009_users_department_id (head)`**（挂 `D_0012_digital_employee`；空库/旧库双路径幂等） |
+| 表 | **84 张 / 模型 84**（本单元只加列，不加表） |
+| 路由 | `backend/app/main.py` **19 个** `include_router`（新增 `account_router`） |
+| 运行态 | 后端 8101 / 前端 3101 / MySQL 3308 / Milvus 19532，容器 `aitalent_main-*`；**本轮未重启**；隔离测试库 `ai_talent_a_probe` 已 `upgrade head` 到 `A_0009` |
+
+### 测试门禁（真实退出码）
+
+| 项 | 结果 |
+|---|---|
+| 后端全量（隔离库 `ai_talent_a_probe`） | **exit 0，812 用例 / 811 passed / 1 skipped / 0 failed / 0 error**（A06-2 +11） |
+| 定向 `test_a06_department_scope.py` | **exit 0，11 passed** |
+| 受影响 schema 断言复跑（`test_models_structure` 列匹配 + `test_db_integration_t03` 真实 schema） | **exit 0，96 passed**（改 `EXPECTED_COLUMNS` 后） |
+| `tsc --noEmit` | **exit 0**（A 侧零前端改动；`npm test` 无前端改动按门禁未重跑） |
+| 静态 | `diff --check` **exit 0**；6 个改动 py 文件 `py_compile` 0 错；19 个 `include_router`；84 表 / 模型 84；单 head `A_0009`；`account_router.py` / 新 test 为 UNASSIGNED，走本地 `collab.integration=1` 整合模式（警告放行、透明登记） |
+
+> 纪律：禁用 `pytest | tail`；一律重定向日志 + 单独 `echo $?`；`--basetemp` 用项目内 `.pytest_tmp_A_*`。主库 `ai_talent` 的 `alembic_version` 超前于实际 schema，只读取证未处理，重建需用户授权。
+
+---
+
+## 状态快照（v0.1.17，2026-11-10 12:00）· 历史
+
+> 本节为历史快照，被上方 v0.1.18 覆盖。权威顺序：`docs/updates/A/` 最新记录 > 根 `更新记录.md` 尾部 > `git log` > 本表。
 
 - v0.1.17（2026-11-10 12:00）：用户「继续」。在 A06-1 基础上跑通 **A06-4 系统管理域 CRUD 路由**（Master 执行表 A06 P0 子单元）：新增 `app/modules/system/router.py` 暴露 `/api/system`（部门/角色/菜单/权限/账号绑定/操作日志），整域接 `require_roles("system_admin")`（A06-1 角色门禁在真实 HTTP 边界端到端生效）；`main.py` 路由 **17 → 18**；**修复 `deps.py` 漏 import `DENY_MESSAGE` 隐患**（A06-1 时只测 service 层未触发 FastAPI 依赖，本次暴露并修复）；新增 `test_a06_system_router.py` **7 passed**（门禁 401/403 + 部门 CRUD 往返 + 权限矩阵 + 账号绑定 + 操作日志只读）。后端全量复验中；前端零改动按门禁复跑；`diff --check` 0、276 个 py AST 0 错。**A06 整行未完成**：部门行级（`users.department_id` 缺失）、字段级、assessments/interviews 内联 `ADMIN_ROLES` 行级判定迁移。证据：[1140 记录](../../updates/A/20261110-1140-A06角色门禁.md) · [1200 记录](../../updates/A/20261110-1200-A06-4系统管理域CRUD路由.md)。
 
@@ -176,7 +209,7 @@
 | ID | 优先级 | 状态 | 下一步 |
 |---|---|---|---|
 | A02 | P0 | **A02-1 已交付** + 新基线复验（794 用例全绿）。**A02-2 未完成**：分数仍是 `0.7/0.3` 向量混合 + `40/30/15/15` 加权 | A02-2 需 D 先改 `PROMPT_C_SCHEMA`（已发 [请求](../../requests/A/20261110-D-A02-2-PromptC综合分契约.md)），之后 A 改模型综合分 |
-| A06 | P0 | **A06-1 + A06-4 已交付**：角色门禁 + 系统管理域 CRUD 路由（`/api/system` 整域接 `require_roles("system_admin")`，含部门/角色/菜单/权限/账号绑定/操作日志）；修复 `deps.py` 漏 import `DENY_MESSAGE` 隐患。**A06 整行未完成**：部门行级（`users.department_id` 缺失）、字段级、assessments/interviews 内联 `ADMIN_ROLES` 行级判定迁移 | A06-2：补 `users.department_id` + 部门行级过滤；A06-3：字段级权限白名单 + 序列化裁剪 |
+| A06 | P0 | **A06-1 + A06-2 + A06-4 已交付**：角色门禁 + `users.department_id` 列 + 数据范围解析（`resolve_data_scope`/`get_visible_department_ids`/`apply_department_filter`）+ 账号花名册部门行级过滤（`/api/system/accounts`，system_admin 看全量、dept_manager 仅看本部门）+ 系统管理域 CRUD 路由。**A06 整行未完成**：字段级权限（A06-3）、assessments/interviews 内联 `ADMIN_ROLES` 行级判定迁移 | A06-3：字段级权限白名单 + 序列化裁剪；assessments/interviews 内联 `ADMIN_ROLES` 行级判定迁移 |
 | D02（A/D） | P0 | **A 侧开关已交付**（`RATE_LIMIT_ENABLED`，默认 false 演示豁免；true 只豁免 `/api/health`） | 客户模式真实 Redis 多环境串扰复验未做 |
 | A03 / A08 / A11 / A12 / A14 | P1 | 空白或未获完整实现证据 | 批次档案冻结、申请输入快照、审批链、真实 AI JD 草稿、员工花名册 |
 | A01 / A04 / A10 / A13 / A15 | P1 | `×`（代码已实现） | 按执行表「通过条件」逐条接入/验收，**A 不替 Master 改表** |

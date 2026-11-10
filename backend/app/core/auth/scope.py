@@ -175,6 +175,78 @@ def _active_grant_summaries(user_id: int | None) -> tuple[dict, ...]:
         return ()
 
 
+def resolve_data_scope(db, user) -> Literal["all", "dept", "self"]:
+    """聚合账号生效角色的 data_scope，解析出最终数据范围（design §8.3 sys_roles）。
+
+    取账号所有启用角色 data_scope 的「最宽松」口径：
+    - 任一角色为 ``all`` → ``all``；
+    - 否则任一为 ``dept`` → ``dept``；
+    - 否则 ``self``。
+    无 sys_user_roles 记录时回退 ``users.role`` 简值：hr→all，其余（含 personal/
+    employee 等未知）→self。这是 A06-2 部门行级过滤与下游（B/C/D）数据范围的权威来源。
+    """
+    uid = getattr(user, "id", None)
+    if uid is None:
+        return "self"
+    try:
+        from sqlalchemy import select
+
+        from app.models import SysRole, SysUserRole, User
+
+        scopes = db.execute(
+            select(SysRole.data_scope)
+            .join(SysUserRole, SysUserRole.role_id == SysRole.id)
+            .where(SysUserRole.user_id == uid, SysRole.status == "active")
+        ).scalars().all()
+        if scopes:
+            if "all" in scopes:
+                return "all"
+            if "dept" in scopes:
+                return "dept"
+            return "self"
+        # 回退：legacy users.role 简值（无 sys_user_roles 绑定）
+        u = db.get(User, uid)
+        r = (getattr(u, "role", "") or "").strip().lower() if u else ""
+        return "all" if r == "hr" else "self"
+    except Exception:
+        return "self"
+
+
+def get_visible_department_ids(db, user) -> tuple[int, ...] | None:
+    """账号可看的部门 id 集合；返回 ``None`` 表示「全部可见」（data_scope=all）。
+
+    - ``all`` → ``None``（不限制部门）；
+    - ``dept`` → ``(users.department_id,)`` ∪ 跨部门授权（user_scope_grants）去重；
+      若账号本身无 ``department_id`` 且无授权，返回空元组（本部门=无，即无数据）；
+    - ``self`` → ``None``（self 范围不按部门过滤，由调用方做本人行级判定）。
+
+    配合 :func:`apply_department_filter` 使用。
+    """
+    scope = resolve_data_scope(db, user)
+    if scope in ("all", "self"):
+        return None
+    # dept：本人所属部门 + 显式跨部门授权
+    base: list[int] = []
+    dept = getattr(user, "department_id", None)
+    if dept is not None:
+        base.append(int(dept))
+    base.extend(_active_department_ids(getattr(user, "id", None)))
+    return tuple(sorted(set(base)))
+
+
+def apply_department_filter(stmt, model, visible_dept_ids):
+    """在查询上叠加部门行级过滤；``visible_dept_ids`` 为 ``None`` 表示不过滤。
+
+    模型无 ``department_id`` 列时防御性地返回原 stmt（不误杀、不抛错）。
+    """
+    if visible_dept_ids is None:
+        return stmt
+    col = getattr(model, "department_id", None)
+    if col is None:
+        return stmt
+    return stmt.where(col.in_(visible_dept_ids))
+
+
 def get_role_codes(db, user_id: int | None) -> tuple[str, ...]:
     """聚合账号生效角色代码（sys_user_roles 优先；无记录则回退 users.role 简值）。
 
