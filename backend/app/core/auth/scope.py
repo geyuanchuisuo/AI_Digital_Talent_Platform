@@ -305,6 +305,61 @@ def require_management_guard(user) -> None:
             raise _BizForbidden()
 
 
+# --------------------------------------------------------------------------- #
+# A06-3 字段级权限：按角色裁剪序列化字段（deny-by-default）
+# --------------------------------------------------------------------------- #
+
+#: 任何角色、任何资源都不得出现在响应中的敏感列（硬底线，白名单也不能覆盖）。
+SENSITIVE_FIELDS = frozenset({"password_hash", "password", "token", "secret", "api_key"})
+
+#: 账号花名册基础字段：能进入 /api/system/accounts 的角色都可见的最小集合。
+ACCOUNT_BASE_FIELDS = ("id", "username", "display_name", "role", "department_id", "is_active")
+
+#: 资源 → 角色 code → 可见字段白名单；``None`` 表示「全部非敏感列」。
+#: 当前为服务端策略常量（V2.6 §8.3 的 sys_role_permissions 只有 menu×action×data_scope，
+#: 无字段维度）；后续可迁到配置表，调用方形状不变。
+FIELD_POLICIES: dict[str, dict[str, tuple[str, ...] | None]] = {
+    "accounts": {
+        "system_admin": None,  # 全部非敏感列（含 person_id / last_login_at / 时间戳）
+        "dept_manager": ACCOUNT_BASE_FIELDS,  # 仅基础字段，审计/绑定类不可见
+    },
+}
+
+
+def resolve_visible_fields(db, user, resource: str) -> tuple[str, ...] | None:
+    """字段级权限：返回该账号对某资源可见的字段白名单。
+
+    - ``None``：全部非敏感列（如 system_admin）；
+    - 非空元组：只允许这些列；
+    - ``()``：**deny-by-default**（未知资源 / 无任何匹配角色，一律不给字段）。
+    """
+    policy = FIELD_POLICIES.get(resource)
+    if policy is None:
+        return ()
+    codes = set(get_role_codes(db, getattr(user, "id", None)))
+    if "system_admin" in codes and "system_admin" in policy:
+        return policy["system_admin"]
+    for code in sorted(codes):
+        if code in policy:
+            return policy[code]
+    return ()
+
+
+def filter_columns(columns, visible) -> tuple[str, ...]:
+    """把 ORM 列名集合按白名单裁剪，并始终剔除 :data:`SENSITIVE_FIELDS`。"""
+    safe = tuple(c for c in columns if c not in SENSITIVE_FIELDS)
+    if visible is None:
+        return safe
+    allowed = set(visible)
+    return tuple(c for c in safe if c in allowed)
+
+
+def serialize_fields(obj, visible) -> dict:
+    """按字段级白名单序列化 ORM 行；敏感列永不出现（防御纵深）。"""
+    cols = [c.name for c in obj.__table__.columns]
+    return {name: getattr(obj, name) for name in filter_columns(cols, visible)}
+
+
 def _BizForbidden():
     from app.core.errors import BizError
 

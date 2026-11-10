@@ -21,7 +21,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, PageParams, pagination, require_roles
-from app.core.auth.scope import apply_department_filter, get_visible_department_ids
+from app.core.auth.scope import (
+    apply_department_filter,
+    get_visible_department_ids,
+    resolve_visible_fields,
+    serialize_fields,
+)
 from app.core.errors import BizError
 from app.core.response import ok, paginated
 from app.database import get_db
@@ -40,16 +45,8 @@ class DepartmentAssign(BaseModel):
     department_id: int
 
 
-# 账号花名册响应不泄露凭证类字段
-_SENSITIVE_COLUMNS = {"password_hash"}
-
-
-def _row_to_dict(obj) -> dict:
-    return {
-        c.name: getattr(obj, c.name)
-        for c in obj.__table__.columns
-        if c.name not in _SENSITIVE_COLUMNS
-    }
+# A06-3：账号花名册响应按角色字段白名单裁剪（system_admin 全量、dept_manager 基础字段），
+# 且 SENSITIVE_FIELDS（password_hash 等）是任何白名单都不可覆盖的硬底线。
 
 
 @router.get("")
@@ -65,6 +62,7 @@ def list_accounts(
     system_admin 看全部；dept_manager 仅看本部门（含跨部门授权）。
     """
     visible = get_visible_department_ids(db, current_user)
+    visible_fields = resolve_visible_fields(db, current_user, "accounts")
     base = select(User)
     base = apply_department_filter(base, User, visible)
     if keyword:
@@ -74,7 +72,12 @@ def list_accounts(
     rows = db.execute(
         base.order_by(User.id.asc()).offset(page_params.offset).limit(page_params.limit)
     ).scalars().all()
-    return paginated([_row_to_dict(r) for r in rows], total, page_params.page, page_params.page_size)
+    return paginated(
+        [serialize_fields(r, visible_fields) for r in rows],
+        total,
+        page_params.page,
+        page_params.page_size,
+    )
 
 
 @router.put("/{user_id}/department")
@@ -105,4 +108,5 @@ def set_user_department(
         status="success",
         params_summary=f"department_id={payload.department_id}",
     )
-    return ok(_row_to_dict(target))
+    visible_fields = resolve_visible_fields(db, current_user, "accounts")
+    return ok(serialize_fields(target, visible_fields))
