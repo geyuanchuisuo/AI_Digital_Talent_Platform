@@ -1,7 +1,8 @@
 """C 域迁移：学习证据可信来源键（防重复计入/凭证重放）。
 
 Revision ID: C_0007_learning_evidence_key
-Revises: C_0006_course_capacity
+Revises: D_0011_ai_platform（2026-11-10 同步整合改挂：原挂 C_0006 与 D_0010
+分叉成双头；改挂 D 链末端 D_0011 后全链单头，见 D_0012/D 更新记录）
 Create Date: 2026-11-09
 
 新增 `training_learning_evidence.evidence_key`，同一学习记录内唯一；
@@ -17,7 +18,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "C_0007_learning_evidence_key"
-down_revision: Union[str, None] = "C_0006_course_capacity"
+down_revision: Union[str, None] = "D_0011_ai_platform"
 branch_labels: Union[str, None] = None
 depends_on: Union[str, None] = None
 

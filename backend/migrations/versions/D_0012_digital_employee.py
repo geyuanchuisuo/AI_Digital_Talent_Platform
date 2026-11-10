@@ -15,7 +15,7 @@ from __future__ import annotations
 from alembic import op
 
 revision = "D_0012_digital_employee"
-down_revision = "D_0011_ai_platform"
+down_revision = "C_0007_learning_evidence_key"
 branch_labels = None
 depends_on = None
 
