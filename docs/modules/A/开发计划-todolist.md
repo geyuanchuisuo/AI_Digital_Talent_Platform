@@ -124,7 +124,7 @@
 - v0.1.12（2026-11-07 14:50）：**需求冻结（V2.6）**——用户指令按 design 四件与 PRD 核对需求文档，冲突 4 处按原需求改回（系统管理域 RBAC 表体系、JD 生成投放、岗前培养计划、候选人管理实体），状态改为已冻结；AGENTS/README 基线对齐。M3+ 重排解锁：F01 增 JD 投放、F05 增岗前培养、系统管理域表体系（sys_*）纳入——A 下一批任务按 V2.6 重排（人才需求实体含 headcount、JD 投放接口、招聘状态机）。同轮功能 6/7 已集成（T-A41/T-A53）。
 - v0.1.13（2026-11-10 10:00）：**T-A06 重排落地**。同步 `origin/master 824809e → bca345e`（52 提交），`tasks/A.md` 新增 Master 统一执行表入口；头部口径改回 V2.6，批次总览与 M3-V2.6 的 T-A60a~f 按实证勾选，新增「状态快照」与「未收口清单」。同轮受理 `REQ-C-20261109-121506` 修复 `C_0001` 空库外键 P0、同步三列与物理外键白名单断言；隔离库空库升级到 `C_0007` 单 head 通过、后端 759 / 前端 104 用例全绿。**未 push、未合 master、未做人工验收**。证据：[1000 记录](../../updates/A/20261110-1000-C_0001空库迁移修复与结构基线同步.md)。
 - v0.1.14（2026-11-10 10:50）：用户明确「继续」的新口径（拉云仓对齐→跑 A→每单元测试→拉云仓→推送→合并主 master）。本轮拉云仓 `bca345e → 2c494da`（7 提交），rebase 解决与 B 的结构断言冲突（采用 B 严格集合断言 + 保留 A 裁决依据）；新基线 76 表、单 head `B_0007`、空库 31 步、后端 761 / 前端 113 用例全绿。**跑通单元 D02-A「限流环境开关」**：`config.py` 加开关、`main.py` 抽出 `rate_limit_exempt_paths()`、两份 `.env.example` 补部署说明、5 个新用例（9 passed）覆盖 429/403/降级，默认行为零变化。客户模式真实 Redis 端到端串扰复验仍记为未验证。证据：[1050 记录](../../updates/A/20261110-1050-D02限流环境开关与云仓对齐.md)。
-- v0.1.15（2026-11-10 11:00）：用户「再拉下来检查一下，没问题继续跑」。开工 `fetch` 后四 ref 全部 `3cb0064`、无新更新、祖先复核 exit 0；跑通 **A02-1「取消硬门槛自动淘汰」**（V2.6 §5 / Master 执行表 A02 P0 子单元）：引擎删除硬淘汰提前返回、规则层结果改「不符项 / 待核实」提示并随 Prompt C 输入、两处 `estimated_llm_calls` 不再折减、`match.txt` 改全员评分口径；按新口径重写三份测试而非删弱。定向 **33 passed**、后端全量 **768 用例 / 767 passed / 1 skipped / 0 failed**、静态门禁全绿。**A02-2 未完成**：模型综合分需 D 先改 `PROMPT_C_SCHEMA`，已发 [请求](../../requests/A/20261110-D-A02-2-PromptC综合分契约.md)，A 不越界代改。台账回填 M4 / 状态快照 / 执行表 A02 映射 / 未收口清单。证据：[1100 记录](../../updates/A/20261110-1100-A02-1取消硬门槛自动淘汰.md)。
+- v0.1.15（2026-11-10 11:00）：用户「再拉下来检查一下，没问题继续跑」。开工 `fetch` 后四 ref 全部 `3cb0064`、无新更新、祖先复核 exit 0；跑通 **A02-1「取消硬门槛自动淘汰」**（V2.6 §5 / Master 执行表 A02 P0 子单元）：引擎删除硬淘汰提前返回、规则层结果改「不符项 / 待核实」提示并随 Prompt C 输入、两处 `estimated_llm_calls` 不再折减、`match.txt` 改全员评分口径；按新口径重写三份测试而非删弱。定向 **33 passed**、后端全量 **768 用例 / 767 passed / 1 skipped / 0 failed**、静态门禁全绿。**A02-2 未完成**：模型综合分需 D 先改 `PROMPT_C_SCHEMA`，已发 [请求](../../requests/A/20261110-D-A02-2-PromptC综合分契约.md)，A 不越界代改。台账回填 M4 / 状态快照 / 执行表 A02 映射 / 未收口清单。**发布前再 fetch 发现 `origin/master 3cb0064 → 3eed209`（23 提交，D 的 T-D18~D24 与迁移链单头收敛）**，双方零重叠、rebase 零冲突，本地 A02-1 提交 `9cfb607 → 5eb81c7`；新基线单 head `D_0012_digital_employee`、84 表 / 17 路由，已重建隔离库复验。证据：[1100 记录](../../updates/A/20261110-1100-A02-1取消硬门槛自动淘汰.md) + [1130 并发更新补记](../../updates/A/20261110-1130-并发更新合并与复验补记.md)（append-only，基线数字以补记为准）。
 
 ## M3-V2.6 · 招聘域重排（需求冻结后按 V2.6 口径，2026-11-07）
 
@@ -149,23 +149,23 @@
 
 | 项 | 当前值 |
 |---|---|
-| 分支 / HEAD | 四 ref（`HEAD` / 本地 `master` / `origin/master` / `origin/feature/A/continuation`）全部对齐 **`3cb0064`**，工作区干净；11:00 再 `fetch` 无新更新、`merge-base --is-ancestor` exit 0、ahead/behind 0。按用户 10:39 口径「继续 = 拉云仓→跑 A→每单元测试→拉云仓→推送→合并主 master」执行本轮闭环 |
-| 迁移链 | `A_0001~A_0008` + `B_0001~B_0007` + `C_0001~C_0007` + `D_0001~D_0009`；`B_0005`/`B_0007` 为合并迁移，`alembic heads` 单 head **`B_0007_merge_learning_evidence (head)`** |
-| 表 | 一期断言 **76 张**（75 + B `talent_profile_questions`）、去重 76；隔离库空库整链 31 步实测通过 |
-| 路由 | `backend/app/main.py` **14 个** `include_router` |
+| 分支 / HEAD | 开工 `fetch` 后四 ref 全部 `3cb0064`；**发布前再 fetch 发现 `origin/master 3cb0064 → 3eed209`（23 提交）**，按规则 rebase 对齐（双方零重叠、0 冲突），A02-1 本地提交 `9cfb607 → 5eb81c7`，rebase 后祖先复核 exit 0、工作区干净。按用户 10:39 口径执行本轮闭环，最终 hash 以远端为准；详见 [1130 补记](../../updates/A/20261110-1130-并发更新合并与复验补记.md) |
+| 迁移链 | 新基线 `alembic heads` 单 head **`D_0012_digital_employee (head)`**；D 的 `D_0010` 挂 `C_0006` → `D_0011` 挂 `D_0010` → `C_0007` 改挂 `D_0011`，`D_0012` 挂 `B_0007_merge_learning_evidence`；`C_0001` 空库修复在新链下复验见测试门禁 |
+| 表 | 一期断言 **84 张 / 模型 84**（D 新增 8 表） |
+| 路由 | `backend/app/main.py` **17 个** `include_router`（D 新增 3） |
 | 运行态 | 后端 8101 / 前端 3101 / MySQL 3308 / Milvus 19532，容器 `aitalent_main-*`；**本轮未重启** |
 
 ### 测试门禁（真实退出码）
 
 | 项 | 结果 |
 |---|---|
-| 后端全量（隔离库 `ai_talent_a_probe`，补种子后，`3cb0064` 基线） | **exit 0**，768 用例 / 767 passed / 1 skipped / 0 failed / 0 error |
-| 前端 `npm test` | **exit 0**，25 文件 / 113 用例（本轮复核，408s） |
+| 后端全量（隔离库 `ai_talent_a_probe`，补种子后，**`3eed209` 新基线**） | **exit 0**，784 用例 / 783 passed / 1 skipped / 0 failed / 0 error（首次 1 例失败为 A 侧表数硬编码 76→84 过期，已改动态一致性断言后串行全量复跑通过） |
+| 前端 `npm test` | **exit 0**，29 文件 / 131 用例（新基线复跑，594s） |
 | `tsc --noEmit` | **exit 0** |
-| 空库 `alembic upgrade head` | **exit 0**，31 步到 `B_0007`（B 的 merge 迁移收编 C 链）；`C_0001` 修复在新链下仍有效 |
+| 空库 `alembic upgrade head` | **exit 0**，**34 步**到 `D_0012_digital_employee`；`C_0001` 修复在新链下仍有效 |
 | A02-1 定向三文件（引擎 + 筛选 + 匹配） | **exit 0，33 passed**（旧硬淘汰用例按新口径重写，非删弱） |
 | D02-A 单元单测 `test_app_integration_t02.py` | **exit 0，9 passed**（保留） |
-| 静态 | `diff --check` **exit 0**；260 个受控 backend py 文件 AST 0 错；14 个 `include_router`；76 表 / 去重 76；单 head `B_0007`；Prompt C 的 `required` 与 `MatchScoreOutput` 字段集合实测一致，D 侧断言字符串仍成立 |
+| 静态 | `diff --check` **exit 0**；**275** 个受控 backend py 文件 AST 0 错；17 个 `include_router`；84 表 / 去重 84 / 模型 84；单 head `D_0012`；Prompt C 的 `required` 与 `MatchScoreOutput` 字段集合实测一致，D 侧断言字符串仍成立 |
 
 > 纪律：禁用 `pytest | tail`（`tail` 的 0 会掩盖真实失败）；一律重定向日志 + 单独 `echo $?`；`--basetemp` 用项目内 `.pytest_tmp_A_*`。主库 `ai_talent` 的 `alembic_version` 超前于实际 schema（缺三列 / 两条外键、表数 76），只读取证未处理，重建需用户授权。
 
