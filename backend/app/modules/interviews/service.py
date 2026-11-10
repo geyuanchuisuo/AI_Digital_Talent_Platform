@@ -137,6 +137,8 @@ def update_round(
     fields = payload.model_dump(exclude_unset=True)
     rescheduled = False
     for key, value in fields.items():
+        if key == "status":
+            continue  # 状态只能走下方状态机，禁止直接赋值绕过校验
         if key == "interviewer_user_ids":
             setattr(row, "interviewer_user_ids_json", sorted({int(item) for item in value or []}))
         elif key == "round_name":
@@ -147,8 +149,18 @@ def update_round(
             setattr(row, key, value)
         if key in {"scheduled_at", "mode", "location_or_link"}:
             rescheduled = True
-    if payload.status == "completed" and row.status != "completed":
-        row.status = "completed"
+    # 状态机：pending → in_progress（记录开展）→ completed；未开展不得标记完成（C-INT 口径）
+    if payload.status is not None and payload.status != row.status:
+        if payload.status == "in_progress":
+            if row.status != "pending":
+                raise BizError(400, "只有待进行的面试才能记录开展")
+            row.status = "in_progress"
+        elif payload.status == "completed":
+            if row.status != "in_progress":
+                raise BizError(400, "面试未开展，不能标记已完成；请先记录开展")
+            row.status = "completed"
+        else:
+            raise BizError(400, "面试轮次状态只支持 pending → in_progress → completed")
     row.version += 1
     row.updated_by = admin.id
     after = {
@@ -159,10 +171,14 @@ def update_round(
         "interviewer_user_ids": list(row.interviewer_user_ids_json or []),
         "status": row.status,
     }
+    if after["status"] != before["status"]:
+        event_type = {"in_progress": "started", "completed": "completed"}.get(after["status"], "updated")
+    else:
+        event_type = "rescheduled" if rescheduled else "updated"
     _event(
         db,
         row,
-        "completed" if after["status"] == "completed" and before["status"] != "completed" else ("rescheduled" if rescheduled else "updated"),
+        event_type,
         operator_id=admin.id,
         before=before,
         after=after,

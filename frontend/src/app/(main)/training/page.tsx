@@ -154,7 +154,8 @@ function MyTraining() {
 
   const saveFeedback = async () => {
     if (!feedbackItem) return;
-    const values = await feedbackForm.validateFields();
+    const values = await feedbackForm.validateFields().catch(() => null);
+    if (!values) return; // 校验失败已由 antd 就地提示
     try {
       const payload = {
         content_score: values.content_score,
@@ -444,7 +445,8 @@ function SessionManager({ course, open, onClose }: { course: TrainingCourse | nu
 
   const createOne = async () => {
     if (!course) return;
-    const values = await form.validateFields();
+    const values = await form.validateFields().catch(() => null);
+    if (!values) return;
     try {
       await createSession(course.id, {
         instructor_name: values.instructor_name ?? null,
@@ -466,7 +468,8 @@ function SessionManager({ course, open, onClose }: { course: TrainingCourse | nu
 
   const addAttendance = async () => {
     if (!selected) return;
-    const values = await attendanceForm.validateFields();
+    const values = await attendanceForm.validateFields().catch(() => null);
+    if (!values) return;
     try {
       await markAttendance(selected.id, values.employee_user_id);
       message.success('出勤已登记');
@@ -579,7 +582,8 @@ function CourseFeedback({ course, open, onClose }: { course: TrainingCourse | nu
 
   const publishNote = async () => {
     if (!course) return;
-    const values = await noteForm.validateFields();
+    const values = await noteForm.validateFields().catch(() => null);
+    if (!values) return;
     try {
       await updateFeedbackNote(course.id, values.note);
       message.success('改进说明已发布');
@@ -707,7 +711,8 @@ function CourseAdmin() {
   };
 
   const submit = async () => {
-    const values = await form.validateFields();
+    const values = await form.validateFields().catch(() => null);
+    if (!values) return;
     try {
       if (editing) {
         await updateCourse(editing.id, values);
@@ -925,7 +930,8 @@ function PlanAdmin() {
   const submitExtend = async () => {
     if (!extendTarget) return;
     try {
-      const values = await extendForm.validateFields();
+      const values = await extendForm.validateFields().catch(() => null);
+      if (!values) return;
       await extendPlanItem(extendTarget.id, {
         new_due_date: values.new_due_date.format('YYYY-MM-DD'),
         reason: values.reason,
@@ -942,7 +948,8 @@ function PlanAdmin() {
   };
 
   const submitManual = async () => {
-    const values = await form.validateFields();
+    const values = await form.validateFields().catch(() => null);
+    if (!values) return;
     try {
       await createPlan({
         employee_user_id: values.employee_user_id,
@@ -968,7 +975,8 @@ function PlanAdmin() {
   };
 
   const submitDraft = async () => {
-    const values = await draftForm.validateFields();
+    const values = await draftForm.validateFields().catch(() => null);
+    if (!values) return;
     try {
       const data = await draftPlan({
         employee_user_id: values.employee_user_id,

@@ -12,7 +12,7 @@ export interface InterviewRound {
   mode: 'onsite' | 'online' | 'phone';
   location_or_link: string | null;
   interviewer_user_ids: number[];
-  status: 'pending' | 'completed' | 'cancelled';
+  status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
   internal_note?: string | null;
   version: number;
 }

@@ -40,6 +40,7 @@ const MODE_LABEL = { onsite: '现场', online: '线上', phone: '电话' } as co
 function statusTag(status: string) {
   if (status === 'completed') return <Tag color="success">已完成</Tag>;
   if (status === 'cancelled') return <Tag color="default">已取消</Tag>;
+  if (status === 'in_progress') return <Tag color="warning">进行中</Tag>;
   return <Tag color="processing">待进行</Tag>;
 }
 
@@ -78,7 +79,8 @@ function RoundDrawer({
 
   const submitFeedback = async () => {
     if (!roundId) return;
-    const values = await form.validateFields();
+    const values = await form.validateFields().catch(() => null);
+    if (!values) return;
     try {
       await saveFeedback(roundId, values);
       message.success('反馈已保存');
@@ -237,7 +239,9 @@ function RoundAdmin() {
   const [modalOpen, setModalOpen] = useState(false);
   const [active, setActive] = useState<number | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [rescheduling, setRescheduling] = useState<InterviewRound | null>(null);
   const [form] = Form.useForm();
+  const [rescheduleForm] = Form.useForm();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -257,7 +261,8 @@ function RoundAdmin() {
   }, [load]);
 
   const submit = async () => {
-    const values = await form.validateFields();
+    const values = await form.validateFields().catch(() => null);
+    if (!values) return;
     try {
       await createRound({
         candidate_user_id: values.candidate_user_id,
@@ -280,6 +285,24 @@ function RoundAdmin() {
     }
   };
 
+  const submitReschedule = async () => {
+    if (!rescheduling) return;
+    const values = await rescheduleForm.validateFields().catch(() => null);
+    if (!values) return;
+    try {
+      await updateRound(rescheduling.id, {
+        scheduled_at: values.scheduled_at ? values.scheduled_at.replace(' ', 'T') : null,
+        mode: values.mode,
+        location_or_link: values.location_or_link,
+      });
+      message.success('已改期');
+      setRescheduling(null);
+      void load();
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    }
+  };
+
   const columns: ColumnsType<InterviewRound> = [
     { title: '候选人', dataIndex: 'candidate_user_id', width: 90, render: (v) => `#${v ?? '—'}` },
     { title: '岗位', dataIndex: 'job_title', render: (v) => v ?? '—' },
@@ -289,7 +312,7 @@ function RoundAdmin() {
     {
       title: '操作',
       key: 'action',
-      width: 210,
+      width: 250,
       render: (_, row) => (
         <Space size={8} wrap>
           <a
@@ -300,7 +323,36 @@ function RoundAdmin() {
           >
             详情/反馈
           </a>
+          {(row.status === 'pending' || row.status === 'in_progress') && (
+            <a
+              onClick={() => {
+                setRescheduling(row);
+                rescheduleForm.setFieldsValue({
+                  scheduled_at: row.scheduled_at ? row.scheduled_at.replace('T', ' ').slice(0, 16) : undefined,
+                  mode: row.mode,
+                  location_or_link: row.location_or_link ?? undefined,
+                });
+              }}
+            >
+              改期
+            </a>
+          )}
           {row.status === 'pending' && (
+            <a
+              onClick={async () => {
+                try {
+                  await updateRound(row.id, { status: 'in_progress' });
+                  message.success('已记录开展');
+                  void load();
+                } catch (error) {
+                  message.error(getErrorMessage(error));
+                }
+              }}
+            >
+              记录开展
+            </a>
+          )}
+          {row.status === 'in_progress' && (
             <a
               onClick={async () => {
                 try {
@@ -315,7 +367,7 @@ function RoundAdmin() {
               标记完成
             </a>
           )}
-          {row.status !== 'cancelled' && (
+          {row.status !== 'cancelled' && row.status !== 'completed' && (
             <a
               style={{ color: '#cf1322' }}
               onClick={async () => {
@@ -389,6 +441,24 @@ function RoundAdmin() {
           </Form.Item>
           <Form.Item name="internal_note" label="内部备注（候选人与会看不到）">
             <Input.TextArea rows={2} />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Modal
+        title={rescheduling ? `改期：第 ${rescheduling.round_no} 轮 · ${rescheduling.round_name}` : '改期'}
+        open={!!rescheduling}
+        onOk={() => void submitReschedule()}
+        onCancel={() => setRescheduling(null)}
+      >
+        <Form form={rescheduleForm} layout="vertical">
+          <Form.Item name="scheduled_at" label="时间（YYYY-MM-DD HH:mm）">
+            <Input placeholder="2026-11-10 14:00" />
+          </Form.Item>
+          <Form.Item name="mode" label="方式">
+            <Select options={[{ value: 'onsite', label: '现场' }, { value: 'online', label: '线上' }, { value: 'phone', label: '电话' }]} />
+          </Form.Item>
+          <Form.Item name="location_or_link" label="地点或会议链接">
+            <Input />
           </Form.Item>
         </Form>
       </Modal>

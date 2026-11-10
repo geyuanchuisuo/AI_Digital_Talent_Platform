@@ -8,7 +8,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 RoundMode = Literal["onsite", "online", "phone"]
-RoundStatus = Literal["pending", "completed"]
+# 状态机：pending → in_progress（记录开展）→ completed；cancelled 独立（需求：没有开展的面试不允许标记已完成反馈）
+RoundStatus = Literal["pending", "in_progress", "completed"]
 Recommendation = Literal["advance", "hold", "reject"]
 
 
