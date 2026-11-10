@@ -150,7 +150,14 @@ class Application(PKMixin, UpdatedAtMixin, Base):
 
     internal_stage 内部状态；external_stage 按 EXTERNAL_STAGE_MAP 随内部流程
     自动更新（人工修正留痕）；终态的 result_category（录用/未录用）经 HR 确认
-    后才对外发布。简历快照以 resume_file_id 引用原件。
+    后才对外发布。
+
+    A08：`input_snapshot_json` 是**创建时一次性冻结的申请输入值拷贝**（岗位/JD
+    条件、人才档案、简历原件与解析结果），不是外键引用。岗位、JD 或档案后续
+    变更一律不得回写本列；历史申请据此复现当时的评分依据（需求 §73/§201/
+    §280）。`input_snapshot_at` 记录冻结时刻；迁移前的历史行两列均可为 NULL。
+    面试/邀约等过程引用由 C 归属 `interview_rounds.application_id` 等外键
+    承载，不重复冻进本快照。
     """
 
     __tablename__ = "applications"
@@ -177,4 +184,7 @@ class Application(PKMixin, UpdatedAtMixin, Base):
     stage_updated_by: Mapped[int | None] = mapped_column(PK_TYPE, nullable=True)
     stage_updated_at: Mapped[datetime | None] = mapped_column(nullable=True)
     closed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    # A08 申请输入快照：创建时冻结，之后只读；NULL 表示迁移前的历史申请。
+    input_snapshot_json: Mapped[dict | None] = mapped_column(JSONDict, nullable=True)
+    input_snapshot_at: Mapped[datetime | None] = mapped_column(nullable=True)
     created_by: Mapped[int | None] = mapped_column(PK_TYPE, nullable=True)

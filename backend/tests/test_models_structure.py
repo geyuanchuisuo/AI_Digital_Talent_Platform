@@ -267,7 +267,8 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "id", "talent_profile_id", "job_profile_id", "job_profile_version",
         "resume_file_id", "internal_stage", "external_stage", "result_category",
         "result_confirmed_by", "stage_reason", "stage_updated_by",
-        "stage_updated_at", "closed_at", "created_by", "created_at", "updated_at",
+        "stage_updated_at", "closed_at", "input_snapshot_json", "input_snapshot_at",
+        "created_by", "created_at", "updated_at",
     },
     "talent_profile_questions": {"id", "person_id", "profile_version", "asked_by", "status", "snapshot_json", "created_at"},
     "training_courses": {
