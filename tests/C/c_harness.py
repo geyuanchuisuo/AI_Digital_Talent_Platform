@@ -44,7 +44,7 @@ if "jose" not in sys.modules:
 
 from fastapi import Depends, FastAPI, Request  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
-from sqlalchemy import BigInteger, create_engine, text  # noqa: E402
+from sqlalchemy import BigInteger, create_engine, select, text  # noqa: E402
 from sqlalchemy.ext.compiler import compiles  # noqa: E402
 from sqlalchemy.orm import Session, sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
@@ -55,9 +55,10 @@ def _sqlite_bigint_as_integer(type_, compiler, **kwargs):  # noqa: ANN001
     return "INTEGER"
 
 from app.api.deps import get_current_user  # noqa: E402
+from app.core.auth.scope import ROLE_CODES  # noqa: E402
 from app.core.errors import BizError, register_exception_handlers  # noqa: E402
 from app.database import Base, get_db  # noqa: E402
-from app.models import User  # noqa: E402
+from app.models import SysRole, SysUserRole, User  # noqa: E402
 from app.modules.assessments.registry import ALL_ROUTERS  # noqa: E402
 from app.modules.assessments.registry_models import ALL_MODELS  # noqa: E402
 # C 培训/测评会向 D 域 notifications 表写入事件；测试库需一并建表
@@ -80,6 +81,30 @@ CREATE TABLE users (
 )
 """
 
+# A06 角色门禁以 sys_user_roles 聚合为准；system 域模型的 UpdatedAtMixin 仅适用
+# MySQL（server_default 含 ON UPDATE），SQLite 下须按同结构手写 DDL。
+ROLES_DDL = """
+CREATE TABLE sys_roles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code VARCHAR(64) NOT NULL UNIQUE,
+    name VARCHAR(120) NOT NULL,
+    description VARCHAR(500),
+    data_scope VARCHAR(20) NOT NULL DEFAULT 'self',
+    status VARCHAR(20) NOT NULL DEFAULT 'active',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+)
+"""
+
+USER_ROLES_DDL = """
+CREATE TABLE sys_user_roles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    role_id INTEGER NOT NULL,
+    UNIQUE (user_id, role_id)
+)
+"""
+
 
 class Harness:
     """独立 SQLite 测试应用；每个测试实例互不影响。"""
@@ -92,10 +117,18 @@ class Harness:
         )
         with self.engine.begin() as connection:
             connection.execute(text(USERS_DDL))
+            connection.execute(text(ROLES_DDL))
+            connection.execute(text(USER_ROLES_DDL))
         Base.metadata.create_all(
             self.engine, tables=[model.__table__ for model in ALL_MODELS] + [Notification.__table__]
         )
         self.SessionLocal = sessionmaker(bind=self.engine, expire_on_commit=False)
+        # A06 角色门禁的服务层入口（require_management_guard）读取全局
+        # app.database.SessionLocal；测试须替换为内存 SQLite，否则会尝试连接
+        # 真实 MySQL 并因查不到角色表而把所有账号判为 personal。
+        import app.database as _app_database
+
+        _app_database.SessionLocal = self.SessionLocal
 
         app = FastAPI()
         register_exception_handlers(app)
@@ -138,6 +171,25 @@ class Harness:
                 is_active=1,
             )
             db.add(user)
+            db.flush()
+            # A06 门禁以 sys_user_roles 聚合为准（deny-by-default）：
+            # "admin" 简值映射为 system_admin，其余六类角色代码原样绑定，
+            # 未知值仅保留 users.role 简值（回退路径按 personal 处理）。
+            bind_code = {"admin": "system_admin"}.get(role, role if role in ROLE_CODES else None)
+            if bind_code is not None:
+                role_row = db.execute(
+                    select(SysRole).where(SysRole.code == bind_code)
+                ).scalar_one_or_none()
+                if role_row is None:
+                    role_row = SysRole(
+                        code=bind_code,
+                        name=bind_code,
+                        data_scope="all" if bind_code in ("system_admin", "hr") else "dept",
+                        status="active",
+                    )
+                    db.add(role_row)
+                    db.flush()
+                db.add(SysUserRole(user_id=user.id, role_id=role_row.id))
             db.commit()
             db.refresh(user)
             return user
