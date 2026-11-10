@@ -47,6 +47,56 @@ from app.core.auth.scope import get_account_scope
 
 router = APIRouter(prefix="/api/talents", tags=["talents"])
 
+from pydantic import BaseModel, Field
+
+
+class ProfileQuestionRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=1000)
+    version: int | None = Field(default=None, ge=1)
+
+
+class BatchQuestionRequest(BaseModel):
+    person_ids: list[int] = Field(min_length=1,max_length=20)
+    question: str = Field(min_length=1,max_length=1000)
+
+
+@router.post('/questions/batch', dependencies=[Depends(require_manager)])
+def ask_batch_questions(payload: BatchQuestionRequest, user: CurrentUser, scope: AccountScopeDep,
+                        db: Annotated[Session, Depends(get_db)]):
+    from app.modules.talents.qa_service import ask_batch
+    return ok(ask_batch(db,payload.person_ids,payload.question,user_id=user.id,scope=scope))
+
+
+@router.post("/{talent_id}/questions", dependencies=[Depends(require_profile_reader)])
+def ask_profile_question(talent_id: int, payload: ProfileQuestionRequest,
+                         user: CurrentUser, scope: AccountScopeDep,
+                         db: Annotated[Session, Depends(get_db)]):
+    from app.modules.talents.qa_service import ask
+    return ok(ask(db, talent_id, payload.question, user_id=user.id,
+                  scope=scope, version=payload.version))
+
+
+@router.post('/{talent_id}/questions/index', dependencies=[Depends(require_manager),Depends(require_profile_reader)])
+def refresh_question_index(talent_id: int, user: CurrentUser, scope: AccountScopeDep,
+                           db: Annotated[Session, Depends(get_db)]):
+    from app.modules.talents.history import save_version
+    from app.modules.talents.qa_index import retrieve
+    from app.modules.talents.qa_sources import chunks
+    from app.modules.talents.qa import QAError
+    current=talent_service.get_person_snapshot(db,talent_id,scope=scope)
+    if current['status']!='ready':raise BizError(409,'档案尚不可用')
+    profile=talent_service._require_profile(db,talent_id,lock=True)
+    version=save_version(db,profile,'reparse',changed_by=user.id)
+    db.commit()
+    snapshot=talent_service.get_person_snapshot(db,talent_id,version=version,scope=scope)
+    try:
+        retrieve(snapshot,'档案原文')
+        count=len(chunks(snapshot))
+    except (QAError,ValueError) as exc:
+        raise BizError(503,'全文索引未完成，可重试') from exc
+    return ok({'profile_version':version,'chunks':count,
+               'source_coverage':'frozen_pages' if snapshot.get('source_pages') else 'legacy_evidence'})
+
 DUPLICATE_STATUSES = ("pending", "merged", "kept")
 
 

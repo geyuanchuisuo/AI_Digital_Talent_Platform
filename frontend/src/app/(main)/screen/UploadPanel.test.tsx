@@ -2,12 +2,13 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import UploadPanel from './UploadPanel';
-import { requeueTask, uploadBatch } from './api';
+import { requeueTask, uploadBatch, fetchUploadOptions } from './api';
 import type { BatchUploadData } from './types';
 
 vi.mock('./api', () => ({
   uploadBatch: vi.fn(),
   requeueTask: vi.fn(),
+  fetchUploadOptions: vi.fn(),
 }));
 
 const uploadBatchMock = vi.mocked(uploadBatch);
@@ -46,8 +47,15 @@ function selectFile(container: HTMLElement, name = '张三.pdf'): void {
 
 describe('UploadPanel', () => {
   beforeEach(() => {
+    vi.mocked(fetchUploadOptions).mockResolvedValue({allowed_ext:['pdf','docx','png','jpg'], max_mb:12, ocr_enabled:true});
     uploadBatchMock.mockReset();
     requeueTaskMock.mockReset();
+  });
+
+  it('uses image formats and upload limits supplied by the backend', async () => {
+    const {container}=render(<UploadPanel onChanged={vi.fn()} />);
+    await waitFor(() => expect(container.querySelector('input[type="file"]')?.getAttribute('accept')).toContain('.png'));
+    expect(screen.getByText(/12MB/)).toBeTruthy();
   });
 
   it('上传成功展示批次号、重复项与拒绝项，可对失败原任务重新入队', async () => {

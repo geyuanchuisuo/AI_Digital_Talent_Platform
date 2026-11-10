@@ -579,7 +579,10 @@ def _delete_vector_quietly(talent_id: int) -> bool:
     from app.core.milvus_store import delete_profile_vector
 
     try:
-        return delete_profile_vector(talent_id)
+        profile_deleted = delete_profile_vector(talent_id)
+        from app.modules.talents.qa_index import remove_person
+        remove_person(talent_id)
+        return profile_deleted
     except Exception:  # noqa: BLE001 - 向量删除失败不阻塞软删（数据库 §5.1）
         logger.exception("画像 %s 向量删除异常（按失败处理）", talent_id)
         return False
@@ -1065,7 +1068,7 @@ def get_person_evidence(
     cursor: str | None = None,
     limit: int = 20,
 ) -> dict[str, Any]:
-    """阶段 1 证据占位：明确 unavailable，不伪造出处、不返回 404。"""
+    """读取已保存的授权版本证据；不可用时明确 unavailable，不伪造出处。"""
     ids = _normalize_person_ids(person_ids, EVIDENCE_MAX_BATCH)
     normalized_scope = _normalize_scope(scope)
     _ensure_scope(normalized_scope, ids)

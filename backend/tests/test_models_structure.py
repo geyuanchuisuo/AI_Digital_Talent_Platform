@@ -62,8 +62,8 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     "talent_profile_versions": {"id", "talent_profile_id", "version", "change_type", "profile_snapshot_json", "changed_by", "created_at"},
     "talent_field_evidence": {"id", "talent_profile_id", "profile_version", "field_name", "resume_file_id", "source_page", "source_text", "source", "confidence", "review_status", "created_at"},
     "talent_profile_edits": {"id", "talent_profile_id", "profile_version", "field_name", "old_value", "new_value", "edited_by", "created_at"},
-    "resume_pages": {"id", "resume_file_id", "page_no", "text_content", "ocr_engine", "confidence", "created_at"},
-    "parse_attempts": {"id", "parse_task_id", "attempt_no", "status", "stage", "error_message", "started_at", "finished_at"},
+    "resume_pages": {"id", "resume_file_id", "page_no", "text_content", "ocr_engine", "confidence", "source_type", "quality_status", "error_message", "created_at"},
+    "parse_attempts": {"id", "parse_task_id", "attempt_no", "status", "stage", "error_message", "started_at", "finished_at", "trace_json"},
     "users": {
         "id", "username", "password_hash", "display_name", "role", "person_id",
         "is_active", "last_login_at", "created_at", "updated_at",
@@ -267,9 +267,10 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "result_confirmed_by", "stage_reason", "stage_updated_by",
         "stage_updated_at", "closed_at", "created_by", "created_at", "updated_at",
     },
+    "talent_profile_questions": {"id", "person_id", "profile_version", "asked_by", "status", "snapshot_json", "created_at"},
     "training_courses": {
         "id", "title", "description", "material_url", "dimension_names_json",
-        "status", "version", "feedback_note", "feedback_note_at",
+        "status", "version", "feedback_note", "feedback_note_at", "capacity",
         "created_by", "updated_by", "created_at", "updated_at",
     },
     "training_sessions": {
@@ -297,7 +298,7 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     },
     "training_plan_items": {
         "id", "plan_id", "plan_version", "course_id", "course_snapshot_json",
-        "dimension_name", "reason", "sort_order", "created_at", "updated_at",
+        "dimension_name", "reason", "sort_order", "created_at", "updated_at", "due_date",
     },
     "training_plan_versions": {
         "id", "plan_id", "version", "status", "snapshot_json", "note",
@@ -309,7 +310,7 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "created_at", "updated_at",
     },
     "training_learning_evidence": {
-        "id", "learning_record_id", "employee_user_id", "evidence_type",
+        "id", "learning_record_id", "employee_user_id", "evidence_type", "evidence_key",
         "payload_json", "score", "verified_by", "created_at", "updated_at",
     },
     "training_enrollments": {
@@ -474,6 +475,7 @@ EXPECTED_UNIQUE: dict[str, set[str]] = {
     "training_plan_items": {"uk_plan_version_course"},
     "training_plan_versions": {"uk_plan_version"},
     "training_learning_records": {"uk_learning_item_employee"},
+    "training_learning_evidence": {"uk_evidence_record_key"},
     "inventory_development_plans": {"uk_idp_review"},
     "notifications": {"uk_notifications_idempotency"},
     "workflow_engine_runs": {"uk_workflow_engine_runs_thread"},
@@ -528,9 +530,9 @@ def ddl(model) -> str:
 
 
 def test_exactly_70_tables_and_no_phase2_table():
-    assert len(TABLE_NAMES) == 83
-    assert len(MODEL_CLASSES) == 83
-    assert len(Base.metadata.tables) == 83
+    assert len(TABLE_NAMES) == 84
+    assert len(MODEL_CLASSES) == 84
+    assert len(Base.metadata.tables) == 84
     assert set(TABLE_NAMES) == set(EXPECTED_COLUMNS)
     # D-7 缓办：一期不建 llm_score_cache
     assert "llm_score_cache" not in Base.metadata.tables
@@ -742,6 +744,13 @@ def test_json_columns_are_mutable():
 
 
 def test_no_physical_foreign_keys():
-    """§1：不建物理外键，一致性由 service 层同事务保证。"""
-    for table in Base.metadata.tables.values():
-        assert not table.foreign_keys, f"{table.name} 不应有物理外键"
+    """仅允许 C_0004 明确接入的申请外键，其他一致性仍由 service 保证。"""
+    actual = {
+        (table.name, key.parent.name, key.target_fullname)
+        for table in Base.metadata.tables.values()
+        for key in table.foreign_keys
+    }
+    assert actual == {
+        ('interview_rounds', 'application_id', 'applications.id'),
+        ('ai_interview_sessions', 'application_id', 'applications.id'),
+    }

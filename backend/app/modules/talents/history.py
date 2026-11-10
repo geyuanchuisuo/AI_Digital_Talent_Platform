@@ -49,8 +49,13 @@ def save_version(db, profile, change_type, *, changed_by=None):
     snapshot['_audit_profile'] = _json({key: getattr(profile, column) for key, column in FIELD_COLUMNS.items()})
     snapshot['sources'] = [_json(svc._parsed_snapshot(parsed, db.get(ResumeFile, parsed.resume_file_id)))
         for parsed in db.scalars(select(ParsedResume).where(ParsedResume.talent_profile_id == profile.id).order_by(ParsedResume.id))]
+    from app.modules.talents.qa_sources import freeze_pages
+    snapshot['source_pages'] = freeze_pages(db, profile.id)
     previous = current_version(db, profile.id)
     if previous and change_type != 'restore' and _content(previous.profile_snapshot_json) == _content(snapshot):
+        if snapshot['status'] == 'ready':
+            from app.modules.talents.evidence import collect_evidence
+            collect_evidence(db, profile, previous.version)
         return previous.version
     version = previous.version + 1 if previous else 1
     snapshot.update(profile_version=version, version_source='persisted')
@@ -89,6 +94,9 @@ def save_version(db, profile, change_type, *, changed_by=None):
                     field_name=field, old_value=json.dumps(old.get(field), ensure_ascii=False),
                     new_value=json.dumps(new.get(field), ensure_ascii=False), edited_by=changed_by))
     db.flush()
+    if snapshot['status'] == 'ready':
+        from app.modules.talents.evidence import collect_evidence
+        collect_evidence(db, profile, version)
     return version
 
 
@@ -104,10 +112,17 @@ def read_version(db, person_id, version=None):
     evidence = db.scalars(select(TalentFieldEvidence).where(
         TalentFieldEvidence.talent_profile_id == person_id,
         TalentFieldEvidence.profile_version == row.version).order_by(TalentFieldEvidence.id)).all()
-    snapshot['evidence'] = [dict(field_path=e.field_name, file_id=e.resume_file_id,
-        page_no=e.source_page, snippet=e.source_text, source=e.source,
-        confidence=float(e.confidence) if e.confidence is not None else None,
-        review_status=e.review_status) for e in evidence]
+    snapshot['evidence'] = []
+    for e in evidence:
+        source_file = db.get(ResumeFile, e.resume_file_id)
+        document_text = source_file is not None and source_file.file_ext == 'docx'
+        snapshot['evidence'].append(dict(field_path=e.field_name, file_id=e.resume_file_id,
+            filename=source_file.filename if source_file else None,
+            page_no=None if document_text else e.source_page,
+            locator_type='document_text' if document_text else 'page',
+            snippet=e.source_text, source=e.source,
+            confidence=float(e.confidence) if e.confidence is not None else None,
+            review_status=e.review_status))
     snapshot['evidence_status'] = 'available' if evidence else 'unavailable'
     return snapshot
 

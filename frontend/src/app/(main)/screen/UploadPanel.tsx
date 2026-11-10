@@ -16,9 +16,10 @@
 import { InboxOutlined } from '@ant-design/icons';
 import { Alert, Button, Card, List, Space, Tag, Typography, Upload, message } from 'antd';
 import type { UploadFile } from 'antd';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
-import { requeueTask, uploadBatch } from './api';
+import { requeueTask, uploadBatch, fetchUploadOptions } from './api';
+import type { UploadOptions } from './api';
 import type { BatchUploadData, DuplicateItem } from './types';
 import { formatBatchId, statusMeta } from './utils';
 
@@ -30,6 +31,16 @@ export interface UploadPanelProps {
 }
 
 export default function UploadPanel({ onChanged }: UploadPanelProps) {
+  const [options, setOptions] = useState<UploadOptions | null>(null);
+  const [optionsError, setOptionsError] = useState(false);
+  const [optionsReload, setOptionsReload] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setOptionsError(false);
+    void fetchUploadOptions().then(data => {if (active) setOptions(data);})
+      .catch(() => {if (active) {setOptions(null); setOptionsError(true);}});
+    return () => {active = false;};
+  }, [optionsReload]);
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState<BatchUploadData | null>(null);
@@ -77,7 +88,7 @@ export default function UploadPanel({ onChanged }: UploadPanelProps) {
     <Card title="批量上传简历">
       <Dragger
         multiple
-        accept=".pdf,.docx"
+        accept={options ? options.allowed_ext.map(ext => `.${ext}`).join(',') : '.pdf,.docx'}
         fileList={fileList}
         beforeUpload={() => false}
         onChange={({ fileList: next }) => setFileList(next)}
@@ -88,18 +99,23 @@ export default function UploadPanel({ onChanged }: UploadPanelProps) {
         </p>
         <p className="ant-upload-text">点击或拖拽简历到此处</p>
         <p className="ant-upload-hint">
-          支持 PDF / DOCX，单文件 ≤20MB；内容已存在过的文件会被自动识别，不会重复入库
+          {options ? `支持 ${options.allowed_ext.map(ext => ext.toUpperCase()).join(' / ')}，单文件 ≤${options.max_mb}MB` : '正在读取上传格式与大小限制…'}
+          ；内容已存在过的文件不会重复入库
+          {options?.max_pages && `；PDF 最多处理 ${options.max_pages} 页，超出会标记截断`}
         </p>
       </Dragger>
 
       <Space style={{ marginTop: 12 }} wrap>
-        <Button type="primary" loading={uploading} onClick={handleUpload}>
+        <Button type="primary" loading={uploading} disabled={!options || optionsError} onClick={handleUpload}>
           上传并解析
         </Button>
         <Typography.Text type="secondary">
           {fileList.length > 0 ? `已选 ${fileList.length} 个文件` : '上传后自动进入解析队列'}
         </Typography.Text>
       </Space>
+
+      {optionsError && <Alert type="warning" showIcon message="暂时无法读取上传限制，请重试"
+        action={<Button size="small" onClick={() => setOptionsReload(value => value + 1)}>重试</Button>} />}
 
       {result && (
         <Alert

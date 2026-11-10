@@ -101,6 +101,19 @@ def validate_content(ext: str, data: bytes) -> str | None:
         return None if _looks_like_pdf(data) else "文件内容不是有效的 PDF"
     if ext == "docx":
         return None if _looks_like_docx(data) else "文件内容不是有效的 DOCX"
+    if ext in {"png", "jpg", "jpeg"}:
+        from PIL import Image, UnidentifiedImageError
+        try:
+            with Image.open(io.BytesIO(data)) as image:
+                expected = "PNG" if ext == "png" else "JPEG"
+                if image.format != expected:
+                    return "图片内容与扩展名不一致"
+                if image.width * image.height > 40_000_000:
+                    return "图片像素超过安全上限（4000 万）"
+                image.verify()
+        except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
+            return "文件内容不是有效的图片"
+        return None
     return "非法文件类型"
 
 

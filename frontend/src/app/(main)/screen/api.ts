@@ -33,6 +33,17 @@ export interface QueueQuery {
   page_size: number;
 }
 
+export interface UploadOptions {
+  allowed_ext: string[];
+  max_mb: number;
+  ocr_enabled: boolean;
+  max_pages?: number;
+}
+
+export function fetchUploadOptions(): Promise<UploadOptions> {
+  return get<UploadOptions>('/resumes/upload-options');
+}
+
 export function fetchQueue(query: QueueQuery): Promise<QueueListData> {
   return get<QueueListData>('/resumes/queue', { params: query });
 }

@@ -113,11 +113,20 @@ def _reject_all_message(rejected: list[dict]) -> str:
     return f"无任何有效文件：{detail}" if detail else "无任何有效文件"
 
 
+def upload_options():
+    from app.service.extract_service import SUPPORTED_EXTS
+    allowed = [ext for ext in settings.upload_allowed_ext_list if ext in SUPPORTED_EXTS]
+    if not settings.ocr_enabled:
+        allowed = [ext for ext in allowed if ext not in {"png", "jpg", "jpeg"}]
+    return {"allowed_ext": allowed, "max_mb": settings.upload_max_mb,
+            "ocr_enabled": settings.ocr_enabled, "max_pages": settings.ocr_max_pages}
+
+
 def save_batch(db: Session, files: list[UploadFile], uploaded_by: int) -> dict:
     """校验 + 去重 + 落盘 + 建行；返回 `BatchUploadData` 的 dict（由 api 层包 `ok()`）。"""
     # 整批共用一个 ULID = 批次标识；不落批次表（D-M），汇总时按该字段 GROUP BY
     upload_batch_id = str(ULID())
-    allowed_ext = set(settings.upload_allowed_ext_list)
+    allowed_ext = set(upload_options()["allowed_ext"])
     max_bytes = _max_bytes()
 
     accepted = 0

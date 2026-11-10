@@ -151,3 +151,13 @@ class TalentProfileEdit(PKMixin, CreatedAtMixin, Base):
     old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
     new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
     edited_by: Mapped[int] = mapped_column(PK_TYPE, nullable=False)
+
+
+class ProfileQuestion(PKMixin, CreatedAtMixin, Base):
+    __tablename__ = 'talent_profile_questions'
+    __table_args__ = (MYSQL_TABLE_OPTIONS,)
+    person_id: Mapped[int] = mapped_column(PK_TYPE, nullable=False, index=True)
+    profile_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    asked_by: Mapped[int] = mapped_column(PK_TYPE, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    snapshot_json: Mapped[dict] = mapped_column(JSONDict, nullable=False)

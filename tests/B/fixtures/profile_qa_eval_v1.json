@@ -1,0 +1,13 @@
+{
+  "version": "synthetic-person592-v1",
+  "scope": "single synthetic resume; smoke evaluation only, not a representative accuracy benchmark",
+  "person_id": 592,
+  "cases": [
+    {"question": "档案提到哪些编程语言？", "expected_contains": "Python"},
+    {"question": "工作单位叫什么？", "expected_contains": "合成科技"},
+    {"question": "开始工作的年份？", "expected_contains": "2021"},
+    {"question": "工作结束年份？", "expected_contains": "2025"},
+    {"question": "是否有驾驶证？", "expected_status": "insufficient_evidence"},
+    {"question": "出生年份是什么？", "expected_status": "insufficient_evidence"}
+  ]
+}
