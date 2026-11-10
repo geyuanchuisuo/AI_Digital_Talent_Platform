@@ -28,6 +28,9 @@ from app.models import (
     MetricRegistry,
     ProjectDemand,
     SnapshotExportAudit,
+    SysRole,
+    SysUserRole,
+    User,
 )
 from app.modules.analytics import service
 from app.modules.analytics.models import seed_metric_registry
@@ -44,6 +47,11 @@ CORE_TABLES = (
     MetricRegistry.__table__,
     AnalyticsQuerySnapshot.__table__,
     SnapshotExportAudit.__table__,
+    User.__table__,
+    # sys_roles/sys_user_roles 建空表：get_role_codes 的 sys_user_roles 查询须成功
+    # 返回空才回退 users.role（P3 修复，见 UPD-MASTER-20261110-203044）。
+    SysRole.__table__,
+    SysUserRole.__table__,
 )
 
 
@@ -85,6 +93,14 @@ def env(tmp_path, monkeypatch):
     Base.metadata.create_all(engine, tables=CORE_TABLES)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     seed_metric_registry(engine)
+
+    # 门禁 get_role_codes 回退 users.role 需要真实 User 行（A06-1 后按 id 查库判定；
+    # P3 修复：替身用户的角色须落库，否则一律 personal）。
+    with factory() as db:
+        db.add(User(id=2, username="hr1", password_hash="x", role="hr"))
+        db.add(User(id=4, username="hr2", password_hash="x", role="hr"))
+        db.add(User(id=5, username="p", password_hash="x", role="personal", person_id=1))
+        db.commit()
 
     monkeypatch.setattr(service, "_replica_engine", engine)
     monkeypatch.setattr(service, "SessionLocal", factory)

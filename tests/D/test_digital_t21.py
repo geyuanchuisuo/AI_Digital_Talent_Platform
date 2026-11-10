@@ -30,6 +30,8 @@ from app.models import (
     AnalyticsQuerySnapshot,
     ParseTask,
     ScreenBatch,
+    SysRole,
+    SysUserRole,
     TrainingLearningRecord,
     TrainingPlanItem,
     User,
@@ -46,6 +48,10 @@ U_PERSONAL = SimpleNamespace(id=3, role="personal", person_id=1)
 
 TABLES = (
     User.__table__,
+    # sys_roles/sys_user_roles 建空表：get_role_codes 的 sys_user_roles 查询须成功
+    # 返回空才回退 users.role（P3 修复，见 UPD-MASTER-20261110-203044）。
+    SysRole.__table__,
+    SysUserRole.__table__,
     MemberImAccount.__table__,
     DigitalTask.__table__,
     DigitalOutboundRequest.__table__,
@@ -60,12 +66,15 @@ TABLES = (
 
 
 @pytest.fixture()
-def env():
+def env(monkeypatch):
     engine = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
     Base.metadata.create_all(engine, tables=TABLES)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
+    # 门禁 require_management_guard 内部开 app.database.SessionLocal（真实库）——
+    # 重定向到本测试库，角色判定走替身用户（P3 修复）。
+    monkeypatch.setattr("app.database.SessionLocal", factory)
     with factory() as db:
         db.add(User(id=2, username="hr1", password_hash="x", role="hr"))
         db.add(User(id=4, username="hr2", password_hash="x", role="hr"))
