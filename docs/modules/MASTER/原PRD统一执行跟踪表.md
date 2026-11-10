@@ -66,15 +66,15 @@
 | D08 | D | P1 | 定时触发、取消、失败重试与重启恢复 |  | T-D18；f9c4306 状态同步改动 | 部分；最新提交仅静态验证 | 补定时启用审计、失败阶段重试、运行中取消与完整运行测试 |
 | D09 | D | P0 | Dify 私有化及业务对接 |  | docs/updates/D/20261108-041500-T-D05部署与建应用API连通.md:11、13 | 历史记录已有 1.19.0 锁版、测试应用及 Service API 连通；本轮未复验存活，业务对接层/画布映射与升级演练未完成 | 复核部署/锁版，补业务应用、发布回滚/权限、画布与业务运行；不再把版本锁定/测试应用误写为未做 |
 | D10 | D | P0 | 可视化节点/连线画布与 Dify 对接 |  | workflows/page.tsx:467 当前 JSON 整图；T-D16待做 | 缺口 | 真实可视化编辑/校验/回传/版本对账，不能只交 JSON 输入框 |
-| D11 | D | P1 | Skills 组件库与版本发布 |  | T-D19未完成 | 待实现 | schema/参数/工具绑定、审核发布、编排引用及审计 |
-| D12 | D/A | P1 | AI 中台：模型/Prompt/Agent/调度/运行管理 |  | T-D20未完成 | 待实现 | 逐块真实管理入口、授权、版本、用量/错误追溯 |
+| D11 | D | P1 | Skills 组件库与版本发布 | × | **T-D19**（D 记录 `UPD-D-20261109-133022-T-D19-Skills组件库`）：`backend/app/modules/workflows/skills_{router,service}.py`（组件受控生命周期：创建→审核→发布→引用，含 schema/参数/工具绑定）；`main.py:217-220` 注册 `/api/workflows/skills`；`tests/D/test_workflow_skills_t19.py` 10 例，定向 **10 passed**、`tests/D/` 全量 **177 passed / 12 skipped** | 隔离测试已达（SQLite 夹具）；当时 `test_models_structure.py` 3 处失败为 **C_0006 预存在问题**（归属 C，与 Skills 无关，D 已如实登记）；真实 MySQL 与浏览器未验 | 编排引用与审计的真实联调验收；与 D05 流程定义联验版本引用与停用后行为 |
+| D12 | D/A | P1 | AI 中台：模型/Prompt/Agent/调度/运行管理 | × | **T-D20**（D 记录 `UPD-D-20261109-150506-T-D20-AI中台`）：`backend/app/modules/dashboard/{models,service,router}.py`（AiProvider / AiPromptVersion / AiCallLog 三 ORM + 白名单枚举；供应商 CRUD/启停/默认切换 CAS 唯一、Prompt 发布后不可变 + 同 name 唯一生效版、record_call 审计旁路、usage_summary 看板）；`/api/ai-platform` 10 端点（`main.py:222-225`）；迁移 `D_0011_ai_platform` 挂 `D_0010`；`llm_client.py` 增 `provider_config_factory`（启停/切换即时生效）+ 成功/失败两路 `_record_call` 埋点；`tests/D/test_ai_platform_t20.py` 12 例 | 隔离测试已达：定向 + LLM 客户端既有回归（`test_llm_client_unit` / `test_llm_client_fake_server`）**46 passed**；`llm_client` 为公共唯一 LLM 入口，D 已回归其 34 例无破坏；真实模型与浏览器未验 | 逐块管理入口的真实联调与授权验收（用量/错误追溯的浏览器验收待做）；调度/运行管理的编排联动待与 D05/D08 联验 |
 | D13 | D/A/B/C | P1 | 指标目录及首批六类统计 |  | backend/app/modules/analytics/service.py:255；docs/modules/D/指标目录.md:4 | 六卡中2类有查询实现（需求缺口、匹配参考达线），另有活跃岗位切片，不是3/6；卡1人工推进子项覆盖仍需补 | 各域登记口径，补解析/测评/正式课程完成/学习自报并分离状态；缺口卡拒答而非编造 |
 | D14 | D | P0 | Vanna.ai 原生自由问数 |  | analytics/nl2sql/generator.py:7 当前 OpenAICompatGenerator | 与严格Vanna基线存在偏差 | 接 Vanna 原生，不以普通模型适配器/安装包替代集成 |
 | D15 | D | P1 | 候选SQL校验、受控执行与查询审计 | × | analytics/nl2sql/{validator,executor,service}.py | 代码存在；真实生成/权限全链待验收 | 验证只读、表/列/行权限、上限、超时与拒答，不执行未审SQL |
 | D16 | D | P1 | 多维图表及图形进入同快照 DOCX/PDF |  | backend/app/modules/analytics/charts.py:17；backend/app/modules/reports/service.py:147、234 | 部分：已支持登记指标的数值卡/柱图；DOCX/PDF 写入的是“图表数据”表，未嵌入图形；自由问数图表链待补 | 补真实图形渲染与导出；同快照数值/图表一致、中文/长表、权限与重试验收；基础导出见 D23 |
 | D17 | D | P1 | SSE 任务进度端点 | × | backend/app/core/tasks/events.py；main.py已挂载 | 代码实现；权限/重连/终态运行验证待做 | 验证Last-Event-ID边界及降级，不宣称逐事件历史重放 |
 | D18 | D/A/B/C | P1 | 通知服务基础 | × | backend/app/modules/notifications/ | 模型/路由/生产方函数存在；各事件投递非全部闭环 | 逐事件核对接收权限、幂等、失败重试及生产方接线 |
-| D19 | D/A | P1 | 双端真实工作台与缺口告警 |  | T-D22/23/24未完整完成 | 缺口 | 真实数量经授权结果服务读取；可回到业务记录核对 |
+| D19 | D/A | P1 | 双端真实工作台与缺口告警 | × | **T-D22/23**（D 记录 `UPD-D-20261109-173107-T-D22管理员工作台` / `UPD-D-20261109-193831-T-D23个人工作台`）：**管理端** `dashboard/overview.py`（admin_overview 六类计数，`_demand_gaps` 复用 analytics `_GAP_SQL` 同口径）+ `GET /admin-overview` + `frontend/src/app/(main)/dashboard/{api,page,page.test}.tsx` 六卡页面；**个人端** `dashboard/me.py`（me_overview 三要素：待测评 / 培训 assigned-only / 已公布结果，`_require_personal` 门禁）+ `GET /me-overview` + `frontend/src/features/dashboard/{me-api,me-dashboard}.tsx` 卡片组件；`tests/D/test_dashboard_{t22,t23}.py` 共 20 例 | 隔离测试已达：t22 **12 passed** + t23 **8 passed**、D 域全量 **209 passed / 12 skipped**；前端 vitest 管理端 4 例 + 个人端 2 例（全量 113 passed 基线）；`AppShell.tsx` 菜单项与 `(person)/home` 挂载为 **A 归属公共布局**（跨归属一行，D 已透明登记，A 集成时可复核）；jsdom 组件测试，真实浏览器/登录态未验 | 真实数量经授权结果服务读取的浏览器验收；可回到业务记录核对；缺口告警与 A05 预警触发的联动待 D07 接线后联验 |
 | D20 | D/A | P2 | 数字员工/企业微信与三类只读场景（V2.6细化） | × | **T-D21**（`52b6d24`）：`backend/app/modules/workflows/digital/` 新增 models（MemberImAccount / DigitalTask / DigitalOutboundRequest 三 ORM + 枚举白名单）、service（三类 collector 全只读：analytics 快照近 24h / parse+screen 队列计数 / workflow waiting + 培训逾期）、router（`/api/workflows/digital` 10 端点）；新迁移 `D_0012_digital_employee` 挂 `D_0011` 成单 head、83 表基线；`main.py` 注册 router（A 公共入口，跨模块）；新增 `tests/D/test_digital_t21.py` **15 例**；新建 [数字员工契约](../../modules/D/数字员工契约.md) v1.0 | 已交付（D 记录 `UPD-D-20261110-024500-T-D21数字员工纯站内版`，`pytest tests/D/test_digital_t21.py` **15 passed**、D 域全量 224 passed / 12 skipped）；**用户 2026-11-10 clarify 选定「方案一纯站内」**——一期不依赖任何 IM 平台凭据，三类只读场景端到端终点是入库 + 站内通知，全程不调 IM API；`member_im_accounts` 一期 manual 登记，channel 预留 wecom/dingtalk/feishu；外发红线已固化（request_outbound 只落 pending、decide_outbound 通过只置 approved 且四眼 403/重复 409、mark_outbound_sent 仅 approved 可置 sent） | 联调与业务验收未达；IM 平台凭据到位后补 oauth 绑定与 adapter（表结构不变）；一期定时未接线 |
 | D21 | D | P1 | 独立 Embedding 适配与1024维校验 | × | backend/app/core/embedding_client.py:109、158；统一需求 §1 | 百炼 text-embedding-v3 适配已有实现；本轮未调用真实服务，不据此称离线推理已交付 | 验证批量/查询向量、维度、失败与凭据隔离；本地推理按 G05 独立验收 |
 | D22 | D/B | P1 | 百炼 gte-rerank 与私有化 bge-reranker 重排 |  | 统一需求 §1；本轮应用源码检索未找到实际重排调用 | 原表漏列；一期必备，不能以 Embedding/Milvus 替代 | 在授权召回后真实重排，保留版本/分数及失败语义；私有化验证本地切换和离线依赖 |
@@ -147,3 +147,19 @@
 **补登未覆盖、仍需各角色回传的条目**（本轮只读核对，未获完整实现证据，故不打 ×）：A03 批次开始冻结档案版本（T-A42 只固定了模型/Prompt 版本与请求级幂等，**不等于** A03 的批次档案冻结语义，两者不可混同）、A11 审批链、A12 真实 AI JD 草稿、A14 员工花名册/任职记录、C08 防挂机与可信学习证据、C09 正式九宫格确认链、C10 发布时冻结题库、D02 限流环境开关（A 已交付 D02-A 但客户模式真实 Redis 串扰未验证）、D07 三类事件完整接线、D09/D10 Dify 业务对接与画布、D14 Vanna 原生问数、B02 OCR、B07/B08 制度与档案 RAG。
 
 **遗留（与同步无关，非本次登记范围）**：A 的 `test_a06_department_scope.py` teardown 混删 id（空库首跑约 12 例假失败）；A→B/D 跨文件向量串扰请求仍打开；D 的 `PROMPT_C_SCHEMA` / `overall_score` 契约待补；主验收库 `ai_talent` 仍 stamp `D_0009_workflow_review` / 73 表，落后 head `A_0011`。
+
+---
+
+## 2026-11-10 第三轮补登（D11 / D12 / D19，基线 `a883222`）
+
+> **为什么补**：用户问「D 角色有哪些可以继续」时逐项核对发现，D11 / D12 / D19 三行仍写「T-D19/20 未完成」「缺口」，但对应代码、路由注册与测试证据均已实核在主干 HEAD（`a883222`）上——属台账滞后而非实现缺口。本轮按用户「可以，继续」的指令补登三行，**只改台账、不改业务代码、不改写 D 的验证结论**。
+
+| 条目 | 补登内容 | 实核依据 |
+| --- | --- | --- |
+| **D11** Skills 组件库与版本发布 | 由「T-D19 未完成·待实现」改为「**×**」：`backend/app/modules/workflows/skills_{router,service}.py`（组件受控生命周期：创建→审核→发布→引用）；`main.py:217-220` 注册 `/api/workflows/skills`；`tests/D/test_workflow_skills_t19.py` 10 例，定向 **10 passed**、`tests/D/` 全量 **177 passed / 12 skipped** | D 记录 `UPD-D-20261109-133022-T-D19-Skills组件库`；文件与路由注册在 HEAD 实核存在 |
+| **D12** AI 中台 | 由「T-D20 未完成·待实现」改为「**×**」：`backend/app/modules/dashboard/{models,service,router}.py`（AiProvider / AiPromptVersion / AiCallLog 三 ORM；供应商 CRUD/启停/默认切换 CAS、Prompt 发布后不可变、record_call 审计旁路、usage_summary 看板）；`/api/ai-platform` 10 端点（`main.py:222-225`）；迁移 `D_0011_ai_platform` 挂 `D_0010`；`llm_client.py` 增 `provider_config_factory` + 成功/失败两路 `_record_call` 埋点；定向 + LLM 客户端回归 **46 passed** | D 记录 `UPD-D-20261109-150506-T-D20-AI中台`；文件、迁移与路由注册在 HEAD 实核存在 |
+| **D19** 双端真实工作台与缺口告警 | 由「T-D22/23/24 未完整完成·缺口」改为「**×**」：**管理端** `dashboard/overview.py`（六类计数，复用 analytics `_GAP_SQL` 同口径）+ `GET /admin-overview` + `frontend/src/app/(main)/dashboard/` 六卡页面；**个人端** `dashboard/me.py`（me_overview 三要素 + `_require_personal` 门禁）+ `GET /me-overview` + `frontend/src/features/dashboard/` 卡片组件；`tests/D/test_dashboard_{t22,t23}.py` 共 20 例（12 + 8 passed），D 域全量 **209 passed / 12 skipped** | D 记录 `UPD-D-20261109-173107-T-D22管理员工作台`、`UPD-D-20261109-193831-T-D23个人工作台`；前后端文件在 HEAD 实核存在 |
+
+**三行共同边界**：均为隔离测试（SQLite 夹具 / jsdom 组件测试）已达，真实 MySQL、真实浏览器与登录态验收未做；`AppShell.tsx` 菜单项与 `(person)/home` 挂载为 A 归属公共布局（D 跨归属透明登记，A 集成时可复核）；「已实现 ×」不等于业务验收完成，接入/验收边界见上表三行的「接入/验证边界」与「下一步/通过条件」列。
+
+**补登后 D 线路未打 × 的条目**（维持原状，待推进或待回传）：D02（限流生效，剩客户模式真实 Redis 串扰复验）、D07（三类事件接线，待 B 生产方）、D08（定时触发/取消/重试完整运行测试）、D09/D10（Dify 业务对接与画布）、D13（指标六类，待 B/C 口径）、D14（Vanna 原生）、D16（图形进 DOCX/PDF）、D22（重排）、D25（智能解读 LLM 增强）。
