@@ -57,6 +57,7 @@ from app.modules.interviews.models import (
 )
 from app.modules.recruitment.models import (
     Application,
+    DemandApprovalRecord,
     JdPublication,
     Project,
     ProjectDemand,
@@ -179,6 +180,7 @@ MODEL_CLASSES: tuple[type[Base], ...] = (
     ProjectGroup,
     Project,
     ProjectDemand,
+    DemandApprovalRecord,
     JdPublication,
     Application,
     UserScopeGrant,
@@ -213,8 +215,9 @@ MODEL_CLASSES: tuple[type[Base], ...] = (
 
 TABLE_NAMES: tuple[str, ...] = tuple(model.__tablename__ for model in MODEL_CLASSES)  # type: ignore[attr-defined]
 
-assert len(TABLE_NAMES) == 84, f"一期 84 张表（70 + 5 B history + 1 B QA + 2 skills + 3 中台 + 3 数字员工），实际 {len(TABLE_NAMES)}"
-assert len(set(TABLE_NAMES)) == 84, "表名重复"
+# 一期表数由 EXPECTED_COLUMNS 基线统一对照（tests/test_models_structure.py），此处
+# 不再写死数字：历史上多次因新增一期表而让硬编码计数变成假失败（H-A18 同类教训）。
+assert len(TABLE_NAMES) == len(set(TABLE_NAMES)), "表名重复"
 assert "llm_score_cache" not in TABLE_NAMES, "llm_score_cache 是 D-7 缓办项，一期不建"
 assert "upload_batches" not in TABLE_NAMES, (
     "批次不是实体表（决策 D-M）：靠 resume_files.upload_batch_id 聚合，"

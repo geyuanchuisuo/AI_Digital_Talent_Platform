@@ -19,6 +19,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.auth.scope import get_role_codes
 from app.core.errors import BizError
 from app.models import (
     JobProfile,
@@ -30,8 +31,13 @@ from app.models import (
     TalentProfile,
 )
 from app.modules.recruitment.models import (
+    DEMAND_ANCHOR_FIELDS,
+    DEMAND_DECISIONS,
+    DEMAND_PRIORITIES,
+    DEMAND_REQUIRED_FIELDS,
     DEMAND_STATUSES,
     Application,
+    DemandApprovalRecord,
     JdPublication,
     ProjectDemand,
 )
@@ -40,6 +46,19 @@ RESULT_NOT_FOUND = "资源不存在"
 DEMAND_CONFLICT = "同名同项目的人才需求已存在"
 
 APPLICATION_SNAPSHOT_SCHEMA = "A08-v1"
+DEMAND_APPROVAL_SNAPSHOT_SCHEMA = "A11-v1"
+
+# A11：审批决策对象的字段值拷贝；status（业务生命周期）与 approval_version 只作
+# 上下文记录，不参与「内容是否变更」的判定。
+_DEMAND_SNAPSHOT_FIELDS = (
+    "id", "project_id", "project_group_id", "job_profile_id", "position_name",
+    "headcount", "expected_start_date", "priority", "remark", "status",
+    "approval_version",
+)
+_DEMAND_CONTENT_FIELDS = (
+    "project_id", "project_group_id", "job_profile_id", "position_name",
+    "headcount", "expected_start_date", "priority", "remark",
+)
 
 # 快照字段白名单：只冻结「评分依据与档案输入」，不把账号/审计列带进历史快照。
 _JOB_SNAPSHOT_FIELDS = (
@@ -184,11 +203,188 @@ def update_demand(db: Session, demand_id: int, changes: dict[str, Any], *, user_
         db, changes["position_name"], changes.get("project_id", row.project_id), exclude_id=demand_id
     ):
         raise BizError(409, DEMAND_CONFLICT)
+    # A11：补齐组织锚点时与创建接口保持同一关联校验（无物理外键，service 层保证）。
+    if changes.get("project_id") is not None and db.get(Project, changes["project_id"]) is None:
+        raise BizError(404, "项目不存在")
+
+    # A11：审批状态只能经审批接口变更。业务生命周期 status 的推进不算内容变更，
+    # 但审批中禁止改内容；已批/已驳回的需求改内容会生成新版本并令旧审批失效。
+    content_changed = any(key in _DEMAND_CONTENT_FIELDS for key in changes)
+    if content_changed and row.approval_status == "pending":
+        raise BizError(409, "审批中的需求不可修改内容，请先退回补充或撤回")
+    invalidate = content_changed and row.approval_status in ("approved", "rejected")
+    old_status = row.approval_status
     for key, value in changes.items():
         setattr(row, key, value)
     row.updated_by = user_id
+    if invalidate:
+        row.approval_version += 1
+        row.approval_status = "draft"
+        row.approved_by = None
+        row.approved_at = None
+        # approved_version 保留为「最后一次获批的版本」，与新版本不等即不可匹配。
+        _add_approval_record(
+            db, row,
+            action="revision", from_status=old_status, to_status="draft",
+            user_id=user_id,
+            reason="内容变更触发版本升级，原审批自动失效",
+        )
     db.commit()
     return row
+
+
+# ---- A11 岗位/人才需求审批链（§6.11 步骤 1 + Master 执行表 A11）----
+
+
+def _demand_snapshot(row: ProjectDemand) -> dict[str, Any]:
+    """决策时刻的需求字段值拷贝（A11-v1）；后续编辑不回写已落库的记录。"""
+    return {
+        "schema_version": DEMAND_APPROVAL_SNAPSHOT_SCHEMA,
+        **_snapshot_of(row, _DEMAND_SNAPSHOT_FIELDS),
+    }
+
+
+def _add_approval_record(
+    db: Session,
+    row: ProjectDemand,
+    *,
+    action: str,
+    from_status: str,
+    to_status: str,
+    user_id: int,
+    reason: str | None = None,
+    actor_roles: tuple[str, ...] | None = None,
+    snapshot: dict[str, Any] | None = None,
+) -> DemandApprovalRecord:
+    """只追加一行审批留痕；调用方负责 commit。"""
+    roles = actor_roles if actor_roles is not None else get_role_codes(db, user_id)
+    record = DemandApprovalRecord(
+        demand_id=row.id,
+        demand_version=row.approval_version,
+        action=action,
+        from_status=from_status,
+        to_status=to_status,
+        actor_user_id=user_id,
+        actor_roles=",".join(sorted(set(roles))) or "unknown",
+        reason=reason,
+        snapshot_json=snapshot if snapshot is not None else _demand_snapshot(row),
+    )
+    db.add(record)
+    return record
+
+
+def _missing_required_demand_fields(row: ProjectDemand) -> list[str]:
+    missing: list[str] = []
+    for name in DEMAND_REQUIRED_FIELDS:
+        value = getattr(row, name, None)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            missing.append(name)
+        elif name == "headcount" and (not isinstance(value, int) or value < 1):
+            missing.append(name)
+        elif name == "priority" and value not in DEMAND_PRIORITIES:
+            missing.append(name)
+    if not any(getattr(row, name, None) is not None for name in DEMAND_ANCHOR_FIELDS):
+        missing.append("project_id/project_group_id/job_profile_id")
+    return missing
+
+
+def submit_demand(
+    db: Session, demand_id: int, *, user_id: int, actor_roles: tuple[str, ...], note: str | None = None
+) -> ProjectDemand:
+    """HR 发起提交（draft/rejected → pending）；重复提交 409、缺必填 400。"""
+    row = get_demand(db, demand_id)
+    if row.approval_status == "withdrawn":
+        raise BizError(400, "需求已撤回，不可再提交；须另立需求")
+    if row.approval_status == "pending":
+        raise BizError(409, "需求已在审批中，不可重复提交")
+    if row.approval_status == "approved":
+        raise BizError(400, "需求已审批通过；变更内容会自动生成新版本并回到草稿")
+    missing = _missing_required_demand_fields(row)
+    if missing:
+        raise BizError(400, "提交审批前须补齐必填项：" + "、".join(missing))
+    old_status = row.approval_status
+    _add_approval_record(
+        db, row, action="submit", from_status=old_status, to_status="pending",
+        user_id=user_id, actor_roles=actor_roles, reason=note,
+    )
+    row.approval_status = "pending"
+    db.commit()
+    return row
+
+
+def decide_demand(
+    db: Session, demand_id: int, decision: str, *, user_id: int,
+    actor_roles: tuple[str, ...], reason: str | None = None,
+) -> ProjectDemand:
+    """业务负责人审批（仅 pending 可决定）；重复批准/非待审批 409、四眼 409、原因必填 400。"""
+    row = get_demand(db, demand_id)
+    if decision not in DEMAND_DECISIONS:
+        raise BizError(400, f"decision 仅支持 {' / '.join(DEMAND_DECISIONS)}")
+    if row.approval_status != "pending":
+        raise BizError(409, f"当前审批状态 {row.approval_status}，无可审批决定（重复批准被拒绝）")
+    if decision in ("reject", "return") and not (reason or "").strip():
+        raise BizError(400, "拒绝或退回补充必须填写原因")
+    # 四眼原则：本版本提交人不可自批（按用户 id，而非角色，避免同角色不同账号绕过）。
+    submitter = db.execute(
+        select(DemandApprovalRecord)
+        .where(
+            DemandApprovalRecord.demand_id == row.id,
+            DemandApprovalRecord.demand_version == row.approval_version,
+            DemandApprovalRecord.action == "submit",
+        )
+        .order_by(DemandApprovalRecord.id.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if submitter is not None and submitter.actor_user_id == user_id:
+        raise BizError(409, "四眼原则：本版本提交人不可自行审批")
+
+    old_status = row.approval_status
+    to_status = {"approve": "approved", "reject": "rejected", "return": "draft"}[decision]
+    _add_approval_record(
+        db, row, action=decision, from_status=old_status, to_status=to_status,
+        user_id=user_id, actor_roles=actor_roles, reason=reason,
+    )
+    row.approval_status = to_status
+    if decision == "approve":
+        row.approved_version = row.approval_version
+        row.approved_by = user_id
+        row.approved_at = datetime.now()
+    db.commit()
+    return row
+
+
+def withdraw_demand(
+    db: Session, demand_id: int, *, user_id: int,
+    actor_roles: tuple[str, ...], reason: str,
+) -> ProjectDemand:
+    """撤回需求（终态）；原因必填，撤回后不可再提交或审批。"""
+    row = get_demand(db, demand_id)
+    if not (reason or "").strip():
+        raise BizError(400, "撤回需求必须填写原因")
+    if row.approval_status == "withdrawn":
+        raise BizError(409, "需求已撤回，不可重复撤回")
+    old_status = row.approval_status
+    _add_approval_record(
+        db, row, action="withdraw", from_status=old_status, to_status="withdrawn",
+        user_id=user_id, actor_roles=actor_roles, reason=reason,
+    )
+    row.approval_status = "withdrawn"
+    row.approved_by = None
+    row.approved_at = None
+    db.commit()
+    return row
+
+
+def list_demand_approval_records(db: Session, demand_id: int) -> list[DemandApprovalRecord]:
+    """按时间正序返回该需求的全部审批留痕（只追加，不提供改/删接口）。"""
+    get_demand(db, demand_id)  # 404 语义与其他接口一致
+    return list(
+        db.execute(
+            select(DemandApprovalRecord)
+            .where(DemandApprovalRecord.demand_id == demand_id)
+            .order_by(DemandApprovalRecord.id.asc())
+        ).scalars().all()
+    )
 
 
 def capture_application_input_snapshot(

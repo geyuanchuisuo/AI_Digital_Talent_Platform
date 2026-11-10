@@ -94,6 +94,11 @@ class MatchBatchDetail(BaseModel):
     job_profile_version: int
     config_snapshot: dict[str, Any]
     scope: dict[str, Any]
+    # A03：批次开始冻结输入的摘要，只有数量/版本来源/时间，不回传全量成员输入
+    frozen_inputs: dict[str, Any] = Field(
+        default_factory=dict,
+        description="A03 冻结摘要：available/schema/frozen_count/captured_at/version_sources",
+    )
     status: str
     progress: int
     total: int

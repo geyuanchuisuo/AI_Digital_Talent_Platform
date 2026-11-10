@@ -16,12 +16,21 @@
 5. **T-A42 请求级幂等**：客户端显式 `idempotency_key` 时，同岗位重复请求返回
    原批次（不新建、不重圈人、不重复建结果）；不传键行为零变化——岗位/档案
    变更仍新建一轮。并发靠 `(job_profile_id, idempotency_key)` 唯一约束兜底。
+6. **A03 批次档案冻结**：创建批次时一次性冻结每位成员的**评分输入值拷贝**与
+   B 正式档案版本/内容摘要，写进 `frozen_inputs_json`。worker 与 retry 只读该
+   冻结输入，不再读取当前 `talent_profiles` / `parsed_resumes` 的内容；排队期间
+   人工修订、重新解析、字段变更都不影响本批，历史回读不读取新版本。
+   仅「软删/不存在跳过」仍按当前档案存在性判断（T-24 既有语义）。
+   `config_snapshot_json` 仍只放岗位配置，不混入成员数据（引擎按白名单读它）。
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any, Mapping
 
 from sqlalchemy import select
@@ -32,7 +41,15 @@ from app.config import settings
 from app.core.errors import BizError
 from app.dao import job_profiles as job_dao
 from app.dao import screen as screen_dao
-from app.models import JobProfile, ParsedResume, ResumeFile, ScreenBatch, ScreenResult, TalentProfile
+from app.models import (
+    JobProfile,
+    ParsedResume,
+    ResumeFile,
+    ScreenBatch,
+    ScreenResult,
+    TalentProfile,
+    TalentProfileVersion,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +94,219 @@ def resolve_batch_model_versions(
             "批次快照缺 model_version/prompt_version，按当前配置回退（历史批次无法追溯）"
         )
     return settings.llm_model, settings.prompt_version
+
+
+# --------------------------------------------------------------------------- #
+# A03 批次档案冻结（创建时一次性值拷贝 + 绑定 B 正式版本）
+# --------------------------------------------------------------------------- #
+FREEZE_SCHEMA_VERSION = "A03-v1"
+FREEZE_SOURCE_PERSISTED = "b_persisted"
+FREEZE_SOURCE_BASELINE = "a_baseline"
+
+# B 契约 UPD-B-20261107-002845 §5 的 profile_input 兼容键；只取评分所需子集，
+# 不把 `sources` / `source_pages` 原文整段塞进批次表（体积与泄露边界）。
+_PERSISTED_PROFILE_KEYS = (
+    "name", "degree", "work_years", "skills", "vector_status", "current_title",
+    "expected_title", "tags", "ability_scores", "manual_edited_fields",
+)
+_PERSISTED_PARSED_KEYS = ("educations", "employments", "projects", "skills", "certificates")
+
+
+def _plain(value: Any) -> Any:
+    """把 ORM 行/Decimal/日期/嵌套 JSON 转成纯值拷贝，杜绝引用污染与序列化失败。"""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, datetime):
+        return value.isoformat(timespec="seconds")
+    if isinstance(value, date):
+        # date.isoformat() 不接受 timespec，单独处理避免 TypeError
+        return value.isoformat()
+    if isinstance(value, Mapping):
+        return {str(k): _plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_plain(v) for v in value]
+    return str(value)
+
+
+def _latest_parsed(db: Session, talent_ids: list[int]) -> dict[int, ParsedResume]:
+    """每人取最新一条解析结果（与两个 worker 原有 `_evidence_input` 同口径）。"""
+    if not talent_ids:
+        return {}
+    rows = db.execute(
+        select(ParsedResume)
+        .where(ParsedResume.talent_profile_id.in_(talent_ids))
+        .order_by(ParsedResume.created_at.desc(), ParsedResume.id.desc())
+    ).scalars()
+    latest: dict[int, ParsedResume] = {}
+    for row in rows:
+        latest.setdefault(row.talent_profile_id, row)
+    return latest
+
+
+def build_profile_input(profile: TalentProfile, parsed: ParsedResume | None) -> dict[str, Any]:
+    """A 侧评分输入（与 worker 原有拼法完全一致）；A03 冻结与历史回退共用。"""
+    profile_input: dict[str, Any] = {
+        "talent_profile_id": profile.id,
+        "name": profile.name,
+        "degree": profile.degree,
+        "work_years": float(profile.work_years) if profile.work_years is not None else None,
+        "skills_json": _plain(list(profile.skills_json or [])),
+        "vector_status": profile.vector_status,
+        "current_title": profile.current_title,
+        "expected_title": profile.expected_title,
+        "tags_json": _plain(list(profile.tags_json or [])),
+        "ability_scores_json": _plain(profile.ability_scores_json),
+        "manual_edited_fields": _plain(list(profile.manual_edited_fields or [])),
+    }
+    if parsed is None or not parsed.structured_json:
+        profile_input["missing_fields"] = ["resume_parsed"]
+    else:
+        structured = parsed.structured_json if isinstance(parsed.structured_json, dict) else {}
+        profile_input.update(
+            {
+                "educations": _plain(list(structured.get("educations") or [])),
+                "employments": _plain(list(structured.get("employments") or [])),
+                "projects": _plain(list(structured.get("projects") or [])),
+            }
+        )
+        parsed_skills = _plain(list(structured.get("skills") or []))
+        if parsed_skills and not profile_input["skills_json"]:
+            profile_input["skills_json"] = parsed_skills
+    return _plain(profile_input)
+
+
+def _latest_persisted_versions(db: Session, talent_ids: list[int]) -> dict[int, TalentProfileVersion]:
+    """只读 B 的不可变版本行，一次批量取每人最新版本（A03 / B 契约阶段 2）。
+
+    直接读 `talent_profile_versions.profile_snapshot_json`，不调用
+    `history.read_version()` 的 evidence 组装：评分输入不需要逐字段证据，且创建
+    阶段需控制查询数。B 的版本行只追加不改写，故按版本回读天然不可变。
+    """
+    if not talent_ids:
+        return {}
+    rows = db.execute(
+        select(TalentProfileVersion)
+        .where(TalentProfileVersion.talent_profile_id.in_(talent_ids))
+        .order_by(
+            TalentProfileVersion.talent_profile_id,
+            TalentProfileVersion.version.desc(),
+        )
+    ).scalars()
+    latest: dict[int, TalentProfileVersion] = {}
+    for row in rows:
+        latest.setdefault(row.talent_profile_id, row)
+    return latest
+
+
+def _persisted_binding(row: TalentProfileVersion) -> tuple[dict[str, Any], str | None, int | None]:
+    """从 B 版本行提取可核对的内容摘要、快照时间与正式版本号。"""
+    raw = row.profile_snapshot_json if isinstance(row.profile_snapshot_json, dict) else {}
+    profile_raw = raw.get("profile") if isinstance(raw.get("profile"), dict) else {}
+    parsed_raw = raw.get("parsed") if isinstance(raw.get("parsed"), dict) else {}
+    content = {
+        "profile": {k: _plain(profile_raw.get(k)) for k in _PERSISTED_PROFILE_KEYS},
+        "parsed": {k: _plain(parsed_raw.get(k)) for k in _PERSISTED_PARSED_KEYS},
+    }
+    version = raw.get("profile_version")
+    if not isinstance(version, int):
+        version = int(row.version)
+    return content, _plain(raw.get("snapshot_at")), version
+
+
+def capture_batch_profile_inputs(
+    db: Session,
+    talent_ids: list[int],
+    *,
+    profiles: Mapping[int, TalentProfile] | None = None,
+) -> dict[str, Any]:
+    """创建批次时冻结每位成员的评分输入 + B 正式版本/内容摘要（A03 / F03）。
+
+    冻结后 worker 只读取本 JSON 的 `profile_input`，不再读取当前档案内容；排队
+    期间的人工修订、重新解析、字段变更都不影响本批。B 版本表尚无该人记录时
+    以 `a_baseline` 标记并仍冻结 A 侧值拷贝，不阻断创建（历史数据兼容）。
+    """
+    ids = [int(i) for i in talent_ids]
+    profile_map = dict(profiles) if profiles is not None else screen_dao.list_profiles_by_ids(db, ids)
+    parsed_map = _latest_parsed(db, ids)
+    versions = _latest_persisted_versions(db, ids)
+    items: dict[str, Any] = {}
+    for tid in ids:
+        profile = profile_map.get(tid)
+        if profile is None:
+            # 圈人后瞬时消失：不冻结，worker 仍按「软删/不存在」跳过
+            continue
+        item: dict[str, Any] = {
+            "profile_input": build_profile_input(profile, parsed_map.get(tid)),
+            "profile_version": None,
+            "version_source": FREEZE_SOURCE_BASELINE,
+            "snapshot_at": None,
+            "content_sha256": None,
+            "persisted_content": None,
+        }
+        row = versions.get(tid)
+        if row is not None:
+            content, snapshot_at, version = _persisted_binding(row)
+            item.update(
+                {
+                    "profile_version": version,
+                    "version_source": FREEZE_SOURCE_PERSISTED,
+                    "snapshot_at": snapshot_at,
+                    "content_sha256": hashlib.sha256(
+                        json.dumps(content, sort_keys=True, ensure_ascii=False, default=str).encode(
+                            "utf-8"
+                        )
+                    ).hexdigest(),
+                    "persisted_content": content,
+                }
+            )
+        items[str(tid)] = item
+    return {
+        "schema": FREEZE_SCHEMA_VERSION,
+        "captured_at": datetime.now().isoformat(timespec="seconds"),
+        "items": items,
+    }
+
+
+def frozen_profile_input(frozen: Any, talent_id: int) -> dict[str, Any] | None:
+    """worker 取冻结输入；缺失/未知 schema 返回 None 让调用方显式回退并告警。"""
+    if not isinstance(frozen, Mapping) or frozen.get("schema") != FREEZE_SCHEMA_VERSION:
+        return None
+    items = frozen.get("items")
+    if not isinstance(items, Mapping):
+        return None
+    item = items.get(str(int(talent_id)))
+    if not isinstance(item, Mapping) or not isinstance(item.get("profile_input"), Mapping):
+        return None
+    copy = _plain(dict(item["profile_input"]))
+    return copy if isinstance(copy, dict) else None
+
+
+def frozen_inputs_summary(frozen: Any) -> dict[str, Any]:
+    """详情接口摘要：只给数量/版本来源/时间，**不回传全量成员冻结输入**。"""
+    if not isinstance(frozen, Mapping) or frozen.get("schema") != FREEZE_SCHEMA_VERSION:
+        return {
+            "available": False,
+            "schema": None,
+            "frozen_count": 0,
+            "captured_at": None,
+            "version_sources": {},
+        }
+    items = frozen.get("items")
+    items = items if isinstance(items, Mapping) else {}
+    sources: dict[str, int] = {}
+    for item in items.values():
+        key = item.get("version_source") if isinstance(item, Mapping) else None
+        key = str(key or "unknown")
+        sources[key] = sources.get(key, 0) + 1
+    return {
+        "available": True,
+        "schema": FREEZE_SCHEMA_VERSION,
+        "frozen_count": len(items),
+        "captured_at": _plain(frozen.get("captured_at")),
+        "version_sources": sources,
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -213,6 +443,8 @@ def create_batch(
     profiles = screen_dao.list_profiles_by_ids(db, resolved_ids)
     # A02-1：所有人都会进 Prompt C，不再用 hard_gate 折减调用数
     estimated = sum(1 for talent_id in resolved_ids if profiles.get(talent_id) is not None)
+    # A03：批次开始时一次性冻结成员输入 + B 正式版本（排队期档案变更不影响本批）
+    frozen_inputs = capture_batch_profile_inputs(db, resolved_ids, profiles=profiles)
 
     try:
         batch = screen_dao.create_batch(
@@ -221,6 +453,7 @@ def create_batch(
             job_profile_version=job.version,
             config_snapshot_json=snapshot,
             scope_json={**normalized_scope, "resolved_ids": resolved_ids},
+            frozen_inputs_json=frozen_inputs,
             status="pending",
             total=len(resolved_ids),
             created_by=user_id,
@@ -302,6 +535,8 @@ def get_batch_detail(db: Session, batch_id: int) -> dict[str, Any]:
         "job_profile_version": batch.job_profile_version,
         "config_snapshot": dict(batch.config_snapshot_json or {}),
         "scope": scope,
+        # A03：只回摘要，不回传全量成员冻结输入（与 resolved_ids 不外泄同口径）
+        "frozen_inputs": frozen_inputs_summary(batch.frozen_inputs_json),
         "status": batch.status,
         "progress": batch.progress,
         "total": batch.total,

@@ -82,6 +82,8 @@ class ScreenBatch(PKMixin, CreatedAtMixin, Base):
     job_profile_version: Mapped[int] = mapped_column(Integer, nullable=False)
     config_snapshot_json: Mapped[dict] = mapped_column(JSONDict, nullable=False)
     scope_json: Mapped[dict] = mapped_column(JSONDict, nullable=False)
+    # A03：创建时冻结的成员评分输入 + B 正式档案版本摘要（worker/retry 只读此列）
+    frozen_inputs_json: Mapped[dict | None] = mapped_column(JSONDict, nullable=True)
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="pending", server_default=str_default("pending")
     )
@@ -165,6 +167,8 @@ class MatchBatch(PKMixin, CreatedAtMixin, Base):
     job_profile_version: Mapped[int] = mapped_column(Integer, nullable=False)
     config_snapshot_json: Mapped[dict] = mapped_column(JSONDict, nullable=False)
     talent_scope_json: Mapped[dict] = mapped_column(JSONDict, nullable=False)
+    # A03：与 ScreenBatch 同口径的批次开始冻结输入
+    frozen_inputs_json: Mapped[dict | None] = mapped_column(JSONDict, nullable=True)
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="pending", server_default=str_default("pending")
     )

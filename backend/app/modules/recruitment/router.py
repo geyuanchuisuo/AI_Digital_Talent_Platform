@@ -1,4 +1,5 @@
-"""招聘域路由（M3-V2.6，A08）：人才需求/项目/项目群 CRUD、申请与五阶段状态机、JD 投放。
+"""招聘域路由（M3-V2.6，A08 / A11）：人才需求/项目/项目群 CRUD、需求审批链、
+申请与五阶段状态机、JD 投放。
 
 由 main.py `include_router(router)` 注册；统一返回体与鉴权沿用 core 约定。
 
@@ -21,8 +22,18 @@ from app.core.errors import BizError
 from app.core.response import ok
 from app.database import get_db
 from app.modules.recruitment import service as recruitment_service
-from app.modules.recruitment.models import EXTERNAL_STAGES
+from app.modules.recruitment.models import (
+    DEMAND_APPROVER_ROLES,
+    DEMAND_RECORD_READ_ROLES,
+    DEMAND_SUBMIT_ROLES,
+    EXTERNAL_STAGES,
+    demand_is_matchable,
+)
 from app.modules.recruitment.schemas import (
+    DemandApprovalRecordItem,
+    DemandDecisionRequest,
+    DemandSubmitRequest,
+    DemandWithdrawRequest,
     PageData,
     ProjectCreate,
     ProjectDemandCreate,
@@ -37,6 +48,10 @@ router = APIRouter(prefix="/api/recruitment", tags=["recruitment"])
 
 # A08：完整输入快照属内部资料（含档案/解析结果），仅管理侧可读。
 _GATE_SNAPSHOT = Depends(require_roles("system_admin", "hr"))
+# A11：提交（HR 发起）/ 审批（业务负责人）/ 记录只读，三套职责门禁互不替代。
+_GATE_SUBMIT = Depends(require_roles(*DEMAND_SUBMIT_ROLES))
+_GATE_DECIDE = Depends(require_roles(*DEMAND_APPROVER_ROLES))
+_GATE_RECORDS = Depends(require_roles(*DEMAND_RECORD_READ_ROLES))
 
 
 # ---- 项目群 ----
@@ -120,7 +135,7 @@ def create_demand(payload: ProjectDemandCreate, user: CurrentUser, db: Annotated
         },
         user_id=user.id,
     )
-    return ok(ProjectDemandItem.model_validate(row).model_dump())
+    return ok(_demand_out(row))
 
 
 @router.get("/demands", summary="人才需求列表（可按状态/项目过滤）")
@@ -137,7 +152,7 @@ def list_demands(
     )
     return ok(
         PageData(
-            items=[ProjectDemandItem.model_validate(r).model_dump() for r in rows],
+            items=[_demand_out(r) for r in rows],
             total=total,
             page=page,
             page_size=page_size,
@@ -147,7 +162,7 @@ def list_demands(
 
 @router.get("/demands/{demand_id}", summary="人才需求详情")
 def get_demand(demand_id: int, user: CurrentUser, db: Annotated[Session, Depends(get_db)]):
-    return ok(ProjectDemandItem.model_validate(recruitment_service.get_demand(db, demand_id)).model_dump())
+    return ok(_demand_out(recruitment_service.get_demand(db, demand_id)))
 
 
 @router.patch("/demands/{demand_id}", summary="编辑人才需求（含状态流转白名单）")
@@ -159,7 +174,62 @@ def update_demand(
 ):
     changes = payload.model_dump(exclude_unset=True)
     row = recruitment_service.update_demand(db, demand_id, changes, user_id=user.id)
-    return ok(ProjectDemandItem.model_validate(row).model_dump())
+    return ok(_demand_out(row))
+
+
+# ---- A11 岗位/人才需求审批链 ----
+
+
+@router.post("/demands/{demand_id}/submit", summary="提交人才需求审批（HR 发起；必填项校验）")
+def submit_demand(
+    demand_id: int,
+    payload: DemandSubmitRequest,
+    user: CurrentUser,
+    roles: Annotated[tuple[str, ...], _GATE_SUBMIT],
+    db: Annotated[Session, Depends(get_db)] = None,
+):
+    row = recruitment_service.submit_demand(
+        db, demand_id, user_id=user.id, actor_roles=roles, note=payload.note
+    )
+    return ok(_demand_out(row))
+
+
+@router.post("/demands/{demand_id}/decision", summary="审批人才需求（业务负责人；approve/reject/return）")
+def decide_demand(
+    demand_id: int,
+    payload: DemandDecisionRequest,
+    user: CurrentUser,
+    roles: Annotated[tuple[str, ...], _GATE_DECIDE],
+    db: Annotated[Session, Depends(get_db)] = None,
+):
+    row = recruitment_service.decide_demand(
+        db, demand_id, payload.decision, user_id=user.id, actor_roles=roles, reason=payload.reason
+    )
+    return ok(_demand_out(row))
+
+
+@router.post("/demands/{demand_id}/withdraw", summary="撤回人才需求（必填原因；终态）")
+def withdraw_demand(
+    demand_id: int,
+    payload: DemandWithdrawRequest,
+    user: CurrentUser,
+    roles: Annotated[tuple[str, ...], _GATE_SUBMIT],
+    db: Annotated[Session, Depends(get_db)] = None,
+):
+    row = recruitment_service.withdraw_demand(
+        db, demand_id, user_id=user.id, actor_roles=roles, reason=payload.reason
+    )
+    return ok(_demand_out(row))
+
+
+@router.get("/demands/{demand_id}/approval-records", summary="审批留痕只读（按时间正序，只追加）")
+def list_demand_approval_records(
+    demand_id: int,
+    roles: Annotated[tuple[str, ...], _GATE_RECORDS],
+    db: Annotated[Session, Depends(get_db)] = None,
+):
+    rows = recruitment_service.list_demand_approval_records(db, demand_id)
+    return ok({"items": [DemandApprovalRecordItem.model_validate(r).model_dump() for r in rows], "total": len(rows)})
 
 
 # ---- 岗位申请与五阶段状态机 ----
@@ -245,6 +315,13 @@ def get_application_input_snapshot(
     db: Annotated[Session, Depends(get_db)] = None,
 ):
     return ok(recruitment_service.get_application_input_snapshot(db, application_id))
+
+
+def _demand_out(row) -> dict:
+    """需求出参：白名单 DTO + A11 计算字段 `matchable`（已批且版本未失效才可匹配）。"""
+    data = ProjectDemandItem.model_validate(row).model_dump()
+    data["matchable"] = demand_is_matchable(row)
+    return data
 
 
 def _application_public_out(row) -> dict:

@@ -15,6 +15,11 @@
    不符项与待核实项进 `misses`；`hard_fail` 恒 0、不再写 `score=NULL`。
    三档 `verdict` 仍是**内部参考标签**，不改申请状态、不自动推进/淘汰；人工结论
    独立存 `manual_verdict*`（两档标签与人工三态对齐属 A02-2/M5 范围）。
+8. **A03 批次档案冻结**：评分输入一律取 `batch.frozen_inputs_json`（创建时冻结的
+   值拷贝 + B 正式版本绑定），**不再读取当前** `talent_profiles` / `parsed_resumes`
+   内容；排队期档案修订/重新解析不影响本批，retry 补缺与历史回读不读新版本。
+   当前档案只用于判断「软删/不存在跳过」（T-24 既有语义）。缺冻结列的历史批次
+   走 `_legacy_current_input()` 显式告警回退，不静默污染新批次。
 """
 
 from __future__ import annotations
@@ -28,36 +33,33 @@ from sqlalchemy.orm import Session
 from app.dao import screen as screen_dao
 from app.models import ParsedResume, ScreenBatch
 from app.service import match_engine
-from app.service.screen_service import build_config_snapshot, resolve_batch_model_versions
+from app.service.screen_service import (
+    build_config_snapshot,
+    build_profile_input,
+    frozen_profile_input,
+    resolve_batch_model_versions,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def _evidence_input(db: Session, talent_profile_id: int) -> dict:
-    """取该主档最新解析结果的结构化证据（educations/employments/projects）。
+def _legacy_current_input(db: Session, profile) -> dict:
+    """A03 兼容回退：历史批次（无 frozen_inputs_json）仍按当前档案取输入。
 
-    H-A07 修复（2026-11-07）：此前 worker 只传 5 字段，评分摘要拿不到经历/项目
-    证据。阶段 1 直接从 `parsed_resumes.structured_json` 取（B 契约 §5 的
-    profile_input 兼容口径）；B 的快照服务落地后由 A 切换到该入口。
-    查询建议后续收编进 B 的 parsed_resumes dao（此处内联避免跨模块写）。
+    只用于迁移前创建的批次，显式告警；不得用于新批次，否则排队期档案变更会
+    回溯污染本批（A03 要修的正是这一点）。
     """
+    logger.warning(
+        "筛选批次缺少成员 %s 的 A03 冻结输入（历史批次兼容），回退读取当前档案",
+        profile.id,
+    )
     parsed = db.execute(
         select(ParsedResume)
-        .where(ParsedResume.talent_profile_id == talent_profile_id)
+        .where(ParsedResume.talent_profile_id == profile.id)
         .order_by(ParsedResume.created_at.desc(), ParsedResume.id.desc())
         .limit(1)
     ).scalar_one_or_none()
-    if parsed is None or not parsed.structured_json:
-        return {"missing_fields": ["resume_parsed"]}  # 原文未解析：证据缺失，按缺失处理
-    structured = parsed.structured_json if isinstance(parsed.structured_json, dict) else {}
-    evidence = {
-        "educations": list(structured.get("educations") or []),
-        "employments": list(structured.get("employments") or []),
-        "projects": list(structured.get("projects") or []),
-    }
-    if structured.get("skills"):
-        evidence["parsed_skills"] = list(structured["skills"])
-    return evidence
+    return build_profile_input(profile, parsed)
 
 
 def _verdict_for(score: float | None, snapshot: dict) -> str:
@@ -121,6 +123,8 @@ def _run_batch(db: Session, batch: ScreenBatch) -> None:
     model_version, prompt_version = resolve_batch_model_versions(snapshot, logger=logger)
     scope = dict(batch.scope_json or {})
     resolved_ids: list[int] = scope.get("resolved_ids") or []
+    # A03：成员评分输入在创建批次时冻结；worker / retry 只读此列，绝不重读当前档案内容
+    frozen = batch.frozen_inputs_json
     # 断点续跑：已写结果的成员直接跳过（retry 只补缺）
     written = screen_dao.result_talent_ids(db, batch.id)
     engine_job = snapshot  # 引擎入参与快照同构（T-23 约定）
@@ -131,26 +135,11 @@ def _run_batch(db: Session, batch: ScreenBatch) -> None:
         profile = screen_dao.list_profiles_by_ids(db, [talent_id]).get(talent_id)
         if profile is None or profile.deleted_at is not None:
             # 软删/消失：跳过不写行（skipped_deleted 由详情接口统计）
+            # A03 只冻结内容，不冻结「存在性」——T-24 既有语义保持不变
             continue
-        profile_input = {
-            "talent_profile_id": profile.id,
-            "name": profile.name,
-            "degree": profile.degree,
-            "work_years": float(profile.work_years) if profile.work_years is not None else None,
-            "skills_json": list(profile.skills_json or []),
-            "vector_status": profile.vector_status,
-            # H-A07 修复（2026-11-07）：补全画像与经历证据输入（阶段 1 用 parsed+profile）
-            "current_title": profile.current_title,
-            "expected_title": profile.expected_title,
-            "tags_json": list(profile.tags_json or []),
-            "ability_scores_json": profile.ability_scores_json,
-            "manual_edited_fields": list(profile.manual_edited_fields or []),
-        }
-        profile_input.update(_evidence_input(db, profile.id))
-        if profile_input.get("parsed_skills") and not profile_input["skills_json"]:
-            profile_input["skills_json"] = list(profile_input.pop("parsed_skills"))
-        else:
-            profile_input.pop("parsed_skills", None)
+        profile_input = frozen_profile_input(frozen, talent_id)
+        if profile_input is None:
+            profile_input = _legacy_current_input(db, profile)
         result = match_engine.evaluate(engine_job, profile_input, use_vector=False)
         # 双重幂等：写前再查一次（并发/重试窗口内唯一键兜底）
         if screen_dao.get_result_by_talent(db, batch.id, talent_id) is not None:
