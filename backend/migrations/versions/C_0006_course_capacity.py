@@ -24,6 +24,11 @@ TABLE_OPTIONS = {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"}
 
 
 def upgrade() -> None:
+    # C_0001 用当前模型元数据 create_all，空库建表时已含本列；重复执行需幂等
+    bind = op.get_bind()
+    columns = {col["name"] for col in sa.inspect(bind).get_columns("training_courses")}
+    if "capacity" in columns:
+        return
     op.add_column(
         "training_courses",
         sa.Column("capacity", sa.Integer(), nullable=True, comment="报名名额上限，NULL 不限"),

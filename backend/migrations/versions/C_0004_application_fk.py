@@ -31,6 +31,11 @@ depends_on: Union[str, Sequence[str], None] = None
 PK_MYSQL = mysql.BIGINT(unsigned=True)
 
 
+def _existing_fk_names(table: str) -> set[str]:
+    bind = op.get_bind()
+    return {fk["name"] for fk in sa.inspect(bind).get_foreign_keys(table)}
+
+
 def upgrade() -> None:
     op.alter_column(
         "interview_rounds",
@@ -39,13 +44,15 @@ def upgrade() -> None:
         type_=PK_MYSQL,
         existing_nullable=True,
     )
-    op.create_foreign_key(
-        "fk_interview_rounds_application",
-        "interview_rounds",
-        "applications",
-        ["application_id"],
-        ["id"],
-    )
+    # 外键幂等：库已带同名约束时只补类型对齐（如经 C_0001 当前元数据 create_all 建出的库）
+    if "fk_interview_rounds_application" not in _existing_fk_names("interview_rounds"):
+        op.create_foreign_key(
+            "fk_interview_rounds_application",
+            "interview_rounds",
+            "applications",
+            ["application_id"],
+            ["id"],
+        )
     op.alter_column(
         "ai_interview_sessions",
         "application_id",
@@ -53,13 +60,14 @@ def upgrade() -> None:
         type_=PK_MYSQL,
         existing_nullable=True,
     )
-    op.create_foreign_key(
-        "fk_ai_interview_sessions_application",
-        "ai_interview_sessions",
-        "applications",
-        ["application_id"],
-        ["id"],
-    )
+    if "fk_ai_interview_sessions_application" not in _existing_fk_names("ai_interview_sessions"):
+        op.create_foreign_key(
+            "fk_ai_interview_sessions_application",
+            "ai_interview_sessions",
+            "applications",
+            ["application_id"],
+            ["id"],
+        )
 
 
 def downgrade() -> None:
