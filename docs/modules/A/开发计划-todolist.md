@@ -1,6 +1,6 @@
 # 开发计划 · Todolist · 板块 A
 
-> 版本：v0.1.24　|　日期：2026-11-10 17:42　|　身份：A　|　分支：`feature/A/continuation`　|　开工基线：四 ref **`b356eeb`**（A08 发布后对齐基线）
+> 版本：v0.1.25　|　日期：2026-11-10 18:40　|　身份：A　|　分支：`feature/A/continuation`　|　开工基线：四 ref **`6d64aa3`**（A03 发布后对齐基线）
 > 上游：`docs/需求文档.md` **V2.6（2026-11-07 已冻结）**、`docs/源码接入与需求决策.md`、`docs/四人分工与试行方案.md` §2、`docs/技术框架.md`、**`docs/modules/MASTER/原PRD统一执行跟踪表.md`（全员统一执行入口）**、`tasks/A.md`、`docs/modules/A/设计方案.md` v0.1.1、`.collaboration/ownership.json`。
 > 用法：按 M1 → M6 顺序；每项满足「验收点」才勾选，勾选必须写实际命令/结果/证据落点；编号 `T-Axx` 供沟通引用。进度同步 `docs/modules/A/开发日志.md` Layer 3/4 与 `docs/updates/A/` 交接记录。
 > ⚠️ 本表是台账，**不是完成声明**；`[x]` 只表示「有实证且已登记」。Master 统一执行表口径：`×` 仅代表代码已实现，不等于接入/业务验收；本表 `[x]` 同理不代表浏览器/客户验收完成，人工验收单列在文末「未收口清单」。
@@ -137,6 +137,8 @@
 
 - v0.1.24（2026-11-10 17:42）：用户「继续」。开工 `fetch` 后四 ref 全 `b356eeb`、ahead/behind 0/0、祖先复核 exit 0、工作区干净；复核 **A02-2 仍被 D 的 `PROMPT_C_SCHEMA` / `overall_score` 契约阻塞**（远端无 D 新提交），A 未越界代改。先按 Master 执行表核验确认 A03「整项 × 撤回」只是撤回已实现标记、非撤销需求，再跑通 **A03 批次档案冻结**（执行表 A03 / F03）：批次创建时一次性冻结每位成员的评分输入值拷贝 + B 正式档案版本/内容绑定（`frozen_inputs_json`，`A03-v1`），新迁移 `A_0012_profile_freeze` 挂 `A_0011` 成为单 head；两个 worker 与 retry 只读冻结输入、不再读取当前档案内容，排队期人工修订/重新解析不污染本批；当前档案只用于「软删跳过」，缺冻结列的历史批次显式告警回退；详情 DTO 补 `frozen_inputs` 摘要（不外泄全量成员输入），`config_snapshot_json` 不被污染。新增 `test_batch_profile_freeze_a03.py` **20 passed**（首轮 3 例为测试自身：`parsed_resumes.uk_parsed_resume_file` 一文件一解析结果、详情 DTO 白名单丢字段，已修正）。门禁：受影响既有 10 文件 **292 passed**；**后端原样全量 exit 1 / 909 passed / 8 skipped / 1 failed**（唯一失败为已登记 B/D 跨文件向量串扰，零 A03 测试的两文件组合即复现、隔离单跑 exit 0 / 1 passed），发布门禁以 「**deselect 后全量 exit 0 / 909 passed / 8 skipped / 1 deselected**」为证据，**不把原样全量 exit 1 写成通过**；前端 **29 文件 / 131 用例**（460.86s）、`tsc` exit 0、`diff --check` / 10 py `py_compile` / 185 py AST / 路由 19 全 0 错。8 skipped 仍是 Milvus 19532 不可达；B/D 跨包请求**保持打开**。`A_0012` 只在隔离库生效，主验收库 `ai_talent` 未碰。台账升 **v0.1.24**。证据：[1742 记录](../../updates/A/20261110-1742-A03批次档案冻结.md)。
 
+- v0.1.25（2026-11-10 18:40）：用户「继续」。开工 `fetch` 后四 ref 全 `6d64aa3`、ahead/behind 0/0、工作区干净；复核 **A02-2 仍被 D 的 `PROMPT_C_SCHEMA` / `overall_score` 契约阻塞**，A 未越界代改。跑通 **A11 岗位/人才需求审批链**（执行表 A11 / 需求细化 §6.11 步骤 1）：审批状态与业务 `status` 分离，`project_demands` 加 5 列 + 新增只追加审计表 `demand_approval_records`，迁移 `A_0013_demand_approval` 单 head（挂 `A_0012`）；新增 `submit`/`decision`/`withdraw`/`approval-records` 四端点与三套角色职责门禁，合法流转 + 必填校验 + 重复批准 409 + 四眼原则（按用户 id）+ 拒绝/退回必填原因；`approve` 冻结 `approved_version`，改内容触发版本 +1、旧审批失效并追加 `revision` 留痕，业务 `status` 推进不失效；`matchable` 只在「已批且版本未失效」为真。`ProjectDemandUpdate` 补 3 个归属锚点字段使「退回补充」可补齐必填项；`app/models/__init__.py` 移除写死的一期表数断言改动态集合对照（**85 表 / 85 模型**）。新增 `test_demand_approval_a11.py` **20 passed**（首轮 18/20 暴露锚点缺口并修代码 + 一处断言改为语义断言）。门禁：受影响既有 5 文件 **205 passed**；隔离库 `upgrade head` / 空库全链 `upgrade head` 均 **exit 0**；**后端原样全量（无 deselect）exit 0 / 932 passed / 8 skipped / 0 failed**（B/D 串扰本轮未复现）、**deselect 后全量 exit 0 / 931 passed / 8 skipped / 1 deselected / 0 failed**；前端 **29 文件 / 131 用例**（476.72s）、`tsc` / `diff --check` / 185 py AST / 路由 19 全 0 错。⚠️ 首次 deselect 全量 `6 failed + 9 errors / exit 1` 定性为环境 `safe-delete` 批量删除护栏在 teardown 抛 `SystemExit(1)`（同批 15 例原样全量 5 分钟前全通过、隔离复跑 6+9 均 exit 0、换进程重跑 exit 0），**不作门禁证据、不写成代码回归**。8 skipped 仍是 Milvus 19532 不可达；B/D 跨包请求保持打开；`A_0013` 只在隔离库生效，主验收库 `ai_talent` 未碰；`matchable` 未接入匹配入口（属 A05/A09 后续边界）。台账升 **v0.1.25**。证据：[1840 记录](../../updates/A/20261110-1840-A11需求审批链.md)。
+
 ## M3-V2.6 · 招聘域重排（需求冻结后按 V2.6 口径，2026-11-07）
 
 > 原 M3（T-A21～T-A24）基于 V2.2 编写；冻结版 V2.6 增补 JD 生成投放（F01）、岗前培养（F05，归 C）、系统管理域表体系（F09）。以下为 A 侧重排清单，编号 T-A60x 供沟通引用。
@@ -152,9 +154,27 @@
 
 ---
 
-## 状态快照（v0.1.24，2026-11-10 17:42）· 当前活状态锚点
+## 状态快照（v0.1.25，2026-11-10 18:40）· 当前活状态锚点
 
-> 本节为**活状态锚点**，覆盖下方 v0.1.23 / v0.1.22 / v0.1.21 / v0.1.20 / v0.1.19 / v0.1.18 / v0.1.17 / v0.1.15 历史快照。权威顺序：`docs/updates/A/` 最新记录 > 根 `更新记录.md` 尾部 > `git log` > 本表。
+> 本节为**活状态锚点**，覆盖下方 v0.1.24 / v0.1.23 / v0.1.22 / v0.1.21 / v0.1.20 / v0.1.19 / v0.1.18 / v0.1.17 / v0.1.15 历史快照。权威顺序：`docs/updates/A/` 最新记录 > 根 `更新记录.md` 尾部 > `git log` > 本表。
+
+- v0.1.25（2026-11-10 18:40）：跑通 **A11 岗位/人才需求审批链**（Master 执行表 A11 / 需求细化 §6.11）：审批状态与业务生命周期分离，`submit`/`decision`/`withdraw`/`approval-records` 四端点 + 三套职责门禁；`demand_approval_records` 只追加留痕（`A11-v1` 值拷贝快照 + 决策时刻角色）；审批版本冻结 + 内容变更自动失效；越权、四眼、重复批准、退回补充、撤回、历史行默认值均有反例。**A02-2 仍被 D 的 `PROMPT_C_SCHEMA` / `overall_score` 契约阻塞**；两档 verdict + 人工三态留待联调。证据：[1840 记录](../../updates/A/20261110-1840-A11需求审批链.md)。
+
+### 基线与结构（v0.1.25）
+
+| 项 | 当前值 |
+|---|---|
+| 迁移链 | 空库全链 `upgrade head` **exit 0** 到单 head **`A_0013_demand_approval`**（挂 `A_0012_profile_freeze`）；Inspector 幂等，revision id ≤32 字符 |
+| 需求审批 | `project_demands` 5 新列（历史行 `draft`/`1` 兜底）+ `demand_approval_records` 只追加表；`matchable` = 已批且 `approved_version == approval_version` |
+| 表 / 路由 | **85 表 / 85 模型**（`set(Base.metadata.tables) == set(EXPECTED_COLUMNS)` 动态断言，不再写死表数）；`include_router` **19**（未变） |
+| 全量门禁 | 后端原样全量 **exit 0 / 932 passed / 8 skipped / 0 failed**；deselect 后 **exit 0 / 931 passed / 8 skipped / 1 deselected / 0 failed**；前端 **29 文件 / 131 用例**；`tsc` / `diff --check` / 185 py AST 全 0 错 |
+| 主验收库 | `ai_talent` **未碰**，仍缺 `A_0010`~`A_0013` 新列，重建需用户授权；8101/3101 未重启 |
+
+---
+
+## 状态快照（v0.1.24，2026-11-10 17:42）· 历史
+
+> 本节为历史快照，被上方 v0.1.25 覆盖。权威顺序：`docs/updates/A/` 最新记录 > 根 `更新记录.md` 尾部 > `git log` > 本表。
 
 - v0.1.24（2026-11-10 17:42）：跑通 **A03 批次档案冻结**（Master 执行表 A03 / F03）：创建批次时一次性冻结每位成员的评分输入值拷贝 + B 正式档案版本/内容绑定（`frozen_inputs_json`，`A03-v1`）；两个 worker 与 retry 只读冻结输入，不再读取当前档案内容，排队期人工修订/重新解析不污染本批；当前档案只用于「软删跳过」判断，缺冻结列的历史批次显式告警回退。详情 DTO 补 `frozen_inputs` 摘要（不外泄全量成员输入），`config_snapshot_json` 不被污染。新增 `test_batch_profile_freeze_a03.py` **20 passed**，受影响既有 10 文件 **292 passed**；**后端原样全量 exit 1 / 909 passed / 8 skipped / 1 failed**（唯一失败为已登记 B/D 跨文件向量串扰，零 A03 测试的两文件组合即复现），以「**deselect 后全量 exit 0 / 909 passed / 8 skipped / 1 deselected** + 该用例隔离单跑 exit 0」为发布门禁，不写成通过；前端 **29 文件 / 131 用例**（460.86s）、`tsc`、静态门禁全绿。**A02-2 仍被 D 的 `PROMPT_C_SCHEMA` / `overall_score` 契约阻塞**；两档 verdict + 人工三态留待与 A02-2 联调。证据：[1742 记录](../../updates/A/20261110-1742-A03批次档案冻结.md)。
 
@@ -338,7 +358,8 @@
 | D02（A/D） | P0 | **A 侧开关已交付**（`RATE_LIMIT_ENABLED`，默认 false 演示豁免；true 只豁免 `/api/health`） | 客户模式真实 Redis 多环境串扰复验未做 |
 | **A08** | P1 | ✅ **已交付**（16:44）：申请输入值快照冻结 + 管理侧只读接口 + 个人侧字段分级/授权收紧；22 例验收、全量 890 passed | 完整面试/邀约引用由 C 归属外键承载，属跨角色联调；人工/浏览器验收排最后 |
 | **A03** | P0（执行表） | ✅ **已交付**（17:42）：批次开始时冻结成员评分输入值拷贝 + B 正式版本绑定；20 例验收、原样全量 909 passed / 1 例已登记 B/D 串扰 | 历史批次缺冻结列显式告警回退；B/D 修复串扰后 A 复跑原样全量并关闭请求 |
-| A11 / A12 / A14 | P1 | 空白或未获完整实现证据 | 审批链、真实 AI JD 草稿、员工花名册 |
+| **A11** | P1 | ✅ **已交付**（18:40）：需求审批链（提交/审批/退回/撤回/留痕/版本冻结）+ 越权、四眼、重复批准反例；20 例验收、原样全量 932 passed | `matchable` 未接入匹配入口（按 `job_profile` 圈人），联动属 A05/A09；人工/浏览器验收排最后 |
+| A12 / A14 | P1 | 空白或未获完整实现证据 | 真实 AI JD 草稿、员工花名册 |
 | A01 / A04 / A10 / A13 / A15 | P1 | `×`（代码已实现） | 按执行表「通过条件」逐条接入/验收，**A 不替 Master 改表** |
 | A05 / A09（配合 D/B） | P1 | 待联动 | A 交付授权需求与人工录用口径、招聘推荐规则 |
 | G01/G02/G07、G03~G06/G08、Q01~Q10 | P1/P2 | 部分或待验收 | 按执行表逐项回传证据，人工/客户演练排最后 |
@@ -380,7 +401,8 @@
 | D02（A/D） | P0 | **A 侧开关已交付**（`RATE_LIMIT_ENABLED`，默认 false 演示豁免；true 只豁免 `/api/health`），5 用例覆盖 429/403/降级 | 客户模式在**真实 Redis + 多环境并存**下的串扰复验未做；D 归属 `ratelimit.py`/`client.py` 未改，代码级键前缀隔离需 A 发请求、D 实现 |
 | **A08** | P1 | ✅ **已交付**（16:44）：申请输入值快照冻结 + 管理侧只读接口 + 个人侧字段分级/授权收紧；22 例验收、全量 890 passed | 完整面试/邀约引用由 C 归属外键承载，属跨角色联调；人工/浏览器验收排最后 |
 | **A03** | P0（执行表） | ✅ **已交付**（17:42）：批次开始时冻结成员评分输入值拷贝 + B 正式版本绑定；20 例验收、原样全量 909 passed / 1 例已登记 B/D 串扰 | 历史批次缺冻结列显式告警回退；B/D 修复串扰后 A 复跑原样全量并关闭请求 |
-| A11 / A12 / A14 | P1 | 空白或未获完整实现证据 | 审批链、真实 AI JD 草稿、员工花名册 |
+| **A11** | P1 | ✅ **已交付**（18:40）：需求审批链（提交/审批/退回/撤回/留痕/版本冻结）+ 越权、四眼、重复批准反例；20 例验收、原样全量 932 passed | `matchable` 未接入匹配入口（按 `job_profile` 圈人），联动属 A05/A09；人工/浏览器验收排最后 |
+| A12 / A14 | P1 | 空白或未获完整实现证据 | 真实 AI JD 草稿、员工花名册 |
 | A01 / A04 / A10 / A13 / A15 | P1 | `×`（代码已实现） | 按执行表「通过条件」逐条接入/验收，**A 不替 Master 改表** |
 | A05 / A09（配合 D/B） | P1 | 待联动 | A 交付授权需求与人工录用口径、招聘推荐规则 |
 | G01/G02/G07、G03~G06/G08、Q01~Q10 | P1/P2 | 部分或待验收 | 按执行表逐项回传证据，人工/客户演练排最后 |
