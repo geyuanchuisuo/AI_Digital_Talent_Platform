@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Literal
 
 ScopeRole = Literal["admin", "hr", "personal"]
@@ -36,6 +37,7 @@ class AccountScope:
     knowledge_scope: KnowledgeScope
     department_ids: tuple[int, ...] = ()
     granted_scope: tuple[dict, ...] = ()
+    allowed_person_ids: tuple[int, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -53,6 +55,8 @@ def get_account_scope(user) -> AccountScope:
     """
     role = (getattr(user, "role", "") or "").strip().lower()
     person_id = getattr(user, "person_id", None)
+    if not getattr(user,'is_active',True):
+        return AccountScope('personal',None,False,'public',allowed_person_ids=())
 
     if role == "personal":
         # 个人账号：仅本人（person_id 未绑定＝无任何数据范围）
@@ -63,15 +67,20 @@ def get_account_scope(user) -> AccountScope:
             knowledge_scope="public",
         )
     if role == "hr":
+        try:
+            all_people,departments,people,grants=_management_range(getattr(user,'id',None),person_id)
+        except Exception:
+            all_people,departments,people,grants=False,(),(),()
         # 阶段 1 管理侧：现有 hr 即全量；六类角色冻结后按职责收窄。
         # 组织范围扩展：管理侧也聚合其名下的授权记录（审计可见）。
         return AccountScope(
             role="hr",
-            person_id=None,
-            can_view_all_persons=True,
+            person_id=person_id if not all_people else None,
+            can_view_all_persons=all_people,
             knowledge_scope="admin",
-            department_ids=_active_department_ids(user_id=getattr(user, "id", None)),
-            granted_scope=_active_grant_summaries(getattr(user, "id", None)),
+            department_ids=departments,
+            granted_scope=grants,
+            allowed_person_ids=people,
         )
     # 未知角色 deny-by-default：映射为未绑定 personal
     return AccountScope(
@@ -86,6 +95,8 @@ def authorize_profile_access(scope: AccountScope, talent_profile_id: int | None)
     """判断账号是否可访问某人才主档（person_id = talent_profiles.id）。"""
     if scope.can_view_all_persons:
         return FileAccessDecision(allowed=True)
+    if scope.allowed_person_ids is not None:
+        return FileAccessDecision(allowed=talent_profile_id in scope.allowed_person_ids,reason=DENY_MESSAGE)
     if scope.person_id is not None and talent_profile_id is not None and scope.person_id == talent_profile_id:
         return FileAccessDecision(allowed=True)
     return FileAccessDecision(allowed=False, reason=DENY_MESSAGE)
@@ -125,6 +136,7 @@ def _active_department_ids(user_id: int | None) -> tuple[int, ...]:
                     UserScopeGrant.scope_type == "department",
                     UserScopeGrant.revoked_at.is_(None),
                     UserScopeGrant.valid_from <= now,
+                    (UserScopeGrant.valid_until.is_(None) | (UserScopeGrant.valid_until > now)),
                 )
             ).scalars().all()
         return tuple(sorted({int(r) for r in rows if r is not None}))
@@ -149,6 +161,7 @@ def _active_grant_summaries(user_id: int | None) -> tuple[dict, ...]:
                     UserScopeGrant.grantee_user_id == user_id,
                     UserScopeGrant.revoked_at.is_(None),
                     UserScopeGrant.valid_from <= now,
+                    (UserScopeGrant.valid_until.is_(None) | (UserScopeGrant.valid_until > now)),
                 )
             ).scalars().all()
         return tuple(
@@ -161,3 +174,32 @@ def _active_grant_summaries(user_id: int | None) -> tuple[dict, ...]:
         )
     except Exception:
         return ()
+
+
+def _management_range(user_id, person_id):
+    from sqlalchemy import select,or_
+    from app.database import SessionLocal
+    from app.models.talent import TalentProfile
+    from app.modules.system.models import SysRole,SysUserRole,SysDepartment
+    from app.modules.recruitment.scope_models import UserScopeGrant
+    if user_id is None:return True,(),None,()
+    with SessionLocal() as db:
+        assignments=list(db.scalars(select(SysUserRole).where(SysUserRole.user_id==user_id)))
+        if not assignments:return True,(),None,()  # Explicit legacy compatibility, not a DB-error fallback.
+        roles=list(db.scalars(select(SysRole).where(SysRole.id.in_([a.role_id for a in assignments]),SysRole.status=='active')))
+        kinds={r.data_scope for r in roles}
+        if not kinds:return False,(),(),()
+        now=datetime.now()
+        grants=list(db.scalars(select(UserScopeGrant).where(UserScopeGrant.grantee_user_id==user_id,
+            UserScopeGrant.revoked_at.is_(None),UserScopeGrant.valid_from<=now,
+            or_(UserScopeGrant.valid_until.is_(None),UserScopeGrant.valid_until>now))))
+        summaries=tuple({'scope_type':g.scope_type,'scope_ref_id':g.scope_ref_id} for g in grants)
+        if 'all' in kinds or any(g.scope_type=='all' for g in grants):return True,(),None,summaries
+        departments={g.scope_ref_id for g in grants if g.scope_type=='department' and g.scope_ref_id is not None}
+        if 'dept' in kinds and person_id:
+            own=db.get(TalentProfile,person_id)
+            if own and own.department_id:departments.add(own.department_id)
+        departments=set(db.scalars(select(SysDepartment.id).where(SysDepartment.id.in_(departments),SysDepartment.status=='active')))
+        people=set(db.scalars(select(TalentProfile.id).where(TalentProfile.department_id.in_(departments))))
+        if person_id:people.add(person_id)
+        return False,tuple(sorted(departments)),tuple(sorted(people)),summaries

@@ -13,12 +13,12 @@
 
 'use client';
 
-import { Badge, Button, Drawer, Empty, List, Modal, Space, Tag, Typography, message } from 'antd';
-import { useCallback, useEffect, useState } from 'react';
+import { Alert, Badge, Button, Drawer, Empty, Input, List, Modal, Space, Tag, Typography, message } from 'antd';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { getErrorMessage } from '@/lib/http';
 
-import { fetchDuplicates, resolveDuplicate } from './api';
+import { fetchDuplicates, resolveDuplicate, undoMerge } from './api';
 import type { DuplicateItem, KeepResolveData, MergeResolveData } from './types';
 import { duplicateReasonMeta, formatTime } from './utils';
 
@@ -35,23 +35,45 @@ export default function DuplicatesDrawer({ open, onClose, onChanged }: Duplicate
   const [items, setItems] = useState<DuplicateItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [acting, setActing] = useState<number | null>(null);
+  const [view,setView]=useState<'pending'|'merged'>('pending');
+  const [undoItem,setUndoItem]=useState<DuplicateItem|null>(null);
+  const [reason,setReason]=useState('');
+  const [error,setError]=useState('');
+  const generation=useRef(0);
 
   const load = useCallback(async () => {
     if (!open) return;
+    const current=++generation.current;
     setLoading(true);
+    setError('');setItems([]);
     try {
-      const data = await fetchDuplicates(1, 50, 'pending');
-      setItems(data.items);
-    } catch {
-      // 错误提示由 lib/http 统一弹
+      const data = await fetchDuplicates(1, 50, view);
+      if(current===generation.current)setItems(data.items);
+    } catch (error) {
+      if(current===generation.current)setError(getErrorMessage(error));
     } finally {
-      setLoading(false);
+      if(current===generation.current)setLoading(false);
     }
-  }, [open]);
+  }, [open,view]);
 
   useEffect(() => {
     void load();
+    return ()=>{generation.current++;};
   }, [load]);
+
+  useEffect(()=>{if(!open){setUndoItem(null);setReason('');}},[open]);
+
+  const handleUndo=async()=>{
+    if(!undoItem||!reason.trim())return;
+    setActing(undoItem.id);setError('');
+    try {
+      const result=await undoMerge(undoItem.id,reason.trim());
+      if(result.vector_status==='failed')message.warning('已撤销合并，向量同步失败，可在档案详情重建向量');
+      else message.success('已撤销合并，简历回到待确认');
+      setUndoItem(null);setReason('');onChanged();void load();
+    } catch(e){setError(getErrorMessage(e));}
+    finally{setActing(null);}
+  };
 
   const handleResolve = useCallback(
     (item: DuplicateItem, action: 'merge' | 'keep') => {
@@ -64,7 +86,7 @@ export default function DuplicatesDrawer({ open, onClose, onChanged }: Duplicate
                 新简历「{item.parsed_resume?.filename ?? `解析 #${item.parsed_resume?.id}`}」将并入画像 A
                 （{item.profile_a?.name}），经历取并集、能力维度沿用画像 A 原值。
               </Text>
-              <Text type="secondary">合并后原解析结果指向画像 A，此操作不可撤销。</Text>
+              <Text type="secondary">合并保留原件与历史。若合并后没有其他修改，可在已合并记录中申请撤销。</Text>
             </Space>
           ),
           okText: '确认合并',
@@ -130,15 +152,30 @@ export default function DuplicatesDrawer({ open, onClose, onChanged }: Duplicate
       open={open}
       onClose={onClose}
     >
+      <Space style={{marginBottom:16}}>
+        <Button type={view==='pending'?'primary':'default'} disabled={acting!==null} onClick={()=>setView('pending')}>待确认记录</Button>
+        <Button type={view==='merged'?'primary':'default'} disabled={acting!==null} onClick={()=>setView('merged')}>已合并记录</Button>
+      </Space>
+      {view==='merged'&&<Alert type="info" message="仅支持有完整日志且合并后未再修改的记录。旧记录需人工核查。"/>}
+      {error&&<Alert type="warning" message={error} showIcon/>}
+      <Modal title="撤销合并" open={undoItem!==null} okText="确认撤销" cancelText="取消"
+        confirmLoading={acting!==null} okButtonProps={{danger:true,disabled:!reason.trim()||acting!==null}}
+        onCancel={()=>{if(acting===null)setUndoItem(null);}} onOk={()=>void handleUndo()}>
+        <Typography.Paragraph>撤销会恢复合并前档案并将简历放回待确认；后续修改不会被覆盖。</Typography.Paragraph>
+        <label htmlFor="merge-undo-reason">撤销原因</label>
+        <Input.TextArea id="merge-undo-reason" maxLength={500} value={reason} onChange={e=>setReason(e.target.value)}/>
+      </Modal>
       <List
         loading={loading}
-        locale={{ emptyText: <Empty description="暂无待确认的重复简历" /> }}
+        locale={{ emptyText: <Empty description={view==='pending'?'暂无待确认的重复简历':'暂无已合并记录'} /> }}
         dataSource={items}
         renderItem={(item) => {
           const reason = duplicateReasonMeta(item.reason);
           return (
             <List.Item
-              actions={[
+              actions={view==='merged'?[
+                <Button key="undo" danger disabled={acting!==null} onClick={()=>{setUndoItem(item);setReason('');setError('');}}>撤销合并</Button>,
+              ]:[
                 <Button
                   key="merge"
                   size="small"

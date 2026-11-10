@@ -142,6 +142,7 @@ def list_page(
     degree: str | None = None,
     min_years: Decimal | float | None = None,
     max_years: Decimal | float | None = None,
+    allowed_ids: tuple[int,...] | None = None,
     offset: int = 0,
     limit: int = 20,
 ) -> tuple[list[TalentProfile], int]:
@@ -155,6 +156,8 @@ def list_page(
     - 排序：默认 `updated_at DESC`，回收站 `deleted_at DESC`，同秒内按 id DESC 稳定。
     """
     conds = [TalentProfile.deleted_at.is_not(None) if deleted else TalentProfile.deleted_at.is_(None)]
+    if allowed_ids is not None:
+        conds.append(TalentProfile.id.in_(allowed_ids))
     if keyword:
         pattern = _like_pattern(keyword)
         conds.append(

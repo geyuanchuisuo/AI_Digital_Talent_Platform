@@ -90,7 +90,7 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "work_years", "current_title", "expected_title", "skills_json", "tags_json",
         "ability_scores_json", "profile_text_hash", "vector_status",
         "vector_synced_at", "source", "manual_edited_fields", "deleted_at",
-        "deleted_by", "updated_by", "created_at", "updated_at",
+        "deleted_by", "updated_by", "created_at", "updated_at", "department_id",
     },
     "talent_tags": {
         "id", "talent_profile_id", "tag", "tag_type", "source", "created_at",

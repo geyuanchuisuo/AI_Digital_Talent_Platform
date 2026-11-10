@@ -31,6 +31,7 @@ class TalentProfile(PKMixin, UpdatedAtMixin, Base):
     """
 
     __tablename__ = "talent_profiles"
+    department_id: Mapped[int | None] = mapped_column(PK_TYPE, nullable=True)
     __table_args__ = (
         Index("idx_name", "name"),
         Index("idx_phone", "phone"),

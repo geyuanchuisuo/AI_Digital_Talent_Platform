@@ -18,6 +18,7 @@ import { useEffect, useState } from 'react';
 import { getErrorMessage } from '@/lib/http';
 
 import { patchTalent } from '../api';
+import TagSuggestions from '@/features/talents/TagSuggestions';
 import type { PatchTalentData, TalentProfileOut } from '../types';
 
 const TAG_TYPES = [
@@ -47,8 +48,11 @@ export default function TagEditModal({ open, profile, onClose, onPatched }: TagE
     }
   }, [open, profile]);
 
-  const skillRows = rows.filter((row) => row.tag_type === 'skill');
-  const editableRows = rows.filter((row) => row.tag_type !== 'skill');
+  const derivedSkills = new Set((profile.skills??[]).map(skill=>skill.toLocaleLowerCase()));
+  const isDerivedSkill = (row:{tag:string;tag_type?:string;existed:boolean}) =>
+    row.tag_type==='skill'&&row.existed&&derivedSkills.has(row.tag.toLocaleLowerCase());
+  const skillRows = rows.filter(isDerivedSkill);
+  const editableRows = rows.filter(row=>!isDerivedSkill(row));
 
   const addTag = () => {
     const name = newTag.trim();
@@ -99,9 +103,13 @@ export default function TagEditModal({ open, profile, onClose, onPatched }: TagE
         style={{ marginBottom: 12 }}
         type="info"
         showIcon
-        message="技能标签随「基本信息 → 技能」字段管理，在此只读；手动新增的标签不会被自动解析覆盖。"
+        message="由技能字段生成的标签在此只读；独立添加的人工标签可在此编辑，不会被自动解析覆盖。"
       />
       <Space direction="vertical" size={8} style={{ width: '100%' }}>
+        {open&&<TagSuggestions personId={profile.id} onChoose={(tag,tag_type)=>{
+          setRows(previous=>previous.some(row=>row.tag.toLocaleLowerCase()===tag.toLocaleLowerCase())
+            ?previous:[...previous,{tag,tag_type,existed:false}]);
+        }}/>}
         {skillRows.length > 0 && (
           <Space wrap size={4}>
             <Text type="secondary">技能（随技能字段管理）：</Text>

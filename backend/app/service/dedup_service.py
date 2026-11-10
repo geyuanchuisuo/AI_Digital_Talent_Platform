@@ -263,8 +263,19 @@ def _merge(
     if master is None or master.deleted_at is not None:
         raise BizError(400, "主画像不存在或已删除，无法合并")
 
+    duplicate = db.scalar(select(TalentDuplicate).where(TalentDuplicate.id == duplicate.id)
+        .with_for_update().execution_options(populate_existing=True))
+    if duplicate is None or duplicate.status != STATUS_PENDING:
+        raise BizError(409, "查重记录状态已变化，请刷新后重试")
+    parsed = db.scalar(select(ParsedResume).where(ParsedResume.id == parsed.id)
+        .with_for_update().execution_options(populate_existing=True))
+    if parsed is None:
+        raise BizError(409, "解析结果已变化，请刷新后重试")
+
     from app.modules.talents.history import save_version
     save_version(db, master, "baseline")
+    from app.modules.talents import merge_journal
+    before_merge = merge_journal.begin(db, master, parsed)
     data = _as_mapping(parsed.structured_json)
     values = profile_service.build_scalar_fields(data)
     protected = set(master.manual_edited_fields or [])
@@ -305,7 +316,8 @@ def _merge(
     task = _finish_task(db, parsed.resume_file_id, now)
 
     db.flush()
-    save_version(db, master, "merge", changed_by=user_id)
+    merged_version = save_version(db, master, "merge", changed_by=user_id)
+    merge_journal.finish(db, master, parsed, duplicate, before_merge, merged_version, user_id)
     db.commit()
     db.refresh(master)
     logger.info(
@@ -334,6 +346,11 @@ def _merge(
         task=task,
         vector_status=vector_status,
     )
+
+
+def undo_merge(db: Session, duplicate_id: int, *, user_id: int, reason: str) -> dict:
+    from app.modules.talents.merge_journal import undo
+    return undo(db, duplicate_id, user_id=user_id, reason=reason)
 
 
 def _merged_tag_rows(

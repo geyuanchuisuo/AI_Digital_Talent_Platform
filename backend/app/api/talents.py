@@ -53,11 +53,72 @@ from pydantic import BaseModel, Field
 class ProfileQuestionRequest(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
     version: int | None = Field(default=None, ge=1)
+    follow_up_to: int | None = Field(default=None, ge=1)
 
 
 class BatchQuestionRequest(BaseModel):
     person_ids: list[int] = Field(min_length=1,max_length=20)
     question: str = Field(min_length=1,max_length=1000)
+
+
+class DepartmentAssignment(BaseModel):
+    department_id: int | None = Field(default=None,ge=1)
+    reason: str = Field(min_length=1,max_length=500)
+
+
+class MergeUndoRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=500)
+
+
+@router.get('/tag-catalog')
+def get_tag_catalog(user: CurrentUser):
+    # Static vocabulary contains no person facts; all authenticated users may read it.
+    from app.modules.talents.tag_catalog import catalog
+    return ok(catalog())
+
+
+@router.get('/{talent_id}/tag-suggestions', dependencies=[Depends(require_profile_reader)])
+def get_tag_suggestions(talent_id: int, scope: AccountScopeDep,
+                        db: Annotated[Session, Depends(get_db)]):
+    from app.modules.talents.tag_catalog import suggest
+    snapshot = talent_service.get_person_snapshot(db, talent_id, scope=scope)
+    if snapshot['status'] != 'ready':
+        raise BizError(409, '档案当前不可用，无法提取标签依据')
+    return ok(suggest(snapshot))
+
+
+@router.get('/{talent_id}/questions', dependencies=[Depends(require_profile_reader)])
+def list_profile_questions(talent_id: int, user: CurrentUser, scope: AccountScopeDep,
+                           db: Annotated[Session, Depends(get_db)],
+                           offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=100)):
+    from app.modules.talents.qa_service import question_history
+    return ok(question_history(db, talent_id, user_id=user.id, scope=scope, offset=offset, limit=limit))
+
+
+@router.post('/duplicates/{duplicate_id}/undo', dependencies=[Depends(require_manager)])
+def undo_duplicate_merge(duplicate_id: int, payload: MergeUndoRequest, user: CurrentUser,
+                         db: Annotated[Session, Depends(get_db)]):
+    result = dedup_service.undo_merge(db, duplicate_id, user_id=user.id, reason=payload.reason)
+    return ok(result, message=HALF_WRITE_VECTOR_MESSAGE if result['vector_status'] == 'failed' else 'success')
+
+
+@router.patch('/{talent_id}/department',dependencies=[Depends(require_manager)])
+def assign_profile_department(talent_id: int,payload: DepartmentAssignment,user: CurrentUser,
+                              scope: AccountScopeDep,db: Annotated[Session,Depends(get_db)]):
+    if not scope.can_view_all_persons:raise BizError(403,'仅全量管理范围可调整组织归属')
+    if not payload.reason.strip():raise BizError(422,'需要填写调整依据')
+    from app.modules.system.models import SysDepartment
+    if payload.department_id is not None:
+        department=db.get(SysDepartment,payload.department_id)
+        if department is None or department.status!='active':raise BizError(422,'部门不可用')
+    from app.modules.talents.history import save_version
+    profile=talent_service._require_profile(db,talent_id,lock=True)
+    if profile.deleted_at is not None:raise BizError(404,'档案不存在')
+    save_version(db,profile,'baseline')
+    profile.department_id=payload.department_id
+    version=save_version(db,profile,'manual_edit',changed_by=user.id,change_reason=payload.reason)
+    db.commit()
+    return ok({'person_id':talent_id,'department_id':profile.department_id,'profile_version':version})
 
 
 @router.post('/questions/batch', dependencies=[Depends(require_manager)])
@@ -73,7 +134,7 @@ def ask_profile_question(talent_id: int, payload: ProfileQuestionRequest,
                          db: Annotated[Session, Depends(get_db)]):
     from app.modules.talents.qa_service import ask
     return ok(ask(db, talent_id, payload.question, user_id=user.id,
-                  scope=scope, version=payload.version))
+                  scope=scope, version=payload.version, follow_up_to=payload.follow_up_to))
 
 
 @router.post('/{talent_id}/questions/index', dependencies=[Depends(require_manager),Depends(require_profile_reader)])
@@ -215,6 +276,7 @@ def list_talents(
         max_years=max_years,
         offset=page.offset,
         limit=page.limit,
+        scope=get_account_scope(user),
     )
     return paginated(
         [TalentListItem.model_validate(item).model_dump() for item in items],
@@ -236,7 +298,7 @@ def search_talents(
     Embedding/Milvus 不可用 → 503（本接口无业务写入，接口 §5 明确的 503 合法场景）。
     相同查询文本命中 embedding 短期缓存（300s TTL，命中不算真实调用）。
     """
-    items = talent_service.search_talents(db, query=query, top_k=top_k)
+    items = talent_service.search_talents(db, query=query, top_k=top_k,scope=get_account_scope(user),user=user)
     return ok({"items": [TalentSearchItem.model_validate(item).model_dump() for item in items]})
 
 

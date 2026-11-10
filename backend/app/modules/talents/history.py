@@ -17,7 +17,7 @@ def _json(value):
 
 def _content(snapshot):
     result = deepcopy(snapshot)
-    for key in ('snapshot_at', 'profile_version', 'version_source', 'evidence', 'evidence_status', 'parse_status', 'parse_stage'):
+    for key in ('snapshot_at', 'profile_version', 'version_source', 'evidence', 'evidence_status', 'parse_status', 'parse_stage','change_reason'):
         result.pop(key, None)
     for key in ('created_at', 'updated_at', 'vector_status'):
         (result.get('profile') or {}).pop(key, None)
@@ -30,7 +30,7 @@ def current_version(db, person_id):
     ).order_by(TalentProfileVersion.version.desc()).limit(1))
 
 
-def save_version(db, profile, change_type, *, changed_by=None):
+def save_version(db, profile, change_type, *, changed_by=None, change_reason=None):
     from app.service import talent_service as svc
     if change_type not in {'baseline', 'reparse', 'manual_edit', 'merge', 'restore', 'delete'}:
         raise ValueError('Invalid profile change type')
@@ -45,8 +45,10 @@ def save_version(db, profile, change_type, *, changed_by=None):
         resume_file=files.get(file_id), parse_task=tasks.get(file_id),
         requested_version=None, snapshot_at=datetime.now().astimezone().isoformat(timespec='seconds'))
     snapshot = _json(snapshot)
+    if change_reason is not None:snapshot['change_reason']=change_reason
     from app.service.profile_service import FIELD_COLUMNS
     snapshot['_audit_profile'] = _json({key: getattr(profile, column) for key, column in FIELD_COLUMNS.items()})
+    snapshot['_audit_profile']['department_id'] = profile.department_id
     snapshot['sources'] = [_json(svc._parsed_snapshot(parsed, db.get(ResumeFile, parsed.resume_file_id)))
         for parsed in db.scalars(select(ParsedResume).where(ParsedResume.talent_profile_id == profile.id).order_by(ParsedResume.id))]
     from app.modules.talents.qa_sources import freeze_pages

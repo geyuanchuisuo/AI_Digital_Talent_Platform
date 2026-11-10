@@ -65,6 +65,7 @@ def list_talents(
     degree: str | None = None,
     min_years: float | None = None,
     max_years: float | None = None,
+    scope=None,
     offset: int = 0,
     limit: int = 20,
 ) -> tuple[list[dict[str, Any]], int]:
@@ -78,6 +79,7 @@ def list_talents(
         degree=degree or None,
         min_years=min_years,
         max_years=max_years,
+        allowed_ids=None if scope is None or scope.can_view_all_persons else (scope.allowed_person_ids or ()),
         offset=offset,
         limit=limit,
     )
@@ -209,7 +211,8 @@ def patch_profile(
     skills_changed = "skills" in values and values["skills"] != list(profile.skills_json or [])
     rebuild_tags = tags_changed or skills_changed
     new_tag_rows = (
-        build_tag_rows(tag_rows_before, values.get("tags"), skills_final) if rebuild_tags else None
+        build_tag_rows(tag_rows_before, values.get("tags"), skills_final,
+                       skills_before=list(profile.skills_json or [])) if rebuild_tags else None
     )
 
     if changed:
@@ -388,23 +391,29 @@ def build_tag_rows(
     existing: Sequence[TalentTag],
     requested: Sequence[TagEntry] | None,
     skills_final: Sequence[str],
+    *,
+    skills_before: Sequence[str] | None = None,
 ) -> list[tuple[str, str, str]]:
     """计算重建 `talent_tags` 的目标行 `(tag, tag_type, source)`（合并模型见模块 docstring）。
 
     - `requested=None`（只改 skills）：保留既有非技能行，技能行随 `skills_final` 增删；
+      调用方提供 skills_before 时，独立人工技能标签不因无关技能修改而删除。
     - `requested` 给定：以请求名单为准（缺的一并补上 skills 名单）；
     - 既有行 source 恒保留（`manual` 不被覆盖，接口 §5 PATCH 第 2 条）；新增行 source='manual'；
     - 名字命中 `skills_final` 的行 tag_type 恒为 `skill`（数据库 §5.2）。
     """
     existing_map = {row.tag: row for row in existing}
     skill_names = {name for name in (normalize_tag(skill) for skill in skills_final) if name}
+    original_skills = None if skills_before is None else {normalize_tag(s) for s in skills_before}
     requested_map: dict[str, str | None] = {}
 
     if requested is None:
         kept = [
             row.tag
             for row in existing
-            if not (row.tag_type == "skill" and row.tag not in skill_names)
+            if not (row.tag_type == "skill" and row.tag not in skill_names
+                    and not (row.source == 'manual' and original_skills is not None
+                             and row.tag not in original_skills))
         ]
         ordered = kept + sorted(name for name in skill_names if name not in existing_map)
     else:
@@ -435,7 +444,7 @@ SEARCH_QUERY_MAX_CHARS = 500
 VECTOR_UNAVAILABLE_PREFIX = "向量服务暂不可用"
 
 
-def search_talents(db: Session, *, query: str, top_k: int) -> list[dict[str, Any]]:
+def search_talents(db: Session, *, query: str, top_k: int, scope=None, user=None) -> list[dict[str, Any]]:
     """语义检索：query embedding（短期缓存）→ Milvus COSINE topK → 回查 MySQL 排除软删。
 
     本接口**无任何业务写入** → Embedding/Milvus 不可用时抛 503（接口 §5 的 503 合法
@@ -459,7 +468,17 @@ def search_talents(db: Session, *, query: str, top_k: int) -> list[dict[str, Any
         logger.warning("语义检索 embedding 失败：%s: %s", type(exc).__name__, exc)
         raise BizError(503, f"{VECTOR_UNAVAILABLE_PREFIX}（检索服务响应异常）") from exc
     try:
-        hits = get_store().search(vector, top_k=top_k)
+        if scope is None or scope.can_view_all_persons:
+            hits = get_store().search(vector, top_k=top_k)
+        else:
+            from types import SimpleNamespace
+            ids=list(scope.allowed_person_ids or ())
+            if not ids:return []
+            store=get_store();store.ensure_collection()
+            raw=store.client.search(collection_name=store.collection,data=[vector],limit=top_k,
+                filter='id in ['+','.join(str(int(i)) for i in ids)+']',
+                output_fields=['text_hash'],search_params={'metric_type':'COSINE'},consistency_level='Strong')
+            hits=[SimpleNamespace(talent_profile_id=int(h['id']),score=float(h['distance'])) for h in (raw[0] if raw else [])]
     except Exception as exc:  # noqa: BLE001
         logger.warning("语义检索 Milvus search 失败：%s: %s", type(exc).__name__, exc)
         raise BizError(503, f"{VECTOR_UNAVAILABLE_PREFIX}（检索服务响应异常）") from exc
@@ -473,9 +492,23 @@ def search_talents(db: Session, *, query: str, top_k: int) -> list[dict[str, Any
     tag_map = profile_dao.tag_rows_for_profiles(db, live_ids)
 
     items: list[dict[str, Any]] = []
+    if user is not None:
+        from app.core.auth.scope import get_account_scope
+        scope=get_account_scope(user)
+    # A split invalidates facts encoded in the old vector. Until rebuilding succeeds,
+    # even a residual Milvus hit must not influence search results.
+    from app.models.talent import TalentProfileEdit
+    split_people = set(db.scalars(select(TalentProfileEdit.talent_profile_id).where(
+        TalentProfileEdit.talent_profile_id.in_(list(rows)),
+        TalentProfileEdit.field_name == '_merge_undo_v1')))
     for hit in hits:
+        if scope is not None:
+            from app.core.auth.scope import authorize_profile_access
+            if not authorize_profile_access(scope,hit.talent_profile_id).allowed:continue
         row = rows.get(hit.talent_profile_id)
         if row is None or row.deleted_at is not None:
+            continue
+        if row.id in split_people and row.vector_status != 'synced':
             continue
         tag_rows = tag_map.get(row.id, [])
         items.append(
@@ -668,6 +701,7 @@ class AccountScope:
 
     role: str = "system"
     person_id: int | None = None
+    allowed_person_ids: tuple[int,...] | None = None
 
 
 def _normalize_scope(scope: AccountScope | Mapping[str, Any] | None) -> AccountScope:
@@ -675,6 +709,8 @@ def _normalize_scope(scope: AccountScope | Mapping[str, Any] | None) -> AccountS
     if isinstance(scope, SharedScope):
         if scope.can_view_all_persons:
             return AccountScope(role="system")
+        if scope.allowed_person_ids is not None:
+            return AccountScope(role='hr',allowed_person_ids=scope.allowed_person_ids)
         if scope.person_id is None:
             raise SnapshotScopeError("无权访问该资源")
         return AccountScope(role="personal", person_id=scope.person_id)
@@ -695,6 +731,10 @@ def _normalize_scope(scope: AccountScope | Mapping[str, Any] | None) -> AccountS
 
 
 def _ensure_scope(scope: AccountScope, person_ids: Sequence[int]) -> None:
+    if scope.allowed_person_ids is not None:
+        if any(pid not in scope.allowed_person_ids for pid in person_ids):
+            raise SnapshotScopeError('无权访问该资源')
+        return
     if scope.role != "personal":
         return
     for person_id in person_ids:
@@ -1011,6 +1051,20 @@ def get_person_snapshot(
     if profile is not None and profile.deleted_at is None:
         persisted = read_version(db, person_id, version)
         if persisted is not None:
+            current_sources = set(db.scalars(select(ParsedResume.resume_file_id).where(
+                ParsedResume.talent_profile_id == person_id)))
+            referenced_sources = {s.get('resume_file_id') for s in persisted.get('sources', [])}
+            referenced_sources.update(s.get('file_id') for s in persisted.get('source_pages', []))
+            referenced_sources.update(s.get('file_id') for s in persisted.get('evidence', []))
+            if persisted.get('parsed'):
+                referenced_sources.add(persisted['parsed'].get('resume_file_id'))
+            referenced_sources.discard(None)
+            if not referenced_sources.issubset(current_sources):
+                # Preserve immutable historical data for audit, but do not expose
+                # another person's incorrectly merged facts through old versions.
+                return _empty_snapshot(person_id, 'source_unavailable',
+                    datetime.now().astimezone().isoformat(timespec='seconds'),
+                    profile_version=persisted['profile_version'], reason='历史来源当前不可访问')
             if version is None:
                 persisted["profile"]["vector_status"] = profile.vector_status
                 persisted["parse_status"] = task_row.status if task_row is not None else None

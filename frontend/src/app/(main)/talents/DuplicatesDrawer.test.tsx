@@ -2,12 +2,13 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import DuplicatesDrawer from './DuplicatesDrawer';
-import { fetchDuplicates, resolveDuplicate } from './api';
+import { fetchDuplicates, resolveDuplicate, undoMerge } from './api';
 import type { DuplicateItem } from './types';
 
 vi.mock('./api', () => ({
   fetchDuplicates: vi.fn(),
   resolveDuplicate: vi.fn(),
+  undoMerge: vi.fn(),
   restoreTalent: vi.fn(),
   fetchTalents: vi.fn(),
   searchTalents: vi.fn(),
@@ -84,7 +85,7 @@ describe('DuplicatesDrawer', () => {
     render(<DuplicatesDrawer open onClose={vi.fn()} onChanged={vi.fn()} />);
     await waitFor(() => expect(screen.getAllByText('张三-新版.pdf').length).toBeGreaterThan(0));
 
-    fireEvent.click(screen.getAllByRole('button', { name: /合\s*并/ })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: /^合\s*并$/ })[0]);
     fireEvent.click(await screen.findByRole('button', { name: '确认合并' }));
 
     await waitFor(() => expect(resolveDuplicateMock).toHaveBeenCalledWith(1, { action: 'merge' }));
@@ -94,5 +95,21 @@ describe('DuplicatesDrawer', () => {
     fetchDuplicatesMock.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 50 });
     render(<DuplicatesDrawer open onClose={vi.fn()} onChanged={vi.fn()} />);
     await waitFor(() => expect(screen.getByText('暂无待确认的重复简历')).toBeTruthy());
+  });
+
+  it('切到已合并记录，填写原因后撤销并刷新', async () => {
+    const onChanged=vi.fn();
+    fetchDuplicatesMock.mockImplementation(async (_page,_size,status)=>({
+      items:status==='merged'?[dupItem({id:1,reason:'phone_match',status:'merged'})]:PENDING,
+      total:1,page:1,page_size:50}));
+    vi.mocked(undoMerge).mockResolvedValue({duplicate_id:1,status:'pending',master_profile_id:5,
+      profile_version:3,vector_status:'synced'});
+    render(<DuplicatesDrawer open onClose={vi.fn()} onChanged={onChanged}/>);
+    fireEvent.click(screen.getByRole('button',{name:'已合并记录'}));
+    fireEvent.click(await screen.findByRole('button',{name:'撤销合并'}));
+    fireEvent.change(await screen.findByLabelText('撤销原因'),{target:{value:'误判为同一个人'}});
+    fireEvent.click(screen.getByRole('button',{name:'确认撤销'}));
+    await waitFor(()=>expect(undoMerge).toHaveBeenCalledWith(1,'误判为同一个人'));
+    await waitFor(()=>expect(onChanged).toHaveBeenCalled());
   });
 });

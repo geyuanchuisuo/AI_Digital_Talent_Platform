@@ -9,7 +9,9 @@ def test_integrated_b_and_d_have_one_migration_head():
     script = ScriptDirectory.from_config(config)
     assert len(script.get_heads()) == 1
     head = script.get_revision(script.get_current_head())
-    assert head.revision == 'B_0007_merge_learning_evidence'
+    assert head.revision == 'B_0008_profile_department'
+    assert head.down_revision == 'B_0007_merge_learning_evidence'
+    head=script.get_revision(head.down_revision)
     integrated_head = head
     qa_head = script.get_revision('B_0006_profile_questions')
     assert set(integrated_head.down_revision) == {qa_head.revision,'C_0007_learning_evidence_key'}

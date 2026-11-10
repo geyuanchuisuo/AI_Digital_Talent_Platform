@@ -73,6 +73,12 @@ export function resolveDuplicate(
   return post<MergeResolveData | KeepResolveData>(`/talents/duplicates/${duplicateId}/resolve`, payload);
 }
 
+export function undoMerge(duplicateId:number,reason:string):Promise<{
+  duplicate_id:number;status:'pending';master_profile_id:number;profile_version:number;vector_status:string;
+}> {
+  return post(`/talents/duplicates/${duplicateId}/undo`,{reason});
+}
+
 /** 撤销软删除（回收站用）；向量随 restore 强制重算，失败仍是 200 + failed */
 export function restoreTalent(talentId: number): Promise<RestoreTalentData> {
   return post<RestoreTalentData>(`/talents/${talentId}/restore`);

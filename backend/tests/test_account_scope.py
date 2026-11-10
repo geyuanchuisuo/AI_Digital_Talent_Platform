@@ -23,6 +23,11 @@ def _user(role: str, person_id: int | None = None) -> SimpleNamespace:
     return SimpleNamespace(id=1, username="u", role=role, person_id=person_id)
 
 
+@pytest.fixture(autouse=True)
+def isolate_management_role_lookup(monkeypatch):
+    monkeypatch.setattr('app.core.auth.scope._management_range',lambda *a:(True,(),None,()))
+
+
 def test_hr_maps_to_admin_side():
     scope = get_account_scope(_user("hr"))
     assert scope.role == "hr"
