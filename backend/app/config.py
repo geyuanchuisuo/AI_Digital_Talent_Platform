@@ -82,6 +82,15 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = 120
     rate_limit_window_seconds: int = 60
     rate_limit_blacklist_ttl: int = 3600
+    # D02（Master 统一执行表）：限流环境开关。
+    # - False（默认）：演示/验收环境维持 main.py 的 `/api` 全量豁免。原因是黑名单键
+    #   `aitalent:ratelimit:blacklist:{ip}` 写在共享 Redis，多环境共用会把其它环境
+    #   的业务请求全部打成 403（2026-11-08 用户验收实测两轮）。
+    # - True：客户模式，`main.py` 只豁免 `/api/health`，429 / 403 / 降级按
+    #   `docs/modules/D/缓存限流契约.md` 生效。**必须**给每个环境配独立 Redis 实例
+    #   或独立 DB 号（REDIS_URL 的 `/N`），否则仍会跨环境串扰。
+    # 仅控制 A 挂载的豁免路径；D 的 RateLimitMiddleware / CacheClient 实现不改。
+    rate_limit_enabled: bool = False
 
     # ---- PostgreSQL 只读分析副本（T-D02，D 维护 scripts/D/etl_pgsql.py；契约 docs/modules/D/ETL说明.md）----
     # 空 ANALYTICS_DB_URL = 副本未启用：自由问数/报表降级主库 MySQL 直查（V2.6 确认的回退口径）。
