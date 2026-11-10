@@ -42,7 +42,7 @@ export function createRound(payload: RoundPayload): Promise<InterviewRound> {
   return post<InterviewRound>('/interviews/rounds', payload);
 }
 
-export function updateRound(id: number, payload: Partial<RoundPayload> & { status?: 'pending' | 'completed' }): Promise<InterviewRound> {
+export function updateRound(id: number, payload: Partial<RoundPayload> & { status?: 'pending' | 'in_progress' | 'completed' }): Promise<InterviewRound> {
   return patch<InterviewRound>(`/interviews/rounds/${id}`, payload);
 }
 

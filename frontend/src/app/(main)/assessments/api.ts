@@ -38,6 +38,23 @@ export function approveQuestion(id: number): Promise<AssessmentQuestion> {
   return post<AssessmentQuestion>(`/assessments/questions/${id}/approve`);
 }
 
+export function updateQuestion(id: number, payload: Partial<QuestionPayload>): Promise<AssessmentQuestion> {
+  return patch<AssessmentQuestion>(`/assessments/questions/${id}`, payload);
+}
+
+/** 模型生成待审核题目（自适应题库供给），生成后需人工审核 */
+export function generateQuestionDrafts(payload: {
+  dimension_name: string;
+  dimension_type?: string;
+  difficulty?: string;
+  question_type?: 'single_choice' | 'short_answer';
+  count?: number;
+  job_id?: number | null;
+  job_title?: string | null;
+}): Promise<AssessmentQuestion[]> {
+  return post<AssessmentQuestion[]>('/assessments/questions/generate-draft', payload);
+}
+
 export interface PlanPayload {
   purpose: 'recruitment' | 'employee';
   job_id: number;
@@ -68,6 +85,11 @@ export function createPlan(payload: PlanPayload): Promise<AssessmentPlan> {
 
 export function publishPlan(id: number): Promise<AssessmentPlan> {
   return post<AssessmentPlan>(`/assessments/plans/${id}/publish`);
+}
+
+/** 修改草稿方案（purpose/job_id 创建后不可改） */
+export function updatePlan(id: number, payload: Partial<PlanPayload>): Promise<AssessmentPlan> {
+  return patch<AssessmentPlan>(`/assessments/plans/${id}`, payload);
 }
 
 export function fetchAssignments(params: {

@@ -7,11 +7,11 @@
 
 import {
   Alert,
+  AutoComplete,
   Button,
   Card,
   Form,
   Input,
-  InputNumber,
   Select,
   Space,
   Table,
@@ -33,6 +33,7 @@ import {
   fetchCourses,
   fetchEnrollments,
   fetchLearningEvidence,
+  fetchMyPlans,
   releaseExpiredEnrollments,
   startLearningSession,
   submitLearningEvidence,
@@ -52,6 +53,12 @@ function enrollTag(status: string) {
   const item = ENROLL_STATUS[status] ?? { color: 'default', text: status };
   return <Tag color={item.color}>{item.text}</Tag>;
 }
+
+const LEARNING_STATUS: Record<string, string> = {
+  not_started: '未开始',
+  learning: '学习中',
+  completed: '已完成',
+};
 
 function useCourses() {
   const [courses, setCourses] = useState<TrainingCourse[]>([]);
@@ -164,7 +171,8 @@ function EmployeeApply() {
   const [form] = Form.useForm();
 
   const submit = async () => {
-    const values = await form.validateFields();
+    const values = await form.validateFields().catch(() => null);
+    if (!values) return;
     try {
       const res = await applyEnrollment(values);
       message.success(`报名已提交（${ENROLL_STATUS[res.status]?.text ?? res.status}）`);
@@ -203,6 +211,32 @@ function EvidencePanel({ isAdmin }: { isAdmin: boolean }) {
   const [form] = Form.useForm();
   const [recordId, setRecordId] = useState<number | null>(null);
   const [rows, setRows] = useState<LearningEvidence[]>([]);
+  const [recordOptions, setRecordOptions] = useState<{ value: number; label: string }[]>([]);
+
+  useEffect(() => {
+    if (isAdmin) return;
+    fetchMyPlans()
+      .then((data) => {
+        const options = data.items.flatMap((plan) =>
+          (plan.items ?? [])
+            .filter((item) => item.learning.record_id)
+            .map((item) => ({
+              value: item.learning.record_id as number,
+              label: `#${item.learning.record_id} ${item.course_snapshot.title}（${
+                LEARNING_STATUS[item.learning.status] ?? item.learning.status
+              }${item.learning.formal_completed ? '·已认定' : ''}）`,
+            })),
+        );
+        setRecordOptions(options);
+      })
+      .catch((error) => message.error(getErrorMessage(error)));
+  }, [isAdmin]);
+
+  const recordIdValue = (): number | null => {
+    const raw = form.getFieldValue('learning_record_id') as string | number | undefined;
+    const num = Number(raw);
+    return Number.isInteger(num) && num > 0 ? num : null;
+  };
 
   const load = async (id: number) => {
     try {
@@ -213,7 +247,8 @@ function EvidencePanel({ isAdmin }: { isAdmin: boolean }) {
   };
 
   const submit = async () => {
-    const values = await form.validateFields();
+    const values = await form.validateFields().catch(() => null);
+    if (!values) return;
     let payload: Record<string, unknown> = {};
     if (values.payload) {
       try {
@@ -224,7 +259,11 @@ function EvidencePanel({ isAdmin }: { isAdmin: boolean }) {
       }
     }
     try {
-      await submitLearningEvidence({ ...values, payload });
+      await submitLearningEvidence({
+        ...values,
+        learning_record_id: Number(values.learning_record_id),
+        payload,
+      });
       message.success('证据已提交');
       form.resetFields(['evidence_type', 'payload']);
       if (recordId) void load(recordId);
@@ -234,9 +273,9 @@ function EvidencePanel({ isAdmin }: { isAdmin: boolean }) {
   };
 
   const startSession = async () => {
-    const id = form.getFieldValue('learning_record_id') as number | undefined;
+    const id = recordIdValue();
     if (!id) {
-      message.warning('请先填写学习记录 ID');
+      message.warning('请先选择或输入学习记录');
       return;
     }
     try {
@@ -250,9 +289,9 @@ function EvidencePanel({ isAdmin }: { isAdmin: boolean }) {
   };
 
   const confirm = async () => {
-    const id = form.getFieldValue('learning_record_id') as number | undefined;
+    const id = recordIdValue();
     if (!id) {
-      message.warning('请先填写学习记录 ID');
+      message.warning('请先选择或输入学习记录');
       return;
     }
     try {
@@ -275,10 +314,32 @@ function EvidencePanel({ isAdmin }: { isAdmin: boolean }) {
       />
       <Form form={form} layout="vertical">
         <Space size={8} wrap>
-          <Form.Item name="learning_record_id" label="学习记录 ID" rules={[{ required: true }]}>
-            <InputNumber
-              min={1}
-              onChange={(v) => setRecordId(typeof v === 'number' ? v : null)}
+          <Form.Item
+            name="learning_record_id"
+            label="学习记录"
+            rules={[
+              { required: true, message: '请选择或输入学习记录' },
+              {
+                validator: (_, value) =>
+                  value === undefined || value === null || value === ''
+                    ? Promise.resolve()
+                    : Number.isInteger(Number(value)) && Number(value) > 0
+                      ? Promise.resolve()
+                      : Promise.reject(new Error('学习记录 ID 需为正整数')),
+              },
+            ]}
+          >
+            <AutoComplete
+              style={{ width: 300 }}
+              options={recordOptions}
+              placeholder={isAdmin ? '输入学习记录 ID' : '选择我的学习记录（也可输入 ID）'}
+              filterOption={(input, option) =>
+                String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+              }
+              onChange={(v) => {
+                const num = Number(v);
+                setRecordId(Number.isInteger(num) && num > 0 ? num : null);
+              }}
             />
           </Form.Item>
           <Form.Item name="evidence_type" label="证据类型" rules={[{ required: true }]}>
@@ -303,9 +364,9 @@ function EvidencePanel({ isAdmin }: { isAdmin: boolean }) {
           {isAdmin && <Button onClick={() => void confirm()}>认定正式完成</Button>}
           <Button
             onClick={() => {
-              const id = form.getFieldValue('learning_record_id') as number | undefined;
+              const id = recordIdValue();
               if (!id) {
-                message.warning('请先填写学习记录 ID');
+                message.warning('请先选择或输入学习记录');
                 return;
               }
               setRecordId(id);
