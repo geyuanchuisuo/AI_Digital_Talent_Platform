@@ -201,6 +201,11 @@ from app.modules.dashboard.router import router as ai_platform_router  # noqa: E
 
 app.include_router(ai_platform_router)
 
+# D 数字员工（T-D21）：/api/workflows/digital IM 绑定/三类只读任务/外发请求登记
+from app.modules.workflows.digital.router import router as digital_router  # noqa: E402
+
+app.include_router(digital_router)
+
 from app.core.tasks.events import router as task_events_router  # noqa: E402
 
 app.include_router(task_events_router)

@@ -429,6 +429,20 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "prompt_tokens", "completion_tokens", "error", "actor_user_id",
         "created_at", "updated_at",
     },
+    "member_im_accounts": {
+        "id", "user_id", "channel", "im_user_id", "source", "enabled", "note",
+        "created_at", "updated_at",
+    },
+    "digital_tasks": {
+        "id", "task_type", "status", "idempotency_key", "trigger", "triggered_by",
+        "notify_admin_ids", "result_json", "summary", "error", "started_at",
+        "finished_at", "created_at", "updated_at",
+    },
+    "digital_outbound_requests": {
+        "id", "task_id", "channel", "target_im_user_id", "content", "status",
+        "requested_by", "decided_by", "decided_at", "decision_note", "sent_at",
+        "created_at", "updated_at",
+    },
 }
 
 EXPECTED_UNIQUE: dict[str, set[str]] = {
@@ -474,6 +488,8 @@ EXPECTED_UNIQUE: dict[str, set[str]] = {
     "workflow_skill_versions": {"uk_workflow_skill_version"},
     "ai_providers": {"uk_ai_providers_name"},
     "ai_prompt_versions": {"uk_ai_prompt_versions"},
+    "member_im_accounts": {"uk_member_im_user_channel"},
+    "digital_tasks": {"uk_digital_tasks_idem"},
 }
 
 EXPECTED_INDEXES: dict[str, set[str]] = {
@@ -501,6 +517,9 @@ EXPECTED_INDEXES: dict[str, set[str]] = {
     "workflow_skill_versions": {"idx_wsv_skill_status"},
     "ai_prompt_versions": {"idx_aip_name_status"},
     "ai_call_logs": {"idx_aic_created", "idx_aic_purpose"},
+    "member_im_accounts": {"idx_mia_user"},
+    "digital_tasks": {"idx_dt_type_status"},
+    "digital_outbound_requests": {"idx_dor_status", "idx_dor_task"},
 }
 
 
@@ -509,9 +528,9 @@ def ddl(model) -> str:
 
 
 def test_exactly_70_tables_and_no_phase2_table():
-    assert len(TABLE_NAMES) == 80
-    assert len(MODEL_CLASSES) == 80
-    assert len(Base.metadata.tables) == 80
+    assert len(TABLE_NAMES) == 83
+    assert len(MODEL_CLASSES) == 83
+    assert len(Base.metadata.tables) == 83
     assert set(TABLE_NAMES) == set(EXPECTED_COLUMNS)
     # D-7 缓办：一期不建 llm_score_cache
     assert "llm_score_cache" not in Base.metadata.tables
