@@ -14,12 +14,23 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser
+from app.core.auth.scope import account_is_management
 from app.core.response import ok
 from app.database import get_db
 from app.schemas.auth import LoginData, LoginRequest, UserOut
 from app.service import auth_service
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+def _build_user_out(db: Session, user) -> UserOut:
+    """聚合 UserOut：补充后端权威的 is_management（sys_user_roles 聚合）。
+
+    不再让前端用 role 字段自己猜权限——统一走 account_is_management。
+    """
+    base = UserOut.model_validate(user).model_dump()
+    base["is_management"] = account_is_management(db, user)
+    return UserOut(**base)
 
 
 @router.post("/login", summary="账号密码登录")
@@ -32,16 +43,21 @@ def login(
     data = LoginData(
         token=token,
         expires_in=expires_in,
-        user=UserOut.model_validate(user),
+        user=_build_user_out(db, user),
     )
     return ok(data.model_dump())
 
 
 @router.get("/me", summary="当前登录用户")
-def me(user: CurrentUser):
+def me(
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
     """返回 token 对应的用户信息；token 失效 401、账号停用 403。
 
     依赖由 `app.api.deps.get_current_user` 提供：无 token / 过期 / 篡改 → 401，
     token 合法但账号停用 → 403（一期不做 RBAC）。
+
+    新增 is_management：后端聚合 sys_user_roles 判定，前端据此做 UI 门控。
     """
-    return ok(UserOut.model_validate(user).model_dump())
+    return ok(_build_user_out(db, user).model_dump())
