@@ -98,17 +98,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# T-D01（REQ-D-20261107-183200，2026-11-07 用户指令 D 直接落地）：Redis 限流/黑名单中间件。
-# REDIS_URL 为空 = 直通零副作用；配置后固定窗口限流 + 黑名单 403，Redis 停服降级放行。
-# 契约：docs/modules/D/缓存限流契约.md。
-# 限流豁免（2026-11-08 二次修复，升级此前的 /api/auth 豁免）：RateLimitMiddleware 的
-# 黑名单键（ratelimit:blacklist:{ip}）写在共享 Redis，其他环境（如 D 的测试）写入会
-# 把本环境全部业务请求打成 403 → 前端渲染「账号已停用」并踢回登录页（用户验收实测两轮）。
-# 单机演示无业务限流需求（限流是客户部署的验收项，V2.6 §7），故本环境全量豁免 /api；
-# 客户部署启用限流时在部署配置中移除本豁免并按环境隔离 Redis（键前缀）。
+# T-D01（REQ-D-20261107-183200）Redis 限流/黑名单中间件：REDIS_URL 为空 = 直通零副作用；
+# 配置后固定窗口限流 429 + 黑名单 403，Redis 停服降级放行。契约 docs/modules/D/缓存限流契约.md。
+# D02（Master 统一执行表，2026-11-10 A 侧交付）：把原先写死的「/api 全量豁免」改为由
+# settings.rate_limit_enabled 控制的**环境开关**。默认 False 保持演示/验收环境行为不变
+# （黑名单键 aitalent:ratelimit:blacklist:{ip} 在共享 Redis 会跨环境串扰，2026-11-08
+# 用户验收实测两轮）；客户部署置 RATE_LIMIT_ENABLED=true 并为每个环境指定独占 Redis
+# 实例/DB 号后，只豁免健康检查，限流才真正生效。D 的 RateLimitMiddleware / CacheClient
+# 实现不改（键前缀按部署侧隔离），A 不擅自改 D 归属文件。
 from app.core.cache.ratelimit import DEFAULT_EXEMPT_PATHS  # noqa: E402
 
-app.add_middleware(RateLimitMiddleware, exempt_paths=(*DEFAULT_EXEMPT_PATHS, "/api"))
+
+def rate_limit_exempt_paths() -> tuple[str, ...]:
+    """D02 环境开关：返回 RateLimitMiddleware 的豁免路径。
+
+    - 默认（演示/验收）：`DEFAULT_EXEMPT_PATHS + ("/api",)`，历史行为零变化；
+    - 客户模式（RATE_LIMIT_ENABLED=true）：只保留 `DEFAULT_EXEMPT_PATHS`
+      （当前为 `/api/health`），业务接口进入限流/黑名单/降级判定。
+
+    抽出为函数便于单测直接断言开关语义，不必重建生产 app。
+    """
+    if settings.rate_limit_enabled:
+        return DEFAULT_EXEMPT_PATHS
+    return (*DEFAULT_EXEMPT_PATHS, "/api")
+
+
+app.add_middleware(RateLimitMiddleware, exempt_paths=rate_limit_exempt_paths())
 
 # T-02：四类全局异常处理器（BizError / HTTPException / RequestValidationError / Exception）
 # 口径见 docs/统一错误码与鉴权.md v1.2 §六；request_id 由下方中间件写入 request.state。

@@ -123,6 +123,7 @@
 - v0.1.11（2026-11-07 09:29）：用户「问题一个一个问我」逐条裁决 C-01～C-11 / U-01～U-09（结论登记 [清单 §6](架构待确认问题清单.md)），并追加「推送前记得测试，测试通过才能推送合并」。落地：C-01 断言修复、C-07 默认前缀 `aitalent-app`、C-02/C-03 README 澄清、U-03 ownership 变更（单独提交）、U-04 旧 Key 本机 `.env`。R-A01 解除。**M2 暂缓（U-07）**。同轮测试完成（09:52）：隔离环境 bootstrap 自检 7/7（真实 LLM/Embedding 调用成功）、health 200 worker alive、全量 pytest **0 失败**、vitest **66/66**；T-A01/T-A05 勾选；新坑 H-A26（`.env` 隔离名覆盖 `test_config` 默认值断言，改回默认）。**U-09 前提「测试通过」已满足**，进入授权推送流程；人工浏览器测试关键节点再叫（U-08）。
 - v0.1.12（2026-11-07 14:50）：**需求冻结（V2.6）**——用户指令按 design 四件与 PRD 核对需求文档，冲突 4 处按原需求改回（系统管理域 RBAC 表体系、JD 生成投放、岗前培养计划、候选人管理实体），状态改为已冻结；AGENTS/README 基线对齐。M3+ 重排解锁：F01 增 JD 投放、F05 增岗前培养、系统管理域表体系（sys_*）纳入——A 下一批任务按 V2.6 重排（人才需求实体含 headcount、JD 投放接口、招聘状态机）。同轮功能 6/7 已集成（T-A41/T-A53）。
 - v0.1.13（2026-11-10 10:00）：**T-A06 重排落地**。同步 `origin/master 824809e → bca345e`（52 提交），`tasks/A.md` 新增 Master 统一执行表入口；头部口径改回 V2.6，批次总览与 M3-V2.6 的 T-A60a~f 按实证勾选，新增「状态快照」与「未收口清单」。同轮受理 `REQ-C-20261109-121506` 修复 `C_0001` 空库外键 P0、同步三列与物理外键白名单断言；隔离库空库升级到 `C_0007` 单 head 通过、后端 759 / 前端 104 用例全绿。**未 push、未合 master、未做人工验收**。证据：[1000 记录](../../updates/A/20261110-1000-C_0001空库迁移修复与结构基线同步.md)。
+- v0.1.14（2026-11-10 10:50）：用户明确「继续」的新口径（拉云仓对齐→跑 A→每单元测试→拉云仓→推送→合并主 master）。本轮拉云仓 `bca345e → 2c494da`（7 提交），rebase 解决与 B 的结构断言冲突（采用 B 严格集合断言 + 保留 A 裁决依据）；新基线 76 表、单 head `B_0007`、空库 31 步、后端 761 / 前端 113 用例全绿。**跑通单元 D02-A「限流环境开关」**：`config.py` 加开关、`main.py` 抽出 `rate_limit_exempt_paths()`、两份 `.env.example` 补部署说明、5 个新用例（9 passed）覆盖 429/403/降级，默认行为零变化。客户模式真实 Redis 端到端串扰复验仍记为未验证。证据：[1050 记录](../../updates/A/20261110-1050-D02限流环境开关与云仓对齐.md)。
 
 ## M3-V2.6 · 招聘域重排（需求冻结后按 V2.6 口径，2026-11-07）
 
@@ -147,9 +148,9 @@
 
 | 项 | 当前值 |
 |---|---|
-| 分支 / HEAD | `feature/A/continuation` @ `bca345e`；本地 `master` / `origin/master` 同 `bca345e`；`origin/feature/A/continuation` 仍 `824809e`（ahead 52，**本轮未 push**） |
-| 迁移链 | `A_0001~A_0008` + `B_0001~0002` + `C_0001~0007` + `D_0001~0009`；`alembic heads` 单 head **`C_0007_learning_evidence_key (head)`** |
-| 表 | 一期断言 **75 张**（70 + 5 B history）、去重 75；隔离完整库实测 78 张（含 `alembic_version` 等） |
+| 分支 / HEAD | `feature/A/continuation` @ `2c494da` + A 的 2 提交；本地 `master` / `origin/master` 同 **`2c494da`**；`origin/feature/A/continuation` 仍 `824809e`。10:50 起按用户新口径「继续 = 拉云仓→跑 A→每单元测试→拉云仓→推送→合并主 master」执行发布 |
+| 迁移链 | `A_0001~A_0008` + `B_0001~B_0007` + `C_0001~C_0007` + `D_0001~D_0009`；`B_0005`/`B_0007` 为合并迁移，`alembic heads` 单 head **`B_0007_merge_learning_evidence (head)`** |
+| 表 | 一期断言 **76 张**（75 + B `talent_profile_questions`）、去重 76；隔离库空库整链 31 步实测通过 |
 | 路由 | `backend/app/main.py` **14 个** `include_router` |
 | 运行态 | 后端 8101 / 前端 3101 / MySQL 3308 / Milvus 19532，容器 `aitalent_main-*`；**本轮未重启** |
 
@@ -157,11 +158,12 @@
 
 | 项 | 结果 |
 |---|---|
-| 后端全量（隔离库 `ai_talent_a_probe`，补种子后） | **exit 0**，759 用例 / 758 passed / 1 skipped / 0 failed / 0 error |
-| 前端 `npm test` | **exit 0**，22 文件 / 104 用例 |
+| 后端全量（隔离库 `ai_talent_a_probe`，补种子后，`2c494da` 基线） | **exit 0**，761 用例 / 760 passed / 1 skipped / 0 failed / 0 error |
+| 前端 `npm test` | **exit 0**，25 文件 / 113 用例 |
 | `tsc --noEmit` | **exit 0** |
-| 空库 `alembic upgrade head` | **exit 0**，24 步到 `C_0007`；二次升级幂等 |
-| 静态 | `diff --check` 通过；162 个 backend py AST 0 错 |
+| 空库 `alembic upgrade head` | **exit 0**，31 步到 `B_0007`（B 的 merge 迁移收编 C 链）；`C_0001` 修复在新链下仍有效 |
+| D02-A 单元单测 `test_app_integration_t02.py` | **exit 0，9 passed**（原 4 + 新 5：默认豁免 / 开关语义 / 429 / 403 / 降级） |
+| 静态 | `diff --check` 通过；260 个受控 backend py 文件 AST 0 错；14 个 `include_router`；`RATE_LIMIT_ENABLED` 默认值 `false`、环境变量 `true` 解析实测生效 |
 
 > 纪律：禁用 `pytest | tail`（`tail` 的 0 会掩盖真实失败）；一律重定向日志 + 单独 `echo $?`；`--basetemp` 用项目内 `.pytest_tmp_A_*`。主库 `ai_talent` 的 `alembic_version` 超前于实际 schema（缺三列 / 两条外键、表数 76），只读取证未处理，重建需用户授权。
 
@@ -171,7 +173,7 @@
 |---|---|---|---|
 | A02 | P0 | 空白（仍是硬门槛 0/NULL + 0.7/0.3 加权） | 消除旧算法替代、缺失资料待核实、内部建议不自动推进/淘汰；对应 T-A31/T-A34 |
 | A06 | P0 | 部分（`core/auth/scope.py` 基础） | 补部门经理/管理层/培训职责权限，逐入口/任务/导出越权反例；对应 T-A15 |
-| D02（A/D） | P0 | 空白（`main.py` 全量 `/api` 豁免） | 环境开关 + 隔离配置，客户模式验 429/403/故障降级 |
+| D02（A/D） | P0 | **A 侧开关已交付**（`RATE_LIMIT_ENABLED`，默认 false 演示豁免；true 只豁免 `/api/health`），5 用例覆盖 429/403/降级 | 客户模式在**真实 Redis + 多环境并存**下的串扰复验未做；D 归属 `ratelimit.py`/`client.py` 未改，代码级键前缀隔离需 A 发请求、D 实现 |
 | A03 / A08 / A11 / A12 / A14 | P1 | 空白或未获完整实现证据 | 批次档案冻结、申请输入快照、审批链、真实 AI JD 草稿、员工花名册 |
 | A01 / A04 / A10 / A13 / A15 | P1 | `×`（代码已实现） | 按执行表「通过条件」逐条接入/验收，**A 不替 Master 改表** |
 | A05 / A09（配合 D/B） | P1 | 待联动 | A 交付授权需求与人工录用口径、招聘推荐规则 |
