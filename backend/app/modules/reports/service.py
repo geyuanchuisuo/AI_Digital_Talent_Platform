@@ -152,6 +152,16 @@ def _build_docx(
         doc.add_paragraph("（无数据行）")
 
     chart = result.get("chart") or {}
+    if chart.get("chart_type") not in (None, "none"):
+        # PRD D16：真实图形嵌入（确定性 PNG 渲染；none/未知类型不嵌图，与 T-D11 一致）
+        from app.modules.reports import chart_render
+
+        png = chart_render.render_chart_png(chart, title=str(metric_id))
+        if png:
+            from docx.shared import Inches
+
+            doc.add_heading("图表", level=2)
+            doc.add_picture(io.BytesIO(png), width=Inches(6.2))
     if chart.get("data"):
         doc.add_heading("图表数据", level=2)
         chart_rows = [{"name": p["name"], "value": p["value"]} for p in chart["data"]]
@@ -239,6 +249,19 @@ def _build_pdf(
         story.append(Paragraph("（无数据行）", body))
 
     chart = result.get("chart") or {}
+    if chart.get("chart_type") not in (None, "none"):
+        # PRD D16：真实图形嵌入（确定性 PNG；与 DOCX 同源渲染器）
+        from app.modules.reports import chart_render
+
+        png = chart_render.render_chart_png(chart, title=str(metric_id))
+        if png:
+            from PIL import Image as PILImage
+            from reportlab.lib.units import inch
+            from reportlab.platypus import Image as RLImage
+
+            w, h = PILImage.open(io.BytesIO(png)).size
+            story.append(Paragraph("图表", heading))
+            story.append(RLImage(io.BytesIO(png), width=6.2 * inch, height=6.2 * inch * h / w))
     if chart.get("data"):
         story.append(Paragraph("图表数据", heading))
         cdata = [["name", "value"]] + [
