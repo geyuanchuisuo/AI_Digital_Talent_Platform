@@ -3,9 +3,10 @@
 /**
  * 我的岗位申请（2026-11-07，T-A60f）：个人端第一块真实业务页面。
  *
- * 数据：GET /api/recruitment/applications?talent_profile_id=<本人>（后端
- * AccountScope 为最终授权点；前端仅展示）。仅展示对外阶段（五阶段中文）
- * 与经 HR 确认的结果类别——内部评分/面试反馈不在此接口响应中（V2.6 F01）。
+ * 数据：GET /api/recruitment/applications?talent_profile_id=<本人>（A08 起后端
+ * 以 AccountScope 为最终授权点强制收窄，忽略前端伪造的 talent_profile_id）。
+ * 仅展示对外阶段（五阶段中文）与经 HR 确认的结果类别——内部阶段、推进原因、
+ * 内部评分/面试反馈、申请输入快照均不在此接口响应中（V2.6 F01）。
  * 未绑定档案（person_id 为空）时提示联系 HR，不发请求。
  */
 
@@ -18,7 +19,6 @@ import { get } from '@/lib/http';
 interface ApplicationRow {
   id: number;
   job_profile_id: number;
-  internal_stage: string;
   external_stage: 'submitted' | 'screening' | 'interviewing' | 'deciding' | 'closed';
   result_category: string | null;
   result_published: boolean;

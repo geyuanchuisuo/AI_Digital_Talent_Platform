@@ -1,6 +1,6 @@
 # 开发计划 · Todolist · 板块 A
 
-> 版本：v0.1.22　|　日期：2026-11-10 16:16　|　身份：A　|　分支：`feature/A/continuation`　|　开工基线：四 ref **`9e9e364`**（T-A34 发布后对齐基线）
+> 版本：v0.1.23　|　日期：2026-11-10 16:44　|　身份：A　|　分支：`feature/A/continuation`　|　开工基线：四 ref **`ffeba54`**（T-A42 发布后对齐基线）
 > 上游：`docs/需求文档.md` **V2.6（2026-11-07 已冻结）**、`docs/源码接入与需求决策.md`、`docs/四人分工与试行方案.md` §2、`docs/技术框架.md`、**`docs/modules/MASTER/原PRD统一执行跟踪表.md`（全员统一执行入口）**、`tasks/A.md`、`docs/modules/A/设计方案.md` v0.1.1、`.collaboration/ownership.json`。
 > 用法：按 M1 → M6 顺序；每项满足「验收点」才勾选，勾选必须写实际命令/结果/证据落点；编号 `T-Axx` 供沟通引用。进度同步 `docs/modules/A/开发日志.md` Layer 3/4 与 `docs/updates/A/` 交接记录。
 > ⚠️ 本表是台账，**不是完成声明**；`[x]` 只表示「有实证且已登记」。Master 统一执行表口径：`×` 仅代表代码已实现，不等于接入/业务验收；本表 `[x]` 同理不代表浏览器/客户验收完成，人工验收单列在文末「未收口清单」。
@@ -133,6 +133,7 @@
 - v0.1.20（2026-11-10 14:30）：用户「继续，一个一个跑完」。跑通 **A06-5「assessments/interviews 内联 `ADMIN_ROLES` 行级判定迁移」**（跨 C 归属，A06 整行最后一项）：`assessments/service.py::is_admin` 改走 `scope.account_is_management`（签名不变，兼容 `interviews`/`training` 复用），修复 `system_admin` 被误拒 + 非标准 `"admin"` 被误放行；`interviews/ai_router.py` 7 端点 8 处内联判断统一为 `_is_management(db,user)`，业务逻辑与 403 文案零改动。新增 `test_a06_c_module_gates.py` **12 passed**。**全量原样跑多次均 1 failed / 827 passed / 8 skipped**，唯一失败 `test_full_pipeline_success` 经实证为 **B/D 归属测试间的既有跨文件串扰**（零 A06 测试的两文件组合即复现、t13 单文件 13 passed、该用例隔离单跑 1 passed；A 试过 conftest 单例隔离与隔离库清脏数据均无效且已回滚/未留改动）；门禁改以「**deselect 该既有用例后全量 exit 0，827 passed / 8 skipped / 1 deselected** + 该用例隔离单跑 exit 0」为证据，已发 [跨包请求](../../requests/A/20261110-BD-全量测试跨文件向量串扰.md) 并登记未收口清单，**不把全量 exit 1 写成通过**。**A06 五个子单元全部交付、整行收口**；跨归属走 `collab.integration=1` 并透明登记。台账升 **v0.1.20**。证据：[1430 记录](../../updates/A/20261110-1430-A06-5跨模块行级判定迁移.md)。
 - v0.1.21（2026-11-10 15:27）：用户「继续，一个一个跑完」。开工先收口上一轮压缩打断遗留的 A06-5 发布补记（append-only 新建文件 + 根索引追加，提交发布 `9c69066`，四 ref 对齐）。P0 仅剩被 D 的 `PROMPT_C_SCHEMA` / `overall_score` 契约阻塞的 A02-2；`screen_worker.py` 头部明确「两档标签与人工三态对齐属 A02-2/M5 范围」，故本轮**不动三档 verdict 枚举**，改跑可独立闭环的 **T-A34 评分边界反例**（M4）。修 `screen_worker._verdict_for` 两处 V2.6 口径违规（硬编码示例阈值 75/60 → 快照必需键 + 批次级早校验；`score=None` → 不伪装 `rejected`，交批次失败/重试路径），`match_engine` 新增 `sanitize_profile_for_prompt` 使年龄/性别不参与评分可验证；新增 `test_match_boundary_t34.py` **21 passed**。门禁：受影响既有 4 文件 **41 passed**；后端原样全量 **exit 0 / 849 passed / 8 skipped / 0 failed**（B/D 跨文件串扰既有用例本轮未复现，**跨包请求保持打开、不写成已修复**）；前端 **29 文件 / 131 用例**（397.84s，初次 300s 边界被截断后重跑取真实退出码）、`tsc` / `diff --check` / 3 py `py_compile` / 185 py AST 全 0 错。8 skipped 沿用 Milvus 19532 不可达（环境退化）。台账升 **v0.1.21**。证据：[1527 记录](../../updates/A/20261110-1527-T-A34评分边界反例.md)。
 - v0.1.22（2026-11-10 16:16）：用户「继续」。开工 `fetch` 后四 ref 全 `9e9e364`、ahead/behind 0/0、祖先复核 exit 0、工作区干净；复核 **A02-2 仍被 D 的 `PROMPT_C_SCHEMA` / `overall_score` 契约阻塞**（远端无 D 新提交），A 未越界代改。跑通 **T-A42 批次快照与幂等**（M5）：两批次表加可空 `idempotency_key` + `(job_profile_id, idempotency_key)` 组合唯一约束，新迁移 `A_0010_batch_idempotency` 挂 `A_0009` 成为单 head（隔离库 `upgrade head` exit 0、真实结构复核生效）；`build_config_snapshot` 固定模型/Prompt 版本，两个 worker 结果行改读快照版本（历史批次告警回退）；service 创建层加请求级幂等（先查后插 + `IntegrityError` 兜底，replay 只用快照 ids、不重圈人）；DTO/路由透传可选 key；`test_models_structure` 同步列与唯一约束基线。新增 `test_batch_snapshot_idempotency_t42.py` **19 passed**（首轮 1 例因测试自身误用 `resume_file_ids` scope 于匹配侧，改用 `upload_batch` 后全绿）。门禁：受影响既有 8 文件 **251 passed**；后端原样全量 **exit 0 / 868 passed / 8 skipped / 0 failed**（较上轮净增 19 例；B/D 跨文件向量串扰本轮未复现，跨包请求保持打开、不写成已修复）；前端 **29 文件 / 131 用例**（455.10s）、`tsc` exit 0、静态门禁全 0 错、路由 19 未变。8 skipped 仍是 Milvus 19532 不可达（环境退化）。台账升 **v0.1.22**。证据：[1616 记录](../../updates/A/20261110-1616-T-A42批次快照与幂等.md)。
+- v0.1.23（2026-11-10 16:44）：用户「继续」。开工 `fetch` 后四 ref 全 `ffeba54`、ahead/behind 0/0、祖先复核 exit 0、工作区干净；复核 **A02-2 仍被 D 的 `PROMPT_C_SCHEMA` / `overall_score` 契约阻塞**（远端无 D 新提交），A 未越界代改。跑通 **A08 申请输入快照与对外字段分级**（执行表 P1，需求 §61/§73/§201/§280）：`applications` 加 `input_snapshot_json` / `input_snapshot_at`，新迁移 `A_0011_app_snapshot` 挂 `A_0010` 成为单 head；`capture_application_input_snapshot` 在创建时把岗位/JD/档案/原件/解析结果做值拷贝冻结（缺源容错、原文用 sha256+长度固定）；新增管理侧角色门禁只读接口 `GET /applications/{id}/input-snapshot`；修复个人端列表**越权 + 内部字段泄露 + 未确认终态结果提前外露**三处真实缺口（后端以 `AccountScope.person_id` 强制收窄、忽略伪造参数，出参改获准字段白名单）。新增 `test_application_snapshot_a08.py` **22 passed**。门禁：受影响既有 7 文件 **227 passed**；后端原样全量 **exit 0 / 890 passed / 8 skipped / 0 failed**（净增 22 例）；前端 **29 文件 / 131 用例**（458.58s）、`tsc` exit 0、`diff --check` / 6 py `py_compile` / 185 py AST / 路由 19 全 0 错。⚠️ 本轮实证两个环境陷阱：`alembic_version.version_num` 为 VARCHAR(32)，revision id 必须 ≤32 字符（长 id 会造成 DDL 已生效但版本号未写入的半迁移）；迁移 docstring 误插三引号会让 alembic 加载报 SyntaxError。8 skipped 仍是 Milvus 19532 不可达；B/D 跨文件向量串扰本轮未复现、请求保持打开。`A_0011` 只在隔离库生效，主验收库 `ai_talent` 未碰。台账升 **v0.1.23**。证据：[1644 记录](../../updates/A/20261110-1644-A08申请输入快照与对外字段分级.md)。
 
 ## M3-V2.6 · 招聘域重排（需求冻结后按 V2.6 口径，2026-11-07）
 
@@ -140,7 +141,7 @@
 
 > 口径：以下 `[x]` 表示**代码 + 自动化断言有实证且已登记**（后端 759 用例全量、前端 104 用例全量均已通过），**不等于浏览器 / 客户业务验收**；Master 统一执行表的 `×` 同为代码标记。
 
-- [x] **T-A60a 招聘域数据层** ✅ `modules/recruitment/models.py` 五表（`project_groups` / `projects` / `project_demands` 含 `headcount` / `jd_publications` / `applications` 含五阶段映射）+ 迁移 `A_0005_m3_recruitment`；注册后一期 **75 表断言**（`backend/app/models/__init__.py:193`，70 + 5 B history）与去重 75 均通过。证据：`backend/tests/test_recruitment_m3.py::test_five_stage_mapping_matches_confirmed_baseline`、`test_models_structure.py`。⚠️ 完整申请输入快照见执行表 A08，尚未落地。
+- [x] **T-A60a 招聘域数据层** ✅ `modules/recruitment/models.py` 五表（`project_groups` / `projects` / `project_demands` 含 `headcount` / `jd_publications` / `applications` 含五阶段映射）+ 迁移 `A_0005_m3_recruitment`；注册后一期 **75 表断言**（`backend/app/models/__init__.py:193`，70 + 5 B history）与去重 75 均通过。证据：`backend/tests/test_recruitment_m3.py::test_five_stage_mapping_matches_confirmed_baseline`、`test_models_structure.py`。✅ **完整申请输入快照已于 2026-11-10 16:44 由 A08 落地**（`A_0011_app_snapshot` + `input_snapshot_json` 值拷贝 + 个人侧字段分级），见 [1644 记录](../../updates/A/20261110-1644-A08申请输入快照与对外字段分级.md)。
 - [x] **T-A60b 人才需求与项目 CRUD** ✅ `recruitment/{router,service}.py`，创建 / 列表 / 详情 / 状态流转 / 重复提交 409 有集成用例。证据：`backend/tests/test_recruitment_api.py`（`headcount=3` 回读、同岗位同项目重复需求 409、未带 token 401、`status=in_progress` + `headcount=5` 更新）。⚠️ 需求人数与「人工推进 ≠ 已录用」缺口口径的**页面核对**未做。
 - [x] **T-A60c 申请与五阶段状态机** ✅ applications 创建（同岗在途 409）+ 内部阶段流转自动映射对外阶段 + 终态 `result_category` + 非法阶段拒绝。证据：`test_recruitment_api.py::test_application_lifecycle_five_stage_mapping`（`new→submitted`、`screening→screening`、`invited→interviewing`、`deciding→deciding`、`offer_accepted→closed/hired`）。⚠️ 越权 403 的完整角色矩阵与浏览器刷新保留归执行表 A06，未收口。
 - [x] **T-A60d JD 投放记录与撤回（代码层）** ✅ `jd-publications` 创建 published 记录、内容快照、撤回与重复撤回反例。证据：`test_recruitment_api.py::test_jd_publication_withdraw`。⚠️ **真实 AI 可编辑 JD 草稿 + 人工确认发布闭环（执行表 A12）未实现**，外部招聘渠道实际投递按客户边界，不默认接入；投放记录不等于渠道投递成功。
@@ -149,9 +150,25 @@
 
 ---
 
-## 状态快照（v0.1.22，2026-11-10 16:16）· 当前活状态锚点
+## 状态快照（v0.1.23，2026-11-10 16:44）· 当前活状态锚点
 
-> 本节为**活状态锚点**，覆盖下方 v0.1.21 / v0.1.20 / v0.1.19 / v0.1.18 / v0.1.17 / v0.1.15 历史快照。权威顺序：`docs/updates/A/` 最新记录 > 根 `更新记录.md` 尾部 > `git log` > 本表。
+> 本节为**活状态锚点**，覆盖下方 v0.1.22 / v0.1.21 / v0.1.20 / v0.1.19 / v0.1.18 / v0.1.17 / v0.1.15 历史快照。权威顺序：`docs/updates/A/` 最新记录 > 根 `更新记录.md` 尾部 > `git log` > 本表。
+
+- v0.1.23（2026-11-10 16:44）：跑通 **A08 申请输入快照与对外字段分级**（需求 §61/§73/§201/§280，执行表 A08）：创建申请时冻结岗位/JD/档案/原件/解析结果的值拷贝，源行后续变更、阶段推进、HR 确认都不回写；完整快照只经 `require_roles("system_admin","hr")` 只读接口暴露；个人端列表按 `AccountScope.person_id` 强制收窄、只返回 6 个获准字段、未确认终态结果不外露。新增 22 例逐条固化。**后端原样全量 exit 0 / 890 passed / 8 skipped / 0 failed**，前端 131 用例、tsc、静态门禁全绿。**A06 五子单元仍整行收口；A02-2 仍被 D 契约阻塞**；两档 verdict + 人工三态按 `screen_worker` 头部口径留在 A02-2/M5 一并联调，本轮不动。B/D 跨文件向量串扰本轮未复现但请求保持打开；8 skipped 仍为 Milvus 19532 不可达。证据：[1644 记录](../../updates/A/20261110-1644-A08申请输入快照与对外字段分级.md)。
+
+### 基线与结构（v0.1.23）
+
+| 项 | 当前值 |
+|---|---|
+| 迁移链 | 单 head **`A_0011_app_snapshot (head)`**（挂 `A_0010_batch_idempotency`；Inspector 检查列，空库/旧库双路径幂等）。⚠️ `alembic_version.version_num` 为 VARCHAR(32)，**revision id 必须 ≤32 字符** |
+| 申请输入快照 | `applications.input_snapshot_json` / `input_snapshot_at` 可空（历史行 `available=false`）；`schema_version=A08-v1`，五段值拷贝 + `missing_sources`；创建时冻结、之后只读 |
+| 表 / 路由 | 84 表 / 84 模型（未变）；`include_router` **19**（未变） |
+| 全量门禁 | 后端 **890 passed / 8 skipped / 0 failed**（exit 0）；前端 **29 文件 / 131 用例**；`tsc` / `diff --check` / 185 py AST 全 0 错 |
+| 四 ref | 开工 `ffeba54`；最终 hash 以根 `更新记录.md` 尾部与 `git log` 为准 |
+
+## 状态快照（v0.1.22，2026-11-10 16:16）· 历史
+
+> 本节为历史快照，被上方 v0.1.23 覆盖。权威顺序：`docs/updates/A/` 最新记录 > 根 `更新记录.md` 尾部 > `git log` > 本表。
 
 - v0.1.22（2026-11-10 16:16）：跑通 **T-A42 批次快照与幂等**（M5，需求 §105 / §201 / §280）：批次快照固定 `model_version` / `prompt_version` 且 worker 只读快照；两批次表加请求级幂等键 + 组合唯一约束（`A_0010`）；新增 19 例逐条反例固化「重复请求不重复建结果、replay 不重圈人、岗位/档案变更新建一轮、历史人工意见与档案输入快照不被覆盖」。**后端原样全量 exit 0 / 868 passed / 8 skipped / 0 failed**，前端 131 用例、tsc、静态门禁全绿。**A06 五个子单元仍整行收口；A02-2 仍被 D 契约阻塞**；两档 verdict + 人工三态按 `screen_worker` 头部口径留在 A02-2/M5 一并联调，本轮不动。B/D 跨文件向量串扰本轮未复现但请求保持打开；8 skipped 仍为 Milvus 19532 不可达。证据：[1616 记录](../../updates/A/20261110-1616-T-A42批次快照与幂等.md)。
 
@@ -299,7 +316,8 @@
 | A02 | P0 | **A02-1 已交付** + 新基线复验（794 用例全绿）。**A02-2 未完成**：分数仍是 `0.7/0.3` 向量混合 + `40/30/15/15` 加权 | A02-2 需 D 先改 `PROMPT_C_SCHEMA`（已发 [请求](../../requests/A/20261110-D-A02-2-PromptC综合分契约.md)），之后 A 改模型综合分 |
 | A06 | P0 | ✅ **A06 整行收口**：A06-1 角色门禁、A06-2 部门行级、A06-3 字段级、A06-4 系统管理域 CRUD 路由、A06-5 跨模块（assessments/interviews）内联 `ADMIN_ROLES` 迁移，**五个子单元全部交付发布**。修复 `system_admin` 被旧 `{"admin","hr"}` 字符串判断误拒、非标准 `"admin"` 被误放行的真实漏洞 | 按执行表「通过条件」逐条接入/验收（人工/浏览器点击流排最后） |
 | D02（A/D） | P0 | **A 侧开关已交付**（`RATE_LIMIT_ENABLED`，默认 false 演示豁免；true 只豁免 `/api/health`） | 客户模式真实 Redis 多环境串扰复验未做 |
-| A03 / A08 / A11 / A12 / A14 | P1 | 空白或未获完整实现证据 | 批次档案冻结、申请输入快照、审批链、真实 AI JD 草稿、员工花名册 |
+| **A08** | P1 | ✅ **已交付**（16:44）：申请输入值快照冻结 + 管理侧只读接口 + 个人侧字段分级/授权收紧；22 例验收、全量 890 passed | 完整面试/邀约引用由 C 归属外键承载，属跨角色联调；人工/浏览器验收排最后 |
+| A03 / A11 / A12 / A14 | P1 | 空白或未获完整实现证据 | 批次档案冻结、审批链、真实 AI JD 草稿、员工花名册 |
 | A01 / A04 / A10 / A13 / A15 | P1 | `×`（代码已实现） | 按执行表「通过条件」逐条接入/验收，**A 不替 Master 改表** |
 | A05 / A09（配合 D/B） | P1 | 待联动 | A 交付授权需求与人工录用口径、招聘推荐规则 |
 | G01/G02/G07、G03~G06/G08、Q01~Q10 | P1/P2 | 部分或待验收 | 按执行表逐项回传证据，人工/客户演练排最后 |
@@ -339,7 +357,8 @@
 | A02 | P0 | **A02-1 已交付**（`3cb0064` 之后本轮）：硬门槛不再淘汰，无 `score=NULL/0`，不符项/待核实进 `misses` 并随 Prompt C 输入，全员评分；`estimated_llm_calls` 不再折减；后端 768 用例全绿。**A02-2 未完成**：分数仍是 `0.7/0.3` 向量混合 + `40/30/15/15` 加权 | A02-2 需 D 先改 `PROMPT_C_SCHEMA`（已发 [请求](../../requests/A/20261110-D-A02-2-PromptC综合分契约.md)），之后 A 改模型综合分；三档 `verdict` → 两档内部参考标签 + 人工三态属 M5，一并联调 |
 | A06 | P0 | **A06-1 角色/职责门禁已交付**（本轮）：`get_role_codes`/`account_is_management` 聚合 `sys_user_roles`，统一替代散落的 `can_view_all_persons` 与 inventory `ADMIN_ROLES` 字符串；修复 `system_admin` 被误拒漏洞；`workflows`/`inventory`/`reports` 导出入口改用角色门禁；新增 `test_a06_rbac_gates.py`（10 passed）、后端全量 794 用例全绿。**A06 整行未完成**：部门行级（`users.department_id` 缺失）、字段级权限、系统管理域 router 尚未建（管理侧尚不可经 API 操作角色/菜单） | A06-2：补 `users.department_id` + 部门行级过滤；A06-3：字段级权限白名单 + 序列化裁剪；A06-4：系统管理域 CRUD router（角色/菜单/权限）并接 `require_roles`；assessments/interviews 内联 `ADMIN_ROLES` 行级判定迁移 |
 | D02（A/D） | P0 | **A 侧开关已交付**（`RATE_LIMIT_ENABLED`，默认 false 演示豁免；true 只豁免 `/api/health`），5 用例覆盖 429/403/降级 | 客户模式在**真实 Redis + 多环境并存**下的串扰复验未做；D 归属 `ratelimit.py`/`client.py` 未改，代码级键前缀隔离需 A 发请求、D 实现 |
-| A03 / A08 / A11 / A12 / A14 | P1 | 空白或未获完整实现证据 | 批次档案冻结、申请输入快照、审批链、真实 AI JD 草稿、员工花名册 |
+| **A08** | P1 | ✅ **已交付**（16:44）：申请输入值快照冻结 + 管理侧只读接口 + 个人侧字段分级/授权收紧；22 例验收、全量 890 passed | 完整面试/邀约引用由 C 归属外键承载，属跨角色联调；人工/浏览器验收排最后 |
+| A03 / A11 / A12 / A14 | P1 | 空白或未获完整实现证据 | 批次档案冻结、审批链、真实 AI JD 草稿、员工花名册 |
 | A01 / A04 / A10 / A13 / A15 | P1 | `×`（代码已实现） | 按执行表「通过条件」逐条接入/验收，**A 不替 Master 改表** |
 | A05 / A09（配合 D/B） | P1 | 待联动 | A 交付授权需求与人工录用口径、招聘推荐规则 |
 | G01/G02/G07、G03~G06/G08、Q01~Q10 | P1/P2 | 部分或待验收 | 按执行表逐项回传证据，人工/客户演练排最后 |
@@ -352,13 +371,14 @@
 | 简历上传 file upload | 人工 | IAB 不支持文件上传，必须用户手动验收 |
 | `/analytics` 运行时缺陷复验 | 人工 | [A 发出的请求](../../requests/A/20261109-D-analytics页运行时缺陷.md) 待 D 修后复验关闭（T-A02 阻塞项） |
 | **Milvus 19532 不可达** | 环境（需人工） | 2026-11-10 14:00 全量实测 `MilvusStoreError: Fail connecting to server on localhost:19532`，`test_vectors_integration_t05.py` 7 例被环境 skip；服务恢复后补跑 7 例向量集成测试。A 按边界未重启容器/服务 |
-| **全量 pytest 跨文件向量串扰** | 协作（B/D） | `test_full_pipeline_success` 在零 A06 测试的两文件组合下即复现；A 已实证与 A06-5 无因果关系、试过两种 A 归属内修复均无效并回滚，**不删弱有效断言、不越界改 B/D 测试**。已发 [跨包请求](../../requests/A/20261110-BD-全量测试跨文件向量串扰.md)，待 B/D 修复后 A 复跑全量并关闭。⚠️ **15:27 更新**：T-A34 轮原样全量 exit 0 / 849 passed，未复现；**16:16 更新**：T-A42 轮**原样全量 exit 0 / 868 passed / 8 skipped / 0 failed**，仍未复现（间歇性），**请求保持打开、不写成已修复**；门禁证据以最新一轮原样全量 exit 0 为准 |
-| 主验收库 `ai_talent` schema 偏差 | 需授权 | stamp 已到 `C_0007` 但实际缺列/外键；**16:16 追加**：本轮 `A_0010` 给两批次表加的 `idempotency_key` 列与唯一约束也只在隔离库 `ai_talent_a_probe` 生效，主库未碰；重建或补迁移需用户明确授权 |
+| **全量 pytest 跨文件向量串扰** | 协作（B/D） | `test_full_pipeline_success` 在零 A06 测试的两文件组合下即复现；A 已实证与 A06-5 无因果关系、试过两种 A 归属内修复均无效并回滚，**不删弱有效断言、不越界改 B/D 测试**。已发 [跨包请求](../../requests/A/20261110-BD-全量测试跨文件向量串扰.md)，待 B/D 修复后 A 复跑全量并关闭。⚠️ **15:27 更新**：T-A34 轮原样全量 exit 0 / 849 passed，未复现；**16:16 更新**：T-A42 轮**原样全量 exit 0 / 868 passed / 8 skipped / 0 failed**，仍未复现（间歇性），**请求保持打开、不写成已修复**；**16:44 追加**：A08 轮原样全量 **exit 0 / 890 passed / 8 skipped / 0 failed**，仍未复现（间歇性）；门禁证据以最新一轮原样全量 exit 0 为准 |
+| 主验收库 `ai_talent` schema 偏差 | 需授权 | stamp 已到 `C_0007` 但实际缺列/外键；**16:16 追加**：本轮 `A_0010` 给两批次表加的 `idempotency_key` 列与唯一约束也只在隔离库 `ai_talent_a_probe` 生效，主库未碰；**16:44 追加**：`A_0011` 给 `applications` 加的两列同样只在隔离库生效；重建或补迁移需用户明确授权 |
 | `next build` / Agnes / 干净客户环境 | 未验证 | `next build` 受运行环境拦截记为未验证；Agnes `agnes-3.0-flash` 待 D 验证 |
 | C 的 `REQ-C-20261109-121506` 关闭 | 对方 | A 已受理并交付证据；C 需在干净空库复跑 `upgrade head` 到 `C_0007` 并回填 `alembic current` 后自行关闭 |
 | **A02-2 模型综合分 / D 契约** | 协作 | 等 D 响应 [A 发出的请求](../../requests/A/20261110-D-A02-2-PromptC综合分契约.md)：`PROMPT_C_SCHEMA` 加 `overall_score` 并同步断言；A 不越界改 D 的 `schemas.py` / `test_prompts.py` |
 | 三档 `verdict` → 两档内部标签 + 人工三态 | 代码 | 设计方案 M5 / V2.6 §12.2；本轮三档仍为**内部参考标签**，不改申请状态、不自动推进/淘汰，待 A02-2 一并联调 |
 | C-08 / C-09（M6） | 代码 | 幽灵规则清理、OpenAPI `response_model` 补齐 |
+| **A08 完整面试/邀约引用** | 协作（C） | 执行表 A08 为 A/B/C 联合项；A 本轮交付的是**输入快照与对外字段分级**。`interview_rounds` / `ai_interview_sessions` 已由 C 侧建立指向 `applications.id` 的外键，A 不越界改 C 归属文件，完整引用链待联调 |
 | B 的 9 表设计稿对照注册、D 通知接线 | 协作 | 按各自工作包推进，A 不代做 |
 
 > 发布：用户 10:39 已把「继续」定义为「拉云仓对齐 master → 跑 A → 每跑通一个单元都测试 → 拉云仓 → 推送 → 合并主 master」，本轮 A02-1 按该闭环发布；发布前仍按 H-A17 再 `fetch` + `merge-base --is-ancestor`，最终提交号以远端为准。早期 v0.1.13 / 09:55 的「未授权 push」口径已被新口径取代，历史记录 append-only 保留供追溯。
