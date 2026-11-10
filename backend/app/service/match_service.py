@@ -25,7 +25,12 @@ from app.dao import job_profiles as job_dao
 from app.dao import match as match_dao
 from app.models import MatchBatch, ParsedResume, ResumeFile, TalentProfile, TalentTag
 from app.service import match_engine
-from app.service.screen_service import build_config_snapshot, normalize_idempotency_key
+from app.service.screen_service import (
+    build_config_snapshot,
+    capture_batch_profile_inputs,
+    frozen_inputs_summary,
+    normalize_idempotency_key,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +150,8 @@ def create_batch(
     profiles = match_dao.list_profiles_by_ids(db, resolved_ids)
     # A02-1：所有人都会进 Prompt C，不再用 hard_gate 折减预估调用数
     estimated = sum(1 for talent_id in resolved_ids if profiles.get(talent_id) is not None)
+    # A03：与筛选侧同口径，批次开始时冻结成员输入 + B 正式版本
+    frozen_inputs = capture_batch_profile_inputs(db, resolved_ids, profiles=profiles)
 
     try:
         batch = match_dao.create_batch(
@@ -153,6 +160,7 @@ def create_batch(
             job_profile_version=job.version,
             config_snapshot_json=snapshot,
             talent_scope_json={**normalized_scope, "resolved_ids": resolved_ids},
+            frozen_inputs_json=frozen_inputs,
             status="pending",
             total=len(resolved_ids),
             created_by=user_id,
@@ -225,6 +233,8 @@ def get_batch_detail(db: Session, batch_id: int) -> dict[str, Any]:
         "job_profile_version": batch.job_profile_version,
         "config_snapshot": dict(batch.config_snapshot_json or {}),
         "scope": scope,
+        # A03：只回摘要，不回传全量成员冻结输入
+        "frozen_inputs": frozen_inputs_summary(batch.frozen_inputs_json),
         "status": batch.status,
         "progress": batch.progress,
         "total": batch.total,

@@ -209,7 +209,7 @@ def test_personal_forbidden(env):
             overview.admin_overview(
                 db, user=U_PERSONAL, engine=env.engine, engine_source="primary"
             )
-    assert "403" in str(ei.value) or "管理侧" in str(ei.value)
+    assert ei.value.code == 403
 
 
 def test_personal_403_via_http(env):

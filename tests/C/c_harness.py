@@ -73,7 +73,10 @@ CREATE TABLE users (
     role VARCHAR(20) NOT NULL DEFAULT 'hr',
     -- person_id BIGINT: synced with A's migration A_0002_users_person (2026-11-07,
     -- edited by A under the user's cooperation rule; nullable, unique in MySQL)
-    person_id BIGINT, department_id BIGINT,
+    person_id BIGINT,
+    -- department_id INTEGER: synced with A's migration A_0009_users_department_id
+    -- (A06-2 dept row-level scope; nullable)
+    department_id INTEGER,
     is_active INTEGER NOT NULL DEFAULT 1,
     last_login_at DATETIME,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

@@ -32,12 +32,18 @@ U_HR = SimpleNamespace(id=2, role="hr", person_id=None)
 
 
 @pytest.fixture()
-def db_factory():
+def db_factory(monkeypatch):
     engine = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
     Base.metadata.create_all(engine, tables=[Notification.__table__])
     factory = sessionmaker(bind=engine, expire_on_commit=False)
+    from app.models import User, SysRole, SysUserRole, UserScopeGrant
+    Base.metadata.create_all(engine, tables=[User.__table__, SysRole.__table__, SysUserRole.__table__, UserScopeGrant.__table__])
+    monkeypatch.setattr('app.database.SessionLocal', factory)
+    with factory() as scope_db:
+        scope_db.add(User(id=2,username='synthetic_hr',password_hash='test-only',role='hr',is_active=1))
+        scope_db.commit()
     yield factory
     engine.dispose()
 

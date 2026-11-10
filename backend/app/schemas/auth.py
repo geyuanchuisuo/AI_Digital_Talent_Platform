@@ -19,6 +19,10 @@ class UserOut(BaseModel):
 
     `person_id`：绑定的主档 id（个人账号唯一；管理侧为 null）。2026-11-07
     贯通（REQ-B-20261106-02），B/C/D 据此做个人数据过滤的前端联动。
+
+    `is_management`：账号是否属于管理侧（system_admin / hr）。后端权威判定，
+    聚合 sys_user_roles 角色 + 回退 users.role，前端据此做 UI 权限门控——
+    不再散落 `role === 'admin' || role === 'hr'` 这种前后端口径不一致的判断。
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -28,6 +32,10 @@ class UserOut(BaseModel):
     display_name: str | None = None
     role: str
     person_id: int | None = None
+    is_management: bool = Field(
+        default=False,
+        description="账号是否属于管理侧（system_admin / hr，后端权威判定）",
+    )
 
 
 class LoginData(BaseModel):

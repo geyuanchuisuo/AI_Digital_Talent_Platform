@@ -23,7 +23,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import { useCallback, useEffect, useState } from 'react';
 
-import { getUser } from '@/lib/auth';
+import { getUser, isManagement } from '@/lib/auth';
 import { getErrorMessage } from '@/lib/http';
 
 import {
@@ -404,8 +404,7 @@ export default function TrainingEnrollmentsPage() {
   const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
-    const role = getUser()?.role;
-    setIsAdmin(role === 'admin' || role === 'hr');
+    setIsAdmin(isManagement());
   }, []);
 
   return (

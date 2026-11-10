@@ -16,6 +16,10 @@ export interface AuthUser {
   role: string;
   /** 绑定的主档 id（个人账号唯一；管理侧为 null）——2026-11-07 贯通 */
   person_id?: number | null;
+  /** 后端权威判定：账号是否属于管理侧（system_admin / hr）。
+   * 聚合 sys_user_roles 角色 + 回退 users.role，前端统一用它做 UI 权限门控，
+   * 不再散落 role === 'admin' || role === 'hr' 这种前后端口径不一致的判断。 */
+  is_management?: boolean;
 }
 
 const TOKEN_KEY = 'ai_talent_token';
@@ -49,6 +53,18 @@ export function clearAuth(): void {
   if (!hasWindow()) return;
   window.localStorage.removeItem(TOKEN_KEY);
   window.localStorage.removeItem(USER_KEY);
+}
+
+/**
+ * 后端权威的管理侧判定——替代散落的 `role === 'admin' || role === 'hr'`。
+ * 优先用登录时后端聚合的 is_management 字段；旧用户数据没这个字段时，
+ * 回退到 role 字符串比较（向后兼容一次）。
+ */
+export function isManagement(user: AuthUser | null = getUser()): boolean {
+  if (!user) return false;
+  if (typeof user.is_management === 'boolean') return user.is_management;
+  // 向后兼容：旧 token 可能没这个字段
+  return user.role === 'hr' || user.role === 'system_admin';
 }
 
 /**

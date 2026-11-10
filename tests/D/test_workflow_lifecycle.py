@@ -38,10 +38,13 @@ WF_TABLES = (
 
 
 @pytest.fixture()
-def db(tmp_path: Path):
+def db(tmp_path: Path, monkeypatch):
     engine = create_engine(f"sqlite:///{tmp_path / 'wf_lifecycle.db'}")
     WorkflowDefinition.__table__.metadata.create_all(engine, tables=WF_TABLES)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
+    from app.models import SysRole, SysUserRole
+    User.metadata.create_all(engine, tables=[SysRole.__table__, SysUserRole.__table__])
+    monkeypatch.setattr('app.database.SessionLocal', factory)
     with factory() as session:
         yield session
     engine.dispose()
