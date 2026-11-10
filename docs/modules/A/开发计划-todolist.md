@@ -1,6 +1,6 @@
 # 开发计划 · Todolist · 板块 A
 
-> 版本：v0.1.23　|　日期：2026-11-10 16:44　|　身份：A　|　分支：`feature/A/continuation`　|　开工基线：四 ref **`ffeba54`**（T-A42 发布后对齐基线）
+> 版本：v0.1.24　|　日期：2026-11-10 17:42　|　身份：A　|　分支：`feature/A/continuation`　|　开工基线：四 ref **`b356eeb`**（A08 发布后对齐基线）
 > 上游：`docs/需求文档.md` **V2.6（2026-11-07 已冻结）**、`docs/源码接入与需求决策.md`、`docs/四人分工与试行方案.md` §2、`docs/技术框架.md`、**`docs/modules/MASTER/原PRD统一执行跟踪表.md`（全员统一执行入口）**、`tasks/A.md`、`docs/modules/A/设计方案.md` v0.1.1、`.collaboration/ownership.json`。
 > 用法：按 M1 → M6 顺序；每项满足「验收点」才勾选，勾选必须写实际命令/结果/证据落点；编号 `T-Axx` 供沟通引用。进度同步 `docs/modules/A/开发日志.md` Layer 3/4 与 `docs/updates/A/` 交接记录。
 > ⚠️ 本表是台账，**不是完成声明**；`[x]` 只表示「有实证且已登记」。Master 统一执行表口径：`×` 仅代表代码已实现，不等于接入/业务验收；本表 `[x]` 同理不代表浏览器/客户验收完成，人工验收单列在文末「未收口清单」。
@@ -135,6 +135,8 @@
 - v0.1.22（2026-11-10 16:16）：用户「继续」。开工 `fetch` 后四 ref 全 `9e9e364`、ahead/behind 0/0、祖先复核 exit 0、工作区干净；复核 **A02-2 仍被 D 的 `PROMPT_C_SCHEMA` / `overall_score` 契约阻塞**（远端无 D 新提交），A 未越界代改。跑通 **T-A42 批次快照与幂等**（M5）：两批次表加可空 `idempotency_key` + `(job_profile_id, idempotency_key)` 组合唯一约束，新迁移 `A_0010_batch_idempotency` 挂 `A_0009` 成为单 head（隔离库 `upgrade head` exit 0、真实结构复核生效）；`build_config_snapshot` 固定模型/Prompt 版本，两个 worker 结果行改读快照版本（历史批次告警回退）；service 创建层加请求级幂等（先查后插 + `IntegrityError` 兜底，replay 只用快照 ids、不重圈人）；DTO/路由透传可选 key；`test_models_structure` 同步列与唯一约束基线。新增 `test_batch_snapshot_idempotency_t42.py` **19 passed**（首轮 1 例因测试自身误用 `resume_file_ids` scope 于匹配侧，改用 `upload_batch` 后全绿）。门禁：受影响既有 8 文件 **251 passed**；后端原样全量 **exit 0 / 868 passed / 8 skipped / 0 failed**（较上轮净增 19 例；B/D 跨文件向量串扰本轮未复现，跨包请求保持打开、不写成已修复）；前端 **29 文件 / 131 用例**（455.10s）、`tsc` exit 0、静态门禁全 0 错、路由 19 未变。8 skipped 仍是 Milvus 19532 不可达（环境退化）。台账升 **v0.1.22**。证据：[1616 记录](../../updates/A/20261110-1616-T-A42批次快照与幂等.md)。
 - v0.1.23（2026-11-10 16:44）：用户「继续」。开工 `fetch` 后四 ref 全 `ffeba54`、ahead/behind 0/0、祖先复核 exit 0、工作区干净；复核 **A02-2 仍被 D 的 `PROMPT_C_SCHEMA` / `overall_score` 契约阻塞**（远端无 D 新提交），A 未越界代改。跑通 **A08 申请输入快照与对外字段分级**（执行表 P1，需求 §61/§73/§201/§280）：`applications` 加 `input_snapshot_json` / `input_snapshot_at`，新迁移 `A_0011_app_snapshot` 挂 `A_0010` 成为单 head；`capture_application_input_snapshot` 在创建时把岗位/JD/档案/原件/解析结果做值拷贝冻结（缺源容错、原文用 sha256+长度固定）；新增管理侧角色门禁只读接口 `GET /applications/{id}/input-snapshot`；修复个人端列表**越权 + 内部字段泄露 + 未确认终态结果提前外露**三处真实缺口（后端以 `AccountScope.person_id` 强制收窄、忽略伪造参数，出参改获准字段白名单）。新增 `test_application_snapshot_a08.py` **22 passed**。门禁：受影响既有 7 文件 **227 passed**；后端原样全量 **exit 0 / 890 passed / 8 skipped / 0 failed**（净增 22 例）；前端 **29 文件 / 131 用例**（458.58s）、`tsc` exit 0、`diff --check` / 6 py `py_compile` / 185 py AST / 路由 19 全 0 错。⚠️ 本轮实证两个环境陷阱：`alembic_version.version_num` 为 VARCHAR(32)，revision id 必须 ≤32 字符（长 id 会造成 DDL 已生效但版本号未写入的半迁移）；迁移 docstring 误插三引号会让 alembic 加载报 SyntaxError。8 skipped 仍是 Milvus 19532 不可达；B/D 跨文件向量串扰本轮未复现、请求保持打开。`A_0011` 只在隔离库生效，主验收库 `ai_talent` 未碰。台账升 **v0.1.23**。证据：[1644 记录](../../updates/A/20261110-1644-A08申请输入快照与对外字段分级.md)。
 
+- v0.1.24（2026-11-10 17:42）：用户「继续」。开工 `fetch` 后四 ref 全 `b356eeb`、ahead/behind 0/0、祖先复核 exit 0、工作区干净；复核 **A02-2 仍被 D 的 `PROMPT_C_SCHEMA` / `overall_score` 契约阻塞**（远端无 D 新提交），A 未越界代改。先按 Master 执行表核验确认 A03「整项 × 撤回」只是撤回已实现标记、非撤销需求，再跑通 **A03 批次档案冻结**（执行表 A03 / F03）：批次创建时一次性冻结每位成员的评分输入值拷贝 + B 正式档案版本/内容绑定（`frozen_inputs_json`，`A03-v1`），新迁移 `A_0012_profile_freeze` 挂 `A_0011` 成为单 head；两个 worker 与 retry 只读冻结输入、不再读取当前档案内容，排队期人工修订/重新解析不污染本批；当前档案只用于「软删跳过」，缺冻结列的历史批次显式告警回退；详情 DTO 补 `frozen_inputs` 摘要（不外泄全量成员输入），`config_snapshot_json` 不被污染。新增 `test_batch_profile_freeze_a03.py` **20 passed**（首轮 3 例为测试自身：`parsed_resumes.uk_parsed_resume_file` 一文件一解析结果、详情 DTO 白名单丢字段，已修正）。门禁：受影响既有 10 文件 **292 passed**；**后端原样全量 exit 1 / 909 passed / 8 skipped / 1 failed**（唯一失败为已登记 B/D 跨文件向量串扰，零 A03 测试的两文件组合即复现、隔离单跑 exit 0 / 1 passed），发布门禁以 「**deselect 后全量 exit 0 / 909 passed / 8 skipped / 1 deselected**」为证据，**不把原样全量 exit 1 写成通过**；前端 **29 文件 / 131 用例**（460.86s）、`tsc` exit 0、`diff --check` / 10 py `py_compile` / 185 py AST / 路由 19 全 0 错。8 skipped 仍是 Milvus 19532 不可达；B/D 跨包请求**保持打开**。`A_0012` 只在隔离库生效，主验收库 `ai_talent` 未碰。台账升 **v0.1.24**。证据：[1742 记录](../../updates/A/20261110-1742-A03批次档案冻结.md)。
+
 ## M3-V2.6 · 招聘域重排（需求冻结后按 V2.6 口径，2026-11-07）
 
 > 原 M3（T-A21～T-A24）基于 V2.2 编写；冻结版 V2.6 增补 JD 生成投放（F01）、岗前培养（F05，归 C）、系统管理域表体系（F09）。以下为 A 侧重排清单，编号 T-A60x 供沟通引用。
@@ -150,9 +152,27 @@
 
 ---
 
-## 状态快照（v0.1.23，2026-11-10 16:44）· 当前活状态锚点
+## 状态快照（v0.1.24，2026-11-10 17:42）· 当前活状态锚点
 
-> 本节为**活状态锚点**，覆盖下方 v0.1.22 / v0.1.21 / v0.1.20 / v0.1.19 / v0.1.18 / v0.1.17 / v0.1.15 历史快照。权威顺序：`docs/updates/A/` 最新记录 > 根 `更新记录.md` 尾部 > `git log` > 本表。
+> 本节为**活状态锚点**，覆盖下方 v0.1.23 / v0.1.22 / v0.1.21 / v0.1.20 / v0.1.19 / v0.1.18 / v0.1.17 / v0.1.15 历史快照。权威顺序：`docs/updates/A/` 最新记录 > 根 `更新记录.md` 尾部 > `git log` > 本表。
+
+- v0.1.24（2026-11-10 17:42）：跑通 **A03 批次档案冻结**（Master 执行表 A03 / F03）：创建批次时一次性冻结每位成员的评分输入值拷贝 + B 正式档案版本/内容绑定（`frozen_inputs_json`，`A03-v1`）；两个 worker 与 retry 只读冻结输入，不再读取当前档案内容，排队期人工修订/重新解析不污染本批；当前档案只用于「软删跳过」判断，缺冻结列的历史批次显式告警回退。详情 DTO 补 `frozen_inputs` 摘要（不外泄全量成员输入），`config_snapshot_json` 不被污染。新增 `test_batch_profile_freeze_a03.py` **20 passed**，受影响既有 10 文件 **292 passed**；**后端原样全量 exit 1 / 909 passed / 8 skipped / 1 failed**（唯一失败为已登记 B/D 跨文件向量串扰，零 A03 测试的两文件组合即复现），以「**deselect 后全量 exit 0 / 909 passed / 8 skipped / 1 deselected** + 该用例隔离单跑 exit 0」为发布门禁，不写成通过；前端 **29 文件 / 131 用例**（460.86s）、`tsc`、静态门禁全绿。**A02-2 仍被 D 的 `PROMPT_C_SCHEMA` / `overall_score` 契约阻塞**；两档 verdict + 人工三态留待与 A02-2 联调。证据：[1742 记录](../../updates/A/20261110-1742-A03批次档案冻结.md)。
+
+### 基线与结构（v0.1.24）
+
+| 项 | 当前值 |
+|---|---|
+| 迁移链 | 单 head **`A_0012_profile_freeze (head)`**（挂 `A_0011_app_snapshot`；Inspector 检查列，空库/旧库双路径幂等）。⚠️ revision id 必须 ≤32 字符（`version_num` VARCHAR(32)） |
+| 批次档案冻结 | 两批次表 `frozen_inputs_json` 可空（历史行 `available=false` + 告警回退）；`schema=A03-v1`，成员值拷贝 + `profile_version` / `version_source` / `content_sha256` / `persisted_content` |
+| 表 / 路由 | 84 表 / 84 模型（未变）；`include_router` **19**（未变） |
+| 全量门禁 | 后端原样全量 **909 passed / 8 skipped / 1 failed（已登记 B/D 串扰）**；deselect 后 **909 passed / 8 skipped / 1 deselected / 0 failed**（exit 0）；前端 **29 文件 / 131 用例**；`tsc` / `diff --check` / 185 py AST 全 0 错 |
+| 四 ref | 开工 `b356eeb`；最终 hash 以根 `更新记录.md` 尾部与 `git log` 为准 |
+
+---
+
+## 状态快照（v0.1.23，2026-11-10 16:44）· 历史
+
+> 本节为历史快照，被上方 v0.1.24 覆盖。权威顺序：`docs/updates/A/` 最新记录 > 根 `更新记录.md` 尾部 > `git log` > 本表。
 
 - v0.1.23（2026-11-10 16:44）：跑通 **A08 申请输入快照与对外字段分级**（需求 §61/§73/§201/§280，执行表 A08）：创建申请时冻结岗位/JD/档案/原件/解析结果的值拷贝，源行后续变更、阶段推进、HR 确认都不回写；完整快照只经 `require_roles("system_admin","hr")` 只读接口暴露；个人端列表按 `AccountScope.person_id` 强制收窄、只返回 6 个获准字段、未确认终态结果不外露。新增 22 例逐条固化。**后端原样全量 exit 0 / 890 passed / 8 skipped / 0 failed**，前端 131 用例、tsc、静态门禁全绿。**A06 五子单元仍整行收口；A02-2 仍被 D 契约阻塞**；两档 verdict + 人工三态按 `screen_worker` 头部口径留在 A02-2/M5 一并联调，本轮不动。B/D 跨文件向量串扰本轮未复现但请求保持打开；8 skipped 仍为 Milvus 19532 不可达。证据：[1644 记录](../../updates/A/20261110-1644-A08申请输入快照与对外字段分级.md)。
 
@@ -317,7 +337,8 @@
 | A06 | P0 | ✅ **A06 整行收口**：A06-1 角色门禁、A06-2 部门行级、A06-3 字段级、A06-4 系统管理域 CRUD 路由、A06-5 跨模块（assessments/interviews）内联 `ADMIN_ROLES` 迁移，**五个子单元全部交付发布**。修复 `system_admin` 被旧 `{"admin","hr"}` 字符串判断误拒、非标准 `"admin"` 被误放行的真实漏洞 | 按执行表「通过条件」逐条接入/验收（人工/浏览器点击流排最后） |
 | D02（A/D） | P0 | **A 侧开关已交付**（`RATE_LIMIT_ENABLED`，默认 false 演示豁免；true 只豁免 `/api/health`） | 客户模式真实 Redis 多环境串扰复验未做 |
 | **A08** | P1 | ✅ **已交付**（16:44）：申请输入值快照冻结 + 管理侧只读接口 + 个人侧字段分级/授权收紧；22 例验收、全量 890 passed | 完整面试/邀约引用由 C 归属外键承载，属跨角色联调；人工/浏览器验收排最后 |
-| A03 / A11 / A12 / A14 | P1 | 空白或未获完整实现证据 | 批次档案冻结、审批链、真实 AI JD 草稿、员工花名册 |
+| **A03** | P0（执行表） | ✅ **已交付**（17:42）：批次开始时冻结成员评分输入值拷贝 + B 正式版本绑定；20 例验收、原样全量 909 passed / 1 例已登记 B/D 串扰 | 历史批次缺冻结列显式告警回退；B/D 修复串扰后 A 复跑原样全量并关闭请求 |
+| A11 / A12 / A14 | P1 | 空白或未获完整实现证据 | 审批链、真实 AI JD 草稿、员工花名册 |
 | A01 / A04 / A10 / A13 / A15 | P1 | `×`（代码已实现） | 按执行表「通过条件」逐条接入/验收，**A 不替 Master 改表** |
 | A05 / A09（配合 D/B） | P1 | 待联动 | A 交付授权需求与人工录用口径、招聘推荐规则 |
 | G01/G02/G07、G03~G06/G08、Q01~Q10 | P1/P2 | 部分或待验收 | 按执行表逐项回传证据，人工/客户演练排最后 |
@@ -358,7 +379,8 @@
 | A06 | P0 | **A06-1 角色/职责门禁已交付**（本轮）：`get_role_codes`/`account_is_management` 聚合 `sys_user_roles`，统一替代散落的 `can_view_all_persons` 与 inventory `ADMIN_ROLES` 字符串；修复 `system_admin` 被误拒漏洞；`workflows`/`inventory`/`reports` 导出入口改用角色门禁；新增 `test_a06_rbac_gates.py`（10 passed）、后端全量 794 用例全绿。**A06 整行未完成**：部门行级（`users.department_id` 缺失）、字段级权限、系统管理域 router 尚未建（管理侧尚不可经 API 操作角色/菜单） | A06-2：补 `users.department_id` + 部门行级过滤；A06-3：字段级权限白名单 + 序列化裁剪；A06-4：系统管理域 CRUD router（角色/菜单/权限）并接 `require_roles`；assessments/interviews 内联 `ADMIN_ROLES` 行级判定迁移 |
 | D02（A/D） | P0 | **A 侧开关已交付**（`RATE_LIMIT_ENABLED`，默认 false 演示豁免；true 只豁免 `/api/health`），5 用例覆盖 429/403/降级 | 客户模式在**真实 Redis + 多环境并存**下的串扰复验未做；D 归属 `ratelimit.py`/`client.py` 未改，代码级键前缀隔离需 A 发请求、D 实现 |
 | **A08** | P1 | ✅ **已交付**（16:44）：申请输入值快照冻结 + 管理侧只读接口 + 个人侧字段分级/授权收紧；22 例验收、全量 890 passed | 完整面试/邀约引用由 C 归属外键承载，属跨角色联调；人工/浏览器验收排最后 |
-| A03 / A11 / A12 / A14 | P1 | 空白或未获完整实现证据 | 批次档案冻结、审批链、真实 AI JD 草稿、员工花名册 |
+| **A03** | P0（执行表） | ✅ **已交付**（17:42）：批次开始时冻结成员评分输入值拷贝 + B 正式版本绑定；20 例验收、原样全量 909 passed / 1 例已登记 B/D 串扰 | 历史批次缺冻结列显式告警回退；B/D 修复串扰后 A 复跑原样全量并关闭请求 |
+| A11 / A12 / A14 | P1 | 空白或未获完整实现证据 | 审批链、真实 AI JD 草稿、员工花名册 |
 | A01 / A04 / A10 / A13 / A15 | P1 | `×`（代码已实现） | 按执行表「通过条件」逐条接入/验收，**A 不替 Master 改表** |
 | A05 / A09（配合 D/B） | P1 | 待联动 | A 交付授权需求与人工录用口径、招聘推荐规则 |
 | G01/G02/G07、G03~G06/G08、Q01~Q10 | P1/P2 | 部分或待验收 | 按执行表逐项回传证据，人工/客户演练排最后 |
@@ -372,7 +394,7 @@
 | `/analytics` 运行时缺陷复验 | 人工 | [A 发出的请求](../../requests/A/20261109-D-analytics页运行时缺陷.md) 待 D 修后复验关闭（T-A02 阻塞项） |
 | **Milvus 19532 不可达** | 环境（需人工） | 2026-11-10 14:00 全量实测 `MilvusStoreError: Fail connecting to server on localhost:19532`，`test_vectors_integration_t05.py` 7 例被环境 skip；服务恢复后补跑 7 例向量集成测试。A 按边界未重启容器/服务 |
 | **全量 pytest 跨文件向量串扰** | 协作（B/D） | `test_full_pipeline_success` 在零 A06 测试的两文件组合下即复现；A 已实证与 A06-5 无因果关系、试过两种 A 归属内修复均无效并回滚，**不删弱有效断言、不越界改 B/D 测试**。已发 [跨包请求](../../requests/A/20261110-BD-全量测试跨文件向量串扰.md)，待 B/D 修复后 A 复跑全量并关闭。⚠️ **15:27 更新**：T-A34 轮原样全量 exit 0 / 849 passed，未复现；**16:16 更新**：T-A42 轮**原样全量 exit 0 / 868 passed / 8 skipped / 0 failed**，仍未复现（间歇性），**请求保持打开、不写成已修复**；**16:44 追加**：A08 轮原样全量 **exit 0 / 890 passed / 8 skipped / 0 failed**，仍未复现（间歇性）；门禁证据以最新一轮原样全量 exit 0 为准 |
-| 主验收库 `ai_talent` schema 偏差 | 需授权 | stamp 已到 `C_0007` 但实际缺列/外键；**16:16 追加**：本轮 `A_0010` 给两批次表加的 `idempotency_key` 列与唯一约束也只在隔离库 `ai_talent_a_probe` 生效，主库未碰；**16:44 追加**：`A_0011` 给 `applications` 加的两列同样只在隔离库生效；重建或补迁移需用户明确授权 |
+| 主验收库 `ai_talent` schema 偏差 | 需授权 | stamp 已到 `C_0007` 但实际缺列/外键；**16:16 追加**：本轮 `A_0010` 给两批次表加的 `idempotency_key` 列与唯一约束也只在隔离库 `ai_talent_a_probe` 生效，主库未碰；**16:44 追加**：`A_0011` 给 `applications` 加的两列同样只在隔离库生效；**17:42 追加**：`A_0012` 给两批次表加的 `frozen_inputs_json` 同样只在隔离库生效；重建或补迁移需用户明确授权 |
 | `next build` / Agnes / 干净客户环境 | 未验证 | `next build` 受运行环境拦截记为未验证；Agnes `agnes-3.0-flash` 待 D 验证 |
 | C 的 `REQ-C-20261109-121506` 关闭 | 对方 | A 已受理并交付证据；C 需在干净空库复跑 `upgrade head` 到 `C_0007` 并回填 `alembic current` 后自行关闭 |
 | **A02-2 模型综合分 / D 契约** | 协作 | 等 D 响应 [A 发出的请求](../../requests/A/20261110-D-A02-2-PromptC综合分契约.md)：`PROMPT_C_SCHEMA` 加 `overall_score` 并同步断言；A 不越界改 D 的 `schemas.py` / `test_prompts.py` |

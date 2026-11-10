@@ -9,6 +9,10 @@
 3. **A02-1（V2.6 §5）不再有硬淘汰**：规则层不符项/待核实项只进 `misses`，
    所有候选人都进 Prompt C 并拿到分数；`hard_fail` 恒 0、`hard_failed` 恒 0。
    原 `score=0` 置底分支已从 `match_engine.evaluate` 移除，DB 字段保留兼容历史行。
+4. **A03 批次档案冻结（与 screen_worker 同口径）**：评分输入一律取
+   `batch.frozen_inputs_json`（创建时冻结的值拷贝 + B 正式版本绑定），不再读取
+   当前档案内容；排队期档案修订/重新解析不影响本批，retry 与历史回读不读新版本。
+   当前档案只用于「软删/不存在跳过」；缺冻结列的历史批次显式告警回退。
 """
 
 from __future__ import annotations
@@ -22,36 +26,31 @@ from sqlalchemy.orm import Session
 from app.dao import match as match_dao
 from app.models import MatchBatch, ParsedResume
 from app.service import match_engine
-from app.service.screen_service import resolve_batch_model_versions
+from app.service.screen_service import (
+    build_profile_input,
+    frozen_profile_input,
+    resolve_batch_model_versions,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def _evidence_input(db: Session, talent_profile_id: int) -> dict:
-    """取该主档最新解析结果的结构化证据（educations/employments/projects）。
+def _legacy_current_input(db: Session, profile) -> dict:
+    """A03 兼容回退：历史批次（无 frozen_inputs_json）仍按当前档案取输入。
 
-    H-A07 修复（2026-11-07）：此前 worker 只传 5 字段，评分摘要拿不到经历/项目
-    证据。阶段 1 直接从 `parsed_resumes.structured_json` 取（B 契约 §5 的
-    profile_input 兼容口径）；B 的快照服务落地后由 A 切换到该入口。
-    查询建议后续收编进 B 的 parsed_resumes dao（此处内联避免跨模块写）。
+    只用于迁移前创建的批次，显式告警；新批次一律读冻结输入。
     """
+    logger.warning(
+        "匹配批次缺少成员 %s 的 A03 冻结输入（历史批次兼容），回退读取当前档案",
+        profile.id,
+    )
     parsed = db.execute(
         select(ParsedResume)
-        .where(ParsedResume.talent_profile_id == talent_profile_id)
+        .where(ParsedResume.talent_profile_id == profile.id)
         .order_by(ParsedResume.created_at.desc(), ParsedResume.id.desc())
         .limit(1)
     ).scalar_one_or_none()
-    if parsed is None or not parsed.structured_json:
-        return {"missing_fields": ["resume_parsed"]}  # 原文未解析：证据缺失，按缺失处理
-    structured = parsed.structured_json if isinstance(parsed.structured_json, dict) else {}
-    evidence = {
-        "educations": list(structured.get("educations") or []),
-        "employments": list(structured.get("employments") or []),
-        "projects": list(structured.get("projects") or []),
-    }
-    if structured.get("skills"):
-        evidence["parsed_skills"] = list(structured["skills"])
-    return evidence
+    return build_profile_input(profile, parsed)
 
 
 def handle_match_batch(batch_id: int) -> None:
@@ -92,6 +91,8 @@ def _run_batch(db: Session, batch: MatchBatch) -> None:
     model_version, prompt_version = resolve_batch_model_versions(snapshot, logger=logger)
     scope = dict(batch.talent_scope_json or {})
     resolved_ids: list[int] = scope.get("resolved_ids") or []
+    # A03：成员评分输入在创建批次时冻结；worker / retry 只读此列，不重读当前档案内容
+    frozen = batch.frozen_inputs_json
     written = match_dao.result_talent_ids(db, batch.id)
 
     job_vector, degraded = _job_vector(snapshot)
@@ -104,26 +105,11 @@ def _run_batch(db: Session, batch: MatchBatch) -> None:
             continue
         profile = match_dao.list_profiles_by_ids(db, [talent_id]).get(talent_id)
         if profile is None or profile.deleted_at is not None:
+            # A03 只冻结内容，不冻结「存在性」——软删/不存在仍跳过
             continue
-        profile_input = {
-            "talent_profile_id": profile.id,
-            "name": profile.name,
-            "degree": profile.degree,
-            "work_years": float(profile.work_years) if profile.work_years is not None else None,
-            "skills_json": list(profile.skills_json or []),
-            "vector_status": profile.vector_status,
-            # H-A07 修复（2026-11-07）：补全画像与经历证据输入（阶段 1 用 parsed+profile）
-            "current_title": profile.current_title,
-            "expected_title": profile.expected_title,
-            "tags_json": list(profile.tags_json or []),
-            "ability_scores_json": profile.ability_scores_json,
-            "manual_edited_fields": list(profile.manual_edited_fields or []),
-        }
-        profile_input.update(_evidence_input(db, profile.id))
-        if profile_input.get("parsed_skills") and not profile_input["skills_json"]:
-            profile_input["skills_json"] = list(profile_input.pop("parsed_skills"))
-        else:
-            profile_input.pop("parsed_skills", None)
+        profile_input = frozen_profile_input(frozen, talent_id)
+        if profile_input is None:
+            profile_input = _legacy_current_input(db, profile)
         result = match_engine.evaluate(
             snapshot, profile_input, use_vector=True, job_vector=job_vector
         )

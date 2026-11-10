@@ -113,6 +113,7 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "rejected", "started_at", "heartbeat_at", "error", "retry_count",
         "vector_degraded", "created_by", "created_at", "finished_at",
         "idempotency_key",  # T-A42 请求级幂等键（可空）
+        "frozen_inputs_json",  # A03 批次开始时冻结的成员输入 + B 版本绑定（可空）
     },
     "screen_results": {
         "id", "screen_batch_id", "job_profile_id", "talent_profile_id", "hard_fail",
@@ -127,6 +128,7 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "started_at", "heartbeat_at", "error", "retry_count", "vector_degraded",
         "created_by", "created_at", "finished_at",
         "idempotency_key",  # T-A42 请求级幂等键（可空）
+        "frozen_inputs_json",  # A03 批次开始时冻结的成员输入 + B 版本绑定（可空）
     },
     "match_results": {
         "id", "match_batch_id", "talent_profile_id", "score", "hard_fail",
