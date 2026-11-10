@@ -1,14 +1,14 @@
 """T-24 L2：筛选批次服务 + worker + API（真实 MySQL；LLM/Embedding/Milvus 全假件）。
 
 覆盖 todolist T-24 验收点：
-1. POST 202（同步圈人 + 成员快照 + estimated_llm_calls=硬门槛预检通过数）；
+1. POST 202（同步圈人 + 成员快照 + estimated_llm_calls=快照内有效画像数，A02-1 起不折减）；
 2. 批次运行中改岗位条件 → 本批次结果不变（快照隔离）；
 3. 批次创建后再上传新简历/删除画像 → total 与结果集不变（新画像不补进、软删跳过计 skipped_deleted）；
 4. worker 断点续跑（杀进程模拟：重置 running→pending 保留进度，只补缺）；
 5. retry：结果行数不变、retry_count 递增、快照与 total 不变；
 6. 改判（manual_verdict）后计数同步、撤销恢复；
 7. Milvus 停机时筛选照常 done 且分数与正常时完全一致（use_vector=False 零向量依赖）；
-8. 三档计数 done 时按结果表重算；results 排序硬淘汰置底 + 有效结论过滤。
+8. 三档计数 done 时按结果表重算 + 有效结论过滤；A02-1 起不再有硬淘汰置底。
 """
 
 from __future__ import annotations
@@ -214,7 +214,7 @@ def test_create_batch_snapshot_and_estimated(env, fakes, client, auth):
     job_id = env.make_job()
     ok1 = env.make_profile()  # 达标
     ok2 = env.make_profile()
-    bad = env.make_profile(degree="大专")  # 学历硬淘汰 → 不计入 estimated
+    bad = env.make_profile(degree="大专")  # 学历不符：A02-1 起仍计入 estimated，不再被预检排除
     f1 = env.make_parsed(ok1)
     f2 = env.make_parsed(ok2)
     f3 = env.make_parsed(bad)
@@ -232,9 +232,9 @@ def test_create_batch_snapshot_and_estimated(env, fakes, client, auth):
     assert resp.status_code == 202, resp.text
     data = resp.json()["data"]
     env.track_batch(data["batch_id"])
-    assert data["total"] == 3  # 三个画像都进快照（硬淘汰者也进，由 worker 出结果）
+    assert data["total"] == 3  # 三个画像都进快照
     assert data["status"] == "pending"
-    assert data["estimated_llm_calls"] == 2  # 仅 2 人通过硬门槛预检
+    assert data["estimated_llm_calls"] == 3  # A02-1：所有人都进 Prompt C，不按预检折减
 
     batch = _batch_row(data["batch_id"])
     assert batch.scope_json["resolved_ids"] == sorted([ok1, ok2, bad])
@@ -278,9 +278,10 @@ def test_create_batch_snapshot_and_estimated(env, fakes, client, auth):
 
 
 def test_worker_executes_snapshot_and_counts(env, fakes):
+    """A02-1：硬条件不符者照样评分，不再 score NULL / rejected / hard_fail=1。"""
     job_id = env.make_job()
     p1 = env.make_profile()  # 达标 → LLM 80/70/75/60 → 73.25 → pending（60≤73.25<75）
-    p2 = env.make_profile(degree="大专")  # 硬淘汰 → score NULL / rejected
+    p2 = env.make_profile(degree="大专")  # 学历不符 → 仍进 Prompt C，不符项只落在 misses
     f1 = env.make_parsed(p1)
     f2 = env.make_parsed(p2)
     with SessionLocal() as db:
@@ -295,10 +296,10 @@ def test_worker_executes_snapshot_and_counts(env, fakes):
     assert batch.status == "done"
     assert batch.progress == 2
     assert batch.total == 2
-    assert batch.passed == 0 and batch.pending_count == 1 and batch.rejected == 1
+    assert batch.passed == 0 and batch.pending_count == 2 and batch.rejected == 0
     assert batch.vector_degraded == 0  # 筛选恒 0
     assert fakes.calls["get_vector"] == 0 and fakes.calls["embed_one"] == 0  # 零向量调用
-    assert fakes.calls["llm"] == 1  # 只有达标者调 LLM
+    assert fakes.calls["llm"] == 2  # A02-1：两名候选人都进 Prompt C
 
     with SessionLocal() as db:
         rows = {
@@ -307,8 +308,11 @@ def test_worker_executes_snapshot_and_counts(env, fakes):
         }
     assert rows[p1].verdict == "pending" and float(rows[p1].score) == 73.25
     assert rows[p1].hard_fail == 0
-    assert rows[p2].verdict == "rejected" and rows[p2].score is None  # 筛选硬淘汰 score NULL
-    assert rows[p2].hard_fail == 1 and "学历" in rows[p2].hard_fail_reason
+    assert rows[p2].verdict == "pending" and float(rows[p2].score) == 73.25
+    assert rows[p2].hard_fail == 0 and rows[p2].hard_fail_reason is None
+    assert any(
+        "不符项" in m and "学历不满足" in m for m in (rows[p2].misses_json or [])
+    )  # 不符项仍可见，但只是展示项
 
 
 def test_snapshot_isolation_profile_change_and_soft_delete(env, fakes):
@@ -477,7 +481,8 @@ def test_retry_and_manual_verdict(env, fakes, client, auth):
 
 
 def test_results_listing_and_filters(env, fakes, client, auth):
-    job_id = env.make_job(min_degree="博士")  # 所有人都硬淘汰 → 验证置底
+    # A02-1：学历不符者不再硬淘汰置底，仍出现在结果列表且有分数
+    job_id = env.make_job(min_degree="博士")
     p1 = env.make_profile()
     f1 = env.make_parsed(p1)
     with SessionLocal() as db:
@@ -493,14 +498,20 @@ def test_results_listing_and_filters(env, fakes, client, auth):
     body = resp.json()["data"]
     assert body["total"] == 1
     item = body["items"][0]
-    assert item["hard_fail"] is True and item["score"] is None
-    assert item["effective_verdict"] == "rejected"
+    assert item["hard_fail"] is False and float(item["score"]) == 73.25
+    assert item["hard_fail_reason"] is None
+    assert item["effective_verdict"] == "pending"
+    assert any("不符项" in m and "学历不满足" in m for m in item["misses"])
 
-    # verdict 过滤（有效结论口径）
+    # verdict 过滤（有效结论口径）；三档仍为内部参考标签，不自动改申请状态
     resp = client.get(
         f"/api/screen/batches/{batch_id}/results", params={"verdict": "passed"}, headers=auth
     )
     assert resp.json()["data"]["total"] == 0
+    resp = client.get(
+        f"/api/screen/batches/{batch_id}/results", params={"verdict": "pending"}, headers=auth
+    )
+    assert resp.json()["data"]["total"] == 1
     resp = client.get(
         f"/api/screen/batches/{batch_id}/results", params={"verdict": "bogus"}, headers=auth
     )

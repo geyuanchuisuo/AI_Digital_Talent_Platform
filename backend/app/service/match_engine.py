@@ -1,17 +1,29 @@
-"""匹配/筛选共用评分引擎（T-23）· 算法与判定规则 v1.2 §1–§5 全文。
+"""匹配/筛选共用评分引擎（T-23）· 需求口径以 `docs/需求文档.md` V2.6 §5（F03）为准。
 
-**输入文档**：`docs/算法与判定规则.md` v1.2（本文实现的唯一口径来源）、
-`docs/LLM提示词设计.md` v1.2 Prompt C、`docs/运行配置.md` v1.3。
+**输入文档**：`docs/需求文档.md` V2.6 §5 / §12.2（冻结基线，优先级最高）、
+`docs/modules/A/设计方案.md` M4、Prompt C（`core/prompts/match.txt`）。
+旧 `docs/算法与判定规则.md` v1.2 仅存于 `docs/imports/` 历史副本，其硬淘汰与
+固定公式口径**不得**覆盖 V2.6；本轮 A02-1 已纠正硬淘汰，公式部分见下方待办。
 
 三条硬口径（改动前先读）：
 1. **D-A：筛选（F1）与匹配（F3）共用本引擎，`use_vector` 区分**——
    筛选传 `False`：`experience = llm_experience`，**全程不触碰 Embedding/Milvus**
    （验收点要求断言零调用）；匹配传 `True`：`experience = 0.7×llm + 0.3×similarity×100`。
-2. **硬门槛规则化零 LLM**（学历排序值比较 / 年限 / 必备技能逐元素命中）；
-   硬淘汰者不进 Prompt C——筛选 `score=NULL`，匹配 `score=0` 且 `dimension_scores={}`。
+2. **规则层核对不再淘汰（A02-1，V2.6 §5）**：学历排序值 / 年限 / 必备技能逐元素
+   命中仍由 `hard_gate()` 计算，但结果只作「不符项」与「待核实」提示，随 Prompt C
+   输入一并交给模型；**所有候选人一律进入评分**，不再有筛选 `score=NULL` /
+   匹配 `score=0` 的硬淘汰分支，`hard_fail` 恒 False。依据：V2.6 §5「硬条件或
+   分数线不符合者仍显示不符项与资料缺口，不自动关闭申请」「缺失证据不直接判为
+   不满足」「低分不自动淘汰」。
 3. **降级不失败**（D-B/§4.2）：匹配路径 Milvus **或** Embedding 不可用（含岗位向量
    缺失、画像 `vector_status != synced`）→ `experience = llm_experience`、
    `vector_similarity=None`、`vector_degraded=True`，批次照常执行。
+
+**A02-2 待办（本轮未做，跨模块阻塞）**：V2.6 §5 明确「语义相似度不等于业务匹配分，
+不强制加入 0.7/0.3 或 40/30/15/15 的公式」，设计方案 M4 要求改为模型直接给
+0–100 综合分。该改动需 `MatchScoreOutput` 增 `overall_score`，而 Prompt C 的
+`PROMPT_C_SCHEMA` 与 `test_prompts.py` 归 D 维护，A 不越界修改；已发
+`docs/requests/A/20261110-D-A02-2-PromptC综合分契约.md`，待 D 响应后实施。
 
 输入约定（worker 负责从 ORM 行转 dict）：
 - `job`：批次 `config_snapshot_json`，键含 `title/jd_text/requirements_text/min_degree/
@@ -47,14 +59,27 @@ EXPERIENCE_VECTOR_WEIGHT = 0.3
 
 VECTOR_DEGRADED_NOTE = "向量依赖不可用，经历维度仅按 LLM 评分"
 
+#: A02-1：规则层核对结果在 `misses` 中的前缀（供页面展示「不符项 / 资料缺口」）。
+RULE_GAP_PREFIX = "不符项："
+PENDING_VERIFICATION_PREFIX = "待核实："
+#: 这些信息只是提示，不是淘汰结论；拼进 Prompt C 输入时明确告知模型不得据此扣分。
+RULE_REVIEW_NOTICE = (
+    "以下规则层核对结果仅作参考，不是淘汰结论：不符项与证据缺失仍须给出评分与依据，"
+    "缺失证据须标注待核实，不得推断为「没有」或据此判为显著不匹配。"
+)
+
 
 @dataclass
 class EngineResult:
-    """单候选人评分结果；worker 据此落 `screen_results` / `match_results`。"""
+    """单候选人评分结果；worker 据此落 `screen_results` / `match_results`。
+
+    A02-1 起 `hard_fail` 恒 False、`hard_fail_reason` 恒 None：DB/接口字段保留
+    兼容历史数据，但引擎不再产生自动淘汰。不符项与待核实项统一进 `misses`。
+    """
 
     hard_fail: bool
     hard_fail_reason: str | None
-    #: 筛选硬淘汰=None；匹配硬淘汰=0；正常=最终加权分（0–100，保留 2 位）
+    #: 综合分（0–100，保留 2 位）；所有候选人均有分，不再有 NULL/0 的硬淘汰值
     score: float | None
     dimension_scores: dict[str, float]
     vector_similarity: float | None
@@ -142,6 +167,38 @@ def hard_gate(job: Mapping[str, Any], profile: Mapping[str, Any]) -> tuple[list[
             hits.append(f"命中加分技能 {normalize_skill(skill)}（候选人：{hit_element}）")
 
     return reasons, hits, misses
+
+
+def classify_rule_gaps(reasons: Sequence[str]) -> tuple[list[str], list[str]]:
+    """A02-1：把规则层核对结果分成「不符项」与「待核实」，均**不是**淘汰结论。
+
+    V2.6 §5：「缺失证据不直接判为不满足」。故 `学历缺失/年限缺失/技能列表为空`
+    这类「资料没有」的情形标 `待核实：`；`学历不满足/年限不足/必备技能未命中`
+    这类明确比对不符的情形标 `不符项：`。两类都会进 `misses` 供页面展示，
+    并随 Prompt C 输入交给模型参考，但不再阻止评分、不再把分数置 NULL/0。
+    """
+    gaps: list[str] = []
+    pending: list[str] = []
+    for reason in reasons:
+        if "缺失" in reason or "为空" in reason:
+            pending.append(PENDING_VERIFICATION_PREFIX + reason)
+        else:
+            gaps.append(RULE_GAP_PREFIX + reason)
+    return gaps, pending
+
+
+def build_rule_review_text(reasons: Sequence[str]) -> str:
+    """拼进 Prompt C 输入的规则层核对段（所有候选人都带，含无不符项时）。"""
+    gaps, pending = classify_rule_gaps(reasons)
+    strip_gap = len(RULE_GAP_PREFIX)
+    strip_pending = len(PENDING_VERIFICATION_PREFIX)
+    lines = [
+        "【规则层核对（仅作参考，不是淘汰结论）】",
+        "不符项：" + ("；".join(item[strip_gap:] for item in gaps) or "无"),
+        "待核实：" + ("；".join(item[strip_pending:] for item in pending) or "无"),
+        RULE_REVIEW_NOTICE,
+    ]
+    return "\n".join(lines)
 
 
 # --------------------------------------------------------------------------- #
@@ -298,38 +355,15 @@ def evaluate(
       画像向量经 `milvus_store.get_profile_vector` 取（不可用/缺失/非 synced → 降级）。
     """
     reasons, hits, misses = hard_gate(job, profile)
-    if reasons:
-        hard_reason = "；".join(reasons)
-        if use_vector:
-            # 匹配口径：score=0 参与置底排序；dimension_scores 为空（算法 §4.3）
-            return EngineResult(
-                hard_fail=True,
-                hard_fail_reason=hard_reason,
-                score=0.0,
-                dimension_scores={},
-                vector_similarity=None,
-                vector_degraded=False,
-                hits=hits,
-                misses=misses,
-                reason=f"硬淘汰：{hard_reason}",
-            )
-        # 筛选口径：score=NULL（算法 §5）
-        return EngineResult(
-            hard_fail=True,
-            hard_fail_reason=hard_reason,
-            score=None,
-            dimension_scores={},
-            vector_similarity=None,
-            vector_degraded=False,
-            hits=hits,
-            misses=misses,
-            reason=f"硬淘汰：{hard_reason}",
-        )
+    gaps, pending = classify_rule_gaps(reasons)
 
+    # A02-1（V2.6 §5）：规则层核对结果只作「不符项 / 待核实」提示，**不再提前淘汰**。
+    # 所有候选人都进 Prompt C，包括硬条件不符与资料缺失者；分数不再置 NULL/0。
     # —— Prompt C 四维评分（temperature=0，chat_json 内置结构化重试）——
     user_text = (
         f"【候选人画像摘要】\n{build_candidate_summary(profile)}\n\n"
-        f"【岗位条件】\n{build_job_summary(job)}"
+        f"【岗位条件】\n{build_job_summary(job)}\n\n"
+        f"{build_rule_review_text(reasons)}"
     )
     output = chat_json(user_text, MatchScoreOutput, prompt_name="match")
 
@@ -371,7 +405,10 @@ def evaluate(
         vector_similarity=None if vector_similarity is None else round(vector_similarity, 4),
         vector_degraded=vector_degraded,
         hits=_dedup(llm_hits + hits),
-        misses=_dedup(llm_misses + [m for m in misses if m not in llm_misses]),
+        # 不符项与待核实项仍可见（V2.6 §5），但只是展示项，不是淘汰结论
+        misses=_dedup(
+            llm_misses + [m for m in misses if m not in llm_misses] + gaps + pending
+        ),
         reason=reason,
     )
 
@@ -422,6 +459,8 @@ __all__ = [
     "build_candidate_summary",
     "build_job_summary",
     "build_job_vector_text",
+    "build_rule_review_text",
+    "classify_rule_gaps",
     "cosine_similarity",
     "evaluate",
     "hard_gate",

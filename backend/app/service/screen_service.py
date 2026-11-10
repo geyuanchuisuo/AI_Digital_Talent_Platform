@@ -7,8 +7,9 @@
 2. **retry 复用原批次（D-E）**：仅 `failed`；复位 status/error/started/heartbeat/
    finished/vector_degraded、`retry_count+1`；**快照与 total 不变**；`progress` 按
    已有结果行数重算；worker 依 `uk_screen_batch_talent` 只补缺（结果行数不增不减）。
-3. **`estimated_llm_calls`**：创建时对 `resolved_ids` 逐人跑规则层硬门槛预检
-   （不调 LLM），通过人数即预估 LLM 调用次数（≤2s 的关键：千级画像纯内存判定）。
+3. **`estimated_llm_calls`（A02-1 起）**：快照内有效画像数。V2.6 §5 取消硬门槛
+   自动淘汰后，所有候选人都进 Prompt C，不再按预检通过人数折减（创建阶段仍不调 LLM）。
+   规则层核对结果只作不符项/待核实展示，见 `match_engine.classify_rule_gaps`。
 """
 
 from __future__ import annotations
@@ -24,7 +25,6 @@ from app.core.errors import BizError
 from app.dao import job_profiles as job_dao
 from app.dao import screen as screen_dao
 from app.models import JobProfile, ParsedResume, ResumeFile, ScreenBatch, ScreenResult, TalentProfile
-from app.service.match_engine import hard_gate
 
 logger = logging.getLogger(__name__)
 
@@ -106,16 +106,6 @@ def build_config_snapshot(job: JobProfile) -> dict[str, Any]:
     }
 
 
-def _profile_gate_input(row: TalentProfile) -> dict[str, Any]:
-    return {
-        "talent_profile_id": row.id,
-        "degree": row.degree,
-        "work_years": float(row.work_years) if row.work_years is not None else None,
-        "skills_json": list(row.skills_json or []),
-        "vector_status": row.vector_status,
-    }
-
-
 # --------------------------------------------------------------------------- #
 # 创建 / 重试 / 查询
 # --------------------------------------------------------------------------- #
@@ -136,14 +126,8 @@ def create_batch(
 
     snapshot = build_config_snapshot(job)
     profiles = screen_dao.list_profiles_by_ids(db, resolved_ids)
-    estimated = 0
-    for talent_id in resolved_ids:
-        row = profiles.get(talent_id)
-        if row is None:
-            continue
-        reasons, _, _ = hard_gate(snapshot, _profile_gate_input(row))
-        if not reasons:
-            estimated += 1
+    # A02-1：所有人都会进 Prompt C，不再用 hard_gate 折减调用数
+    estimated = sum(1 for talent_id in resolved_ids if profiles.get(talent_id) is not None)
 
     batch = screen_dao.create_batch(
         db,

@@ -6,7 +6,9 @@
 2. **降级不失败（D-B）**：Milvus/Embedding 任一不可用 → `experience=llm`、
    `vector_similarity=null`（写入 `dimension_scores_json.vector_similarity`）、
    批次 `vector_degraded=1`，照常 done；
-3. 硬淘汰 `score=0`（参与置底排序），`hard_failed` 汇总到批次行（done 时按结果表重算）。
+3. **A02-1（V2.6 §5）不再有硬淘汰**：规则层不符项/待核实项只进 `misses`，
+   所有候选人都进 Prompt C 并拿到分数；`hard_fail` 恒 0、`hard_failed` 恒 0。
+   原 `score=0` 置底分支已从 `match_engine.evaluate` 移除，DB 字段保留兼容历史行。
 """
 
 from __future__ import annotations

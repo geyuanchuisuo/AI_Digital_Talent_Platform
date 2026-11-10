@@ -11,6 +11,10 @@
    快照内画像已软删/不存在 → 跳过不写行（done 后由详情接口计 `skipped_deleted`）。
 5. **done 时按结果表重算三档计数**（防漂移）；`total` 保持快照值。
 6. 异常 → 批次 `failed` + error，可 retry（断点续跑：已写行保留）。
+7. **A02-1（V2.6 §5）不再有硬淘汰**：硬条件不符/资料缺失者照样进 Prompt C 拿分，
+   不符项与待核实项进 `misses`；`hard_fail` 恒 0、不再写 `score=NULL`。
+   三档 `verdict` 仍是**内部参考标签**，不改申请状态、不自动推进/淘汰；人工结论
+   独立存 `manual_verdict*`（两档标签与人工三态对齐属 A02-2/M5 范围）。
 """
 
 from __future__ import annotations

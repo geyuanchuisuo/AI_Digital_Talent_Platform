@@ -4,8 +4,10 @@
 - scope 为 `all / filter / upload_batch`（无 all_unscreened、多 filter）；
 - worker `use_vector=True`：岗位向量**批次内算一次**；Milvus/Embedding 不可用 →
   **降级执行并置批次 `vector_degraded=1`，不 503 不失败**（§4.2）；
-- 硬淘汰 `score=0` 参与置底排序；`hard_failed` 汇总到批次行；
-- 名次查询时计算（`hard_fail ASC, score DESC, talent_profile_id ASC` + 行号），不持久化。
+- A02-1（V2.6 §5）：不再有硬淘汰 `score=0`；规则层不符项只进 `misses`，
+  所有候选人均有分；`hard_fail` 字段保留兼容历史数据但恒 0，`hard_failed` 恒 0；
+- 名次查询时计算（`hard_fail ASC, score DESC, talent_profile_id ASC` + 行号），不持久化；
+  由于 `hard_fail` 恒 0，实际按分数排序，不因规则层不符项被置底。
 """
 
 from __future__ import annotations
@@ -89,15 +91,6 @@ def resolve_talent_ids(db: Session, scope: Mapping[str, Any]) -> list[int]:
     return sorted(set(db.execute(stmt).scalars().all()))
 
 
-def _profile_gate_input(row: TalentProfile) -> dict[str, Any]:
-    return {
-        "talent_profile_id": row.id,
-        "degree": row.degree,
-        "work_years": float(row.work_years) if row.work_years is not None else None,
-        "skills_json": list(row.skills_json or []),
-        "vector_status": row.vector_status,
-    }
-
 
 def create_batch(
     db: Session, job_profile_id: int, scope: Mapping[str, Any], *, user_id: int
@@ -115,14 +108,8 @@ def create_batch(
 
     snapshot = build_config_snapshot(job)
     profiles = match_dao.list_profiles_by_ids(db, resolved_ids)
-    estimated = 0
-    for talent_id in resolved_ids:
-        row = profiles.get(talent_id)
-        if row is None:
-            continue
-        reasons, _, _ = match_engine.hard_gate(snapshot, _profile_gate_input(row))
-        if not reasons:
-            estimated += 1
+    # A02-1：所有人都会进 Prompt C，不再用 hard_gate 折减预估调用数
+    estimated = sum(1 for talent_id in resolved_ids if profiles.get(talent_id) is not None)
 
     batch = match_dao.create_batch(
         db,

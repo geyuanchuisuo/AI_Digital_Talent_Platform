@@ -1,8 +1,10 @@
-"""匹配/筛选 LLM 评分契约（T-23，`docs/LLM提示词设计.md` v1.2 Prompt C、算法 §4.3）。
+"""匹配/筛选 LLM 评分契约（T-23，Prompt C；需求口径以 V2.6 §5 为准）。
 
 维度键名固定四个：skills / experience / education / others（+ reason）。
-`hard_fail / hard_fail_reason` 不在 LLM 输出里——规则层在调用前完成硬门槛判定，
-硬淘汰者根本不进入本 prompt（Prompt C 系统提示明示）。
+`hard_fail / hard_fail_reason` 不在 LLM 输出里——A02-1 起规则层核对只生成
+「不符项 / 待核实」提示，所有候选人都进入本 prompt，引擎不再产生硬淘汰。
+A02-2 待办：模型直接给 0–100 综合分（`overall_score`），需 D 先更新
+`PROMPT_C_SCHEMA`，见 docs/requests/A/20261110-D-A02-2-PromptC综合分契约.md。
 """
 
 from __future__ import annotations
@@ -118,9 +120,9 @@ class MatchResultItem(BaseModel):
     name: str
     deleted: bool = False
     current_title: str | None = None
-    score: float = Field(description="硬淘汰 score=0（置底排序）")
-    hard_fail: bool
-    hard_fail_reason: str | None = None
+    score: float = Field(description="综合分；A02-1 起不再有硬淘汰 score=0")
+    hard_fail: bool = Field(description="历史兼容字段；A02-1 起恒 false")
+    hard_fail_reason: str | None = Field(default=None, description="历史兼容字段；A02-1 起恒 null")
     hits_count: int
     misses_count: int
 

@@ -1,5 +1,11 @@
 """T-30 匹配评测：直连 `match_engine.evaluate(use_vector=True)`（另跑 use_vector=False 作参考口径）。
 
+⚠️ **A02-1（2026-11-10）口径提示**：引擎已按 V2.6 §5 取消硬门槛自动淘汰，
+`evaluate()` 不再返回 `hard_fail=True` 或 `score=NULL`。本脚本的 T-30 评测口径
+（「硬淘汰即 rejected」、`production_verdict` 的 hard_fail 分支）仍按旧算法编写，
+**在按 V2.6 重写并复跑真实模型前，不得用其产出作为 A02 验收依据**；对应
+`docs/updates/A/20261110-1100-A02-1取消硬门槛自动淘汰.md`。
+
 口径（算法 §7 / §4.0-§4.2 / 需求 §10）：
 - 一致率 ≥85%（评测标注 passed/rejected 两档，硬淘汰即 rejected）；另按生产实现
   `screen_worker._verdict_for` 三档阈值复核（见 `production_verdict_recheck`）；
