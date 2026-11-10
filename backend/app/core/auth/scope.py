@@ -45,6 +45,8 @@ class AccountScope:
     knowledge_scope: KnowledgeScope
     department_ids: tuple[int, ...] = ()
     granted_scope: tuple[dict, ...] = ()
+    # 多职责角色 code（sys_user_roles 聚合；空=未绑定 sys 角色，回退 users.role 简值）
+    roles: tuple[str, ...] = ()
     #: 账号生效角色代码集合（sys_user_roles 聚合；无记录时回退 users.role）。
     #: A06 职责门禁的权威来源；默认空元组以保持既有纯函数构造向后兼容。
     role_codes: tuple[str, ...] = ()
@@ -84,6 +86,7 @@ def get_account_scope(user) -> AccountScope:
             knowledge_scope="admin",
             department_ids=_active_department_ids(user_id=getattr(user, "id", None)),
             granted_scope=_active_grant_summaries(getattr(user, "id", None)),
+            roles=_active_role_codes(user_id=getattr(user, "id", None)),
         )
     # 未知角色 deny-by-default：映射为未绑定 personal
     return AccountScope(
@@ -364,3 +367,17 @@ def _BizForbidden():
     from app.core.errors import BizError
 
     return BizError(403, DENY_MESSAGE)
+
+
+def _active_role_codes(user_id: int | None) -> tuple[str, ...]:
+    """聚合账号的启用角色 code（sys_user_roles 多职责）；无记录/不连库返回空。"""
+    if user_id is None:
+        return ()
+    try:
+        from app.database import SessionLocal
+        from app.modules.system.service import list_user_role_codes
+
+        with SessionLocal() as db:
+            return tuple(list_user_role_codes(db, user_id))
+    except Exception:
+        return ()
