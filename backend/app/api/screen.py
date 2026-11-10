@@ -33,7 +33,11 @@ def create_screen_batch(
 ):
     """同步阶段 ≤2s：圈定 `resolved_ids` 快照 + 硬门槛预检估 LLM 次数；执行由 TaskRunner 异步。"""
     data = screen_service.create_batch(
-        db, payload.job_profile_id, payload.scope.model_dump(exclude_none=True), user_id=user.id
+        db,
+        payload.job_profile_id,
+        payload.scope.model_dump(exclude_none=True),
+        user_id=user.id,
+        idempotency_key=payload.idempotency_key,
     )
     return ok(ScreenBatchCreatedData.model_validate(data).model_dump(), status_code=202)
 

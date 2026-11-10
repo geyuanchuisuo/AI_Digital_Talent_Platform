@@ -112,6 +112,7 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "scope_json", "status", "progress", "total", "passed", "pending_count",
         "rejected", "started_at", "heartbeat_at", "error", "retry_count",
         "vector_degraded", "created_by", "created_at", "finished_at",
+        "idempotency_key",  # T-A42 请求级幂等键（可空）
     },
     "screen_results": {
         "id", "screen_batch_id", "job_profile_id", "talent_profile_id", "hard_fail",
@@ -125,6 +126,7 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "talent_scope_json", "status", "progress", "total", "hard_failed",
         "started_at", "heartbeat_at", "error", "retry_count", "vector_degraded",
         "created_by", "created_at", "finished_at",
+        "idempotency_key",  # T-A42 请求级幂等键（可空）
     },
     "match_results": {
         "id", "match_batch_id", "talent_profile_id", "score", "hard_fail",
@@ -457,6 +459,8 @@ EXPECTED_UNIQUE: dict[str, set[str]] = {
     "parsed_resumes": {"uk_parsed_resume_file"},
     "talent_tags": {"uk_profile_tag"},
     "talent_duplicates": {"uk_parsed_resume"},
+    "screen_batches": {"uk_screen_batch_idem"},  # T-A42 (job_profile_id, idempotency_key)
+    "match_batches": {"uk_match_batch_idem"},    # T-A42 (job_profile_id, idempotency_key)
     "screen_results": {"uk_screen_batch_talent"},
     "match_results": {"uk_match_batch_talent"},
     # ---- C 模块唯一键（来自 app/modules/*/models.py，2026-11-07 注册时提取）----
@@ -607,6 +611,13 @@ def test_unique_constraints_by_name():
     assert unique_cols("talent_duplicates", "uk_parsed_resume") == ("parsed_resume_id",)
     assert unique_cols("screen_results", "uk_screen_batch_talent") == (
         "screen_batch_id", "talent_profile_id",
+    )
+    # T-A42：组合唯一，NULL 键允许无限多行（不传键＝行为零变化）
+    assert unique_cols("screen_batches", "uk_screen_batch_idem") == (
+        "job_profile_id", "idempotency_key",
+    )
+    assert unique_cols("match_batches", "uk_match_batch_idem") == (
+        "job_profile_id", "idempotency_key",
     )
     assert unique_cols("match_results", "uk_match_batch_talent") == (
         "match_batch_id", "talent_profile_id",

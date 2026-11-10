@@ -23,6 +23,10 @@ class ScreenBatchCreateRequest(BaseModel):
 
     job_profile_id: int = Field(ge=1)
     scope: ScopePayload
+    # T-A42：可选请求级幂等键；空白＝未提供，超长由 service 统一返回 400。
+    idempotency_key: str | None = Field(
+        default=None, description="同一岗位下重复提交返回原批次，不新建结果"
+    )
 
 
 class ScreenBatchCreatedData(BaseModel):
