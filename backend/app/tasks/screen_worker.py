@@ -27,9 +27,8 @@ from sqlalchemy.orm import Session
 
 from app.dao import screen as screen_dao
 from app.models import ParsedResume, ScreenBatch
-from app.config import settings
 from app.service import match_engine
-from app.service.screen_service import build_config_snapshot
+from app.service.screen_service import build_config_snapshot, resolve_batch_model_versions
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +117,8 @@ def _run_batch(db: Session, batch: ScreenBatch) -> None:
             f"筛选批次 {batch.id} 配置快照缺少阈值字段 {missing_thresholds}，"
             "拒绝按示例默认值判定（V2.6 §5）"
         )
+    # T-A42：整批共用快照固定的模型/Prompt 版本，retry 补缺也不受运行时配置变更影响。
+    model_version, prompt_version = resolve_batch_model_versions(snapshot, logger=logger)
     scope = dict(batch.scope_json or {})
     resolved_ids: list[int] = scope.get("resolved_ids") or []
     # 断点续跑：已写结果的成员直接跳过（retry 只补缺）
@@ -157,8 +158,8 @@ def _run_batch(db: Session, batch: ScreenBatch) -> None:
         score = None if result.score is None else round(float(result.score), 2)
         screen_dao.create_result(
             db,
-            model_version=settings.llm_model,
-            prompt_version=settings.prompt_version,
+            model_version=model_version,
+            prompt_version=prompt_version,
             attempt=1,
             profile_input_snapshot_json=profile_input,
             screen_batch_id=batch.id,

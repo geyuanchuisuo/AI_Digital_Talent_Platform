@@ -17,6 +17,7 @@ from datetime import datetime
 from typing import Any, Mapping
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.errors import BizError
@@ -24,7 +25,7 @@ from app.dao import job_profiles as job_dao
 from app.dao import match as match_dao
 from app.models import MatchBatch, ParsedResume, ResumeFile, TalentProfile, TalentTag
 from app.service import match_engine
-from app.service.screen_service import build_config_snapshot
+from app.service.screen_service import build_config_snapshot, normalize_idempotency_key
 
 logger = logging.getLogger(__name__)
 
@@ -92,9 +93,43 @@ def resolve_talent_ids(db: Session, scope: Mapping[str, Any]) -> list[int]:
 
 
 
+def _find_batch_by_key(db: Session, job_profile_id: int, key: str) -> MatchBatch | None:
+    """T-A42：与 screen_service 同构，幂等键限定在同一岗位内。"""
+    return db.execute(
+        select(MatchBatch)
+        .where(MatchBatch.job_profile_id == job_profile_id)
+        .where(MatchBatch.idempotency_key == key)
+        .order_by(MatchBatch.id.asc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+def _replay_payload(db: Session, batch: MatchBatch) -> dict[str, Any]:
+    resolved_ids = list(dict(batch.talent_scope_json or {}).get("resolved_ids") or [])
+    profiles = match_dao.list_profiles_by_ids(db, resolved_ids)
+    return {
+        "batch_id": batch.id,
+        "total": batch.total,
+        "status": batch.status,
+        "estimated_llm_calls": sum(1 for tid in resolved_ids if profiles.get(tid) is not None),
+    }
+
+
 def create_batch(
-    db: Session, job_profile_id: int, scope: Mapping[str, Any], *, user_id: int
+    db: Session,
+    job_profile_id: int,
+    scope: Mapping[str, Any],
+    *,
+    user_id: int,
+    idempotency_key: str | None = None,
 ) -> dict[str, Any]:
+    """T-A42：显式 `idempotency_key` 命中已有批次时直接返回原批次，不新建、不重圈人。"""
+    key = normalize_idempotency_key(idempotency_key)
+    if key is not None:
+        existing = _find_batch_by_key(db, job_profile_id, key)
+        if existing is not None:
+            return _replay_payload(db, existing)
+
     job = job_dao.get(db, job_profile_id)
     if job is None:
         raise BizError(404, JOB_NOT_FOUND)
@@ -111,17 +146,25 @@ def create_batch(
     # A02-1：所有人都会进 Prompt C，不再用 hard_gate 折减预估调用数
     estimated = sum(1 for talent_id in resolved_ids if profiles.get(talent_id) is not None)
 
-    batch = match_dao.create_batch(
-        db,
-        job_profile_id=job_profile_id,
-        job_profile_version=job.version,
-        config_snapshot_json=snapshot,
-        talent_scope_json={**normalized_scope, "resolved_ids": resolved_ids},
-        status="pending",
-        total=len(resolved_ids),
-        created_by=user_id,
-    )
-    db.commit()
+    try:
+        batch = match_dao.create_batch(
+            db,
+            job_profile_id=job_profile_id,
+            job_profile_version=job.version,
+            config_snapshot_json=snapshot,
+            talent_scope_json={**normalized_scope, "resolved_ids": resolved_ids},
+            status="pending",
+            total=len(resolved_ids),
+            created_by=user_id,
+            idempotency_key=key,
+        )
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = _find_batch_by_key(db, job_profile_id, key) if key is not None else None
+        if existing is not None:
+            return _replay_payload(db, existing)
+        raise
     db.refresh(batch)
     return {
         "batch_id": batch.id,

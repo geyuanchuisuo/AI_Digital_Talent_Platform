@@ -10,6 +10,12 @@
 3. **`estimated_llm_calls`（A02-1 起）**：快照内有效画像数。V2.6 §5 取消硬门槛
    自动淘汰后，所有候选人都进 Prompt C，不再按预检通过人数折减（创建阶段仍不调 LLM）。
    规则层核对结果只作不符项/待核实展示，见 `match_engine.classify_rule_gaps`。
+4. **T-A42 快照固定性**：`config_snapshot_json` 额外固定 `model_version` /
+   `prompt_version`；worker 写结果行时**只读快照**，不读运行时 `settings`，
+   保证同批次（含 retry 补缺）模型口径一致且历史批次可追溯。
+5. **T-A42 请求级幂等**：客户端显式 `idempotency_key` 时，同岗位重复请求返回
+   原批次（不新建、不重圈人、不重复建结果）；不传键行为零变化——岗位/档案
+   变更仍新建一轮。并发靠 `(job_profile_id, idempotency_key)` 唯一约束兜底。
 """
 
 from __future__ import annotations
@@ -19,8 +25,10 @@ from datetime import datetime
 from typing import Any, Mapping
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.core.errors import BizError
 from app.dao import job_profiles as job_dao
 from app.dao import screen as screen_dao
@@ -33,6 +41,42 @@ RESULT_NOT_FOUND = "筛选结果不存在"
 JOB_NOT_FOUND = "岗位不存在"
 SCOPE_TYPES = ("all_unscreened", "upload_batch", "resume_file_ids", "all")
 VERDICTS = ("passed", "pending", "rejected")
+
+IDEMPOTENCY_KEY_MAX = 64
+
+
+def normalize_idempotency_key(raw: str | None) -> str | None:
+    """T-A42：空白视为未提供（行为零变化）；超长显式 400，避免静默截断后误判幂等生效。
+
+    `match_service` 复用同一归一化函数，保证两侧口径一致。
+    """
+    if raw is None:
+        return None
+    key = raw.strip()
+    if not key:
+        return None
+    if len(key) > IDEMPOTENCY_KEY_MAX:
+        raise BizError(400, f"idempotency_key 最长 {IDEMPOTENCY_KEY_MAX} 个字符")
+    return key
+
+
+def resolve_batch_model_versions(
+    snapshot: Mapping[str, Any], *, logger: logging.Logger | None = None
+) -> tuple[str, str]:
+    """T-A42：结果行版本必须来自批次快照（同批次一致 + 历史可追溯）。
+
+    A_0010 之前创建的历史批次快照没有版本字段：回退当前配置并告警，不阻断
+    retry；这类历史批次无法追溯原始模型口径，属已知限制，不做静默伪装。
+    """
+    model = snapshot.get("model_version")
+    prompt = snapshot.get("prompt_version")
+    if isinstance(model, str) and model and isinstance(prompt, str) and prompt:
+        return model, prompt
+    if logger is not None:
+        logger.warning(
+            "批次快照缺 model_version/prompt_version，按当前配置回退（历史批次无法追溯）"
+        )
+    return settings.llm_model, settings.prompt_version
 
 
 # --------------------------------------------------------------------------- #
@@ -103,16 +147,57 @@ def build_config_snapshot(job: JobProfile) -> dict[str, Any]:
         "pass_threshold": float(job.pass_threshold),
         "pending_threshold": float(job.pending_threshold),
         "weights": dict(job.weights_json),
+        # T-A42：模型/Prompt 版本在创建时随批次固定；worker 只读快照不读运行时 settings。
+        "model_version": settings.llm_model,
+        "prompt_version": settings.prompt_version,
     }
 
 
 # --------------------------------------------------------------------------- #
 # 创建 / 重试 / 查询
 # --------------------------------------------------------------------------- #
+def _find_batch_by_key(db: Session, job_profile_id: int, key: str) -> ScreenBatch | None:
+    """T-A42：幂等键限定在同一岗位内（组合唯一约束同口径）。"""
+    return db.execute(
+        select(ScreenBatch)
+        .where(ScreenBatch.job_profile_id == job_profile_id)
+        .where(ScreenBatch.idempotency_key == key)
+        .order_by(ScreenBatch.id.asc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+def _replay_payload(db: Session, batch: ScreenBatch) -> dict[str, Any]:
+    """重复请求回原批次：**不重新圈人**，estimated 仍按快照成员计算。"""
+    resolved_ids = list(dict(batch.scope_json or {}).get("resolved_ids") or [])
+    profiles = screen_dao.list_profiles_by_ids(db, resolved_ids)
+    return {
+        "batch_id": batch.id,
+        "total": batch.total,
+        "status": batch.status,
+        "estimated_llm_calls": sum(1 for tid in resolved_ids if profiles.get(tid) is not None),
+    }
+
+
 def create_batch(
-    db: Session, job_profile_id: int, scope: Mapping[str, Any], *, user_id: int
+    db: Session,
+    job_profile_id: int,
+    scope: Mapping[str, Any],
+    *,
+    user_id: int,
+    idempotency_key: str | None = None,
 ) -> dict[str, Any]:
-    """同步阶段（≤2s）：校验 → 圈人 → 预检 → 落批次行。返回 202 data。"""
+    """同步阶段（≤2s）：校验 → 圈人 → 预检 → 落批次行。返回 202 data。
+
+    T-A42：显式 `idempotency_key` 命中已有批次时直接返回原批次，不新建、
+    不重圈人；并发插入由唯一约束兜底（IntegrityError → 回查原批次）。
+    """
+    key = normalize_idempotency_key(idempotency_key)
+    if key is not None:
+        existing = _find_batch_by_key(db, job_profile_id, key)
+        if existing is not None:
+            return _replay_payload(db, existing)
+
     job = job_dao.get(db, job_profile_id)
     if job is None:
         raise BizError(404, JOB_NOT_FOUND)
@@ -129,17 +214,26 @@ def create_batch(
     # A02-1：所有人都会进 Prompt C，不再用 hard_gate 折减调用数
     estimated = sum(1 for talent_id in resolved_ids if profiles.get(talent_id) is not None)
 
-    batch = screen_dao.create_batch(
-        db,
-        job_profile_id=job_profile_id,
-        job_profile_version=job.version,
-        config_snapshot_json=snapshot,
-        scope_json={**normalized_scope, "resolved_ids": resolved_ids},
-        status="pending",
-        total=len(resolved_ids),
-        created_by=user_id,
-    )
-    db.commit()
+    try:
+        batch = screen_dao.create_batch(
+            db,
+            job_profile_id=job_profile_id,
+            job_profile_version=job.version,
+            config_snapshot_json=snapshot,
+            scope_json={**normalized_scope, "resolved_ids": resolved_ids},
+            status="pending",
+            total=len(resolved_ids),
+            created_by=user_id,
+            idempotency_key=key,
+        )
+        db.commit()
+    except IntegrityError:
+        # 并发窗口：另一个请求已用同键建批次。回查并返回原批次，不向外抛 500。
+        db.rollback()
+        existing = _find_batch_by_key(db, job_profile_id, key) if key is not None else None
+        if existing is not None:
+            return _replay_payload(db, existing)
+        raise
     db.refresh(batch)
     return {
         "batch_id": batch.id,

@@ -4,6 +4,8 @@
 关键口径：
 - 批次表用 `retry_count` / `vector_degraded`（**无 retry_of_batch_id**，决策 D-E）；
 - `scope_json` / `talent_scope_json` 创建时追加 `resolved_ids` 成员快照（决策 D-D）；
+- T-A42：批次 `(job_profile_id, idempotency_key)` 组合唯一，`idempotency_key` 可空，
+  用于「重复请求不重复建结果」；不传键时行为不变（岗位/档案变更新建一轮）；
 - 结果表用复合唯一键保证 retry 幂等；`match_results` **不持久化 rank 列**（查询时计算）；
 - 筛选硬淘汰 score=NULL，匹配硬淘汰 score=0（决策 D-8）。
 """
@@ -70,6 +72,9 @@ class ScreenBatch(PKMixin, CreatedAtMixin, Base):
     __tablename__ = "screen_batches"
     __table_args__ = (
         Index("idx_screen_job", "job_profile_id"),
+        UniqueConstraint(
+            "job_profile_id", "idempotency_key", name="uk_screen_batch_idem"
+        ),
         MYSQL_TABLE_OPTIONS,
     )
 
@@ -106,6 +111,8 @@ class ScreenBatch(PKMixin, CreatedAtMixin, Base):
     )
     created_by: Mapped[int] = mapped_column(PK_TYPE, nullable=False)
     finished_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    # T-A42：客户端显式幂等键（可空＝不启用）。同一岗位下重复提交只回原批次。
+    idempotency_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class ScreenResult(PKMixin, CreatedAtMixin, Base):
@@ -148,6 +155,9 @@ class MatchBatch(PKMixin, CreatedAtMixin, Base):
     __tablename__ = "match_batches"
     __table_args__ = (
         Index("idx_match_job", "job_profile_id"),
+        UniqueConstraint(
+            "job_profile_id", "idempotency_key", name="uk_match_batch_idem"
+        ),
         MYSQL_TABLE_OPTIONS,
     )
 
@@ -178,6 +188,8 @@ class MatchBatch(PKMixin, CreatedAtMixin, Base):
     )
     created_by: Mapped[int] = mapped_column(PK_TYPE, nullable=False)
     finished_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    # T-A42：与 ScreenBatch 同构的请求级幂等键（可空＝不启用）。
+    idempotency_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class MatchResult(PKMixin, CreatedAtMixin, Base):

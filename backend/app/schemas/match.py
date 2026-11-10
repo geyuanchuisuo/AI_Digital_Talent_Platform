@@ -60,6 +60,10 @@ class MatchBatchCreateRequest(BaseModel):
 
     job_profile_id: int = Field(ge=1)
     scope: MatchScopePayload
+    # T-A42：与筛选侧同构的可选请求级幂等键。
+    idempotency_key: str | None = Field(
+        default=None, description="同一岗位下重复提交返回原批次，不新建结果"
+    )
 
 
 class MatchBatchCreatedData(BaseModel):
