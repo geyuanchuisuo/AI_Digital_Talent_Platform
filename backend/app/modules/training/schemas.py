@@ -153,3 +153,34 @@ class ReminderScanRequest(_StrictModel):
 
     today: date | None = None
     days_ahead: int = Field(default=3, ge=0, le=30)
+
+
+class CapabilityEvidenceIn(_StrictModel):
+    """实践成果证据项：来源类型 + 说明 + 可选引用（url/记录 id）。"""
+
+    source_type: str = Field(min_length=1, max_length=30)
+    description: str = Field(min_length=1, max_length=1000)
+    ref: str | None = Field(default=None, max_length=300)
+
+
+class CapabilityRatingChangeCreateRequest(_StrictModel):
+    """能力评级变更申请（C14）：经理提交实践成果证据 + 经理评价 → HR 审核。
+
+    不允许员工为自己提交正式评级变更；evidence 至少一项，manager_level 1-5。
+    """
+
+    employee_user_id: int
+    talent_profile_id: int | None = None
+    dimension_name: str = Field(min_length=1, max_length=100)
+    evidence: list[CapabilityEvidenceIn] = Field(min_length=1, max_length=30)
+    manager_level: int = Field(ge=1, le=5)
+    manager_comment: str = Field(min_length=1, max_length=1000)
+
+
+class CapabilityRatingReviewRequest(_StrictModel):
+    """HR 审核能力评级变更：通过则 approve=true 并给出正式 level；拒绝则 false。"""
+
+    approve: bool
+    final_level: int | None = Field(default=None, ge=1, le=5)
+    comment: str | None = Field(default=None, max_length=1000)
+

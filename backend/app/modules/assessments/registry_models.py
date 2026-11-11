@@ -35,6 +35,8 @@ from app.modules.inventory.models import (
     InventoryTalentPool,
 )
 from app.modules.training.models import (
+    CapabilityRating,
+    CapabilityRatingChange,
     PrejobPhase,
     PrejobPlan,
     PrejobPlanVersion,
@@ -83,6 +85,8 @@ ALL_MODELS: tuple[type, ...] = (
     PrejobPlan,
     PrejobPhase,
     PrejobPlanVersion,
+    CapabilityRating,
+    CapabilityRatingChange,
     InventoryReview,
     InventoryTalentPool,
     InventoryDispute,

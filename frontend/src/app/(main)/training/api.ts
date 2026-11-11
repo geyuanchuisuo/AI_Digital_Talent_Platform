@@ -14,6 +14,8 @@ import type {
   TrainingLearningRecord,
   TrainingPlan,
   PrejobPlan,
+  CapabilityRating,
+  CapabilityRatingChange,
   TrainingSession,
 } from './types';
 
@@ -240,6 +242,43 @@ export function assignPrejobPlan(id: number) {
 
 export function revisePrejobPlan(id: number) {
   return post<PrejobPlan>(`/training/prejob-plans/${id}/revise`);
+}
+
+/** 正式能力评级变更链（C14）：经理提交实践成果证据+经理评价 → HR 审核生成新评级版本 */
+export interface CapabilityEvidenceIn {
+  source_type: string;
+  description: string;
+  ref?: string | null;
+}
+
+export interface CapabilityRatingChangePayload {
+  employee_user_id: number;
+  talent_profile_id?: number | null;
+  dimension_name: string;
+  evidence: CapabilityEvidenceIn[];
+  manager_level: number;
+  manager_comment: string;
+}
+
+export function fetchCapabilityRatingChanges(params?: { status?: string }) {
+  return get<CapabilityRatingChange[]>('/training/capability-rating-changes', { params });
+}
+
+export function createCapabilityRatingChange(payload: CapabilityRatingChangePayload) {
+  return post<CapabilityRatingChange>('/training/capability-rating-changes', payload);
+}
+
+export function reviewCapabilityRatingChange(
+  id: number,
+  payload: { approve: boolean; final_level?: number | null; comment?: string | null },
+) {
+  return post<CapabilityRatingChange>(`/training/capability-rating-changes/${id}/review`, payload);
+}
+
+export function fetchCapabilityRatings(employeeUserId?: number) {
+  return get<CapabilityRating[]>('/training/capability-ratings', {
+    params: employeeUserId ? { employee_user_id: employeeUserId } : undefined,
+  });
 }
 
 /** 有效学习证据与正式完成认定：分数与验证人由服务端按可信来源计算，前端不可传 */

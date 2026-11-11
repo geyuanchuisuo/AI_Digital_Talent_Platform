@@ -301,3 +301,52 @@ class PrejobPlanVersion(PKMixin, CrossDbUpdatedAtMixin, Base):
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+
+class CapabilityRating(PKMixin, CrossDbUpdatedAtMixin, Base):
+    """正式能力评级（按维度，追加版本，历史不覆盖）。
+
+    仅由经 HR 审核通过的能力评级变更生成新版本；课程完成、AI 结果不得自动改写本表。
+    """
+
+    __tablename__ = "capability_ratings"
+    __table_args__ = (
+        UniqueConstraint(
+            "employee_user_id", "talent_profile_id", "dimension_name", "version",
+            name="uk_capability_rating_dim_version",
+        ),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    employee_user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    talent_profile_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    dimension_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    level: Mapped[int] = mapped_column(Integer, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default=text("1"))
+    effective: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1, server_default=text("1"))
+    source_change_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    basis_json: Mapped[dict] = mapped_column(JSONDict, nullable=False, default=dict)
+    created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class CapabilityRatingChange(PKMixin, CrossDbUpdatedAtMixin, Base):
+    """能力评级变更申请链：实践成果证据 + 经理评价 → HR 审核；通过后生成新评级版本。"""
+
+    __tablename__ = "capability_rating_changes"
+    __table_args__ = MYSQL_TABLE_OPTIONS
+
+    employee_user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    talent_profile_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    dimension_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    evidence_json: Mapped[list] = mapped_column(JSONList, nullable=False, default=list)
+    manager_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    manager_level: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    manager_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    hr_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    hr_level: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    hr_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending_hr", server_default=str_default("pending_hr")
+    )
+    created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+

@@ -24,9 +24,12 @@ from app.core.errors import BizError
 from app.models import User
 from app.modules.assessments.models import AssessmentAssignment, AssessmentResult
 from app.modules.assessments.service import is_admin, require_admin
+from app.core.auth.scope import get_role_codes
 from app.modules.notifications import producers as notify
 from app.modules.training import drafting, feedback_themes
 from app.modules.training.models import (
+    CapabilityRating,
+    CapabilityRatingChange,
     PrejobPhase,
     PrejobPlan,
     PrejobPlanVersion,
@@ -45,6 +48,8 @@ from app.modules.training.models import (
 )
 from app.modules.training.schemas import (
     AttendanceMarkRequest,
+    CapabilityRatingChangeCreateRequest,
+    CapabilityRatingReviewRequest,
     CourseCreateRequest,
     CourseUpdateRequest,
     DraftRequest,
@@ -764,6 +769,168 @@ def list_prejob_plans(db: Session, *, user: User) -> list[PrejobPlan]:
     if not is_admin(user):
         stmt = stmt.where(PrejobPlan.employee_user_id == user.id)
     return list(db.scalars(stmt))
+
+
+# ---------------------------------------------------------------- 正式能力评级变更链（C14）
+
+def _is_manager_caller(db: Session, user: User) -> bool:
+    """部门经理或管理侧（system_admin/hr）可提交能力评级变更；员工本人不可为自己提交。"""
+    codes = set(get_role_codes(db, user.id))
+    return bool(codes & {"dept_manager"}) or is_admin(user)
+
+
+def _require_capability_employee(db: Session, employee_user_id: int) -> User:
+    emp = db.get(User, employee_user_id)
+    if emp is None:
+        raise BizError(404, "员工账号不存在")
+    if emp.role != "employee":
+        raise BizError(400, "正式能力评级仅面向在职员工")
+    return emp
+
+
+def create_capability_rating_change(
+    db: Session, payload: CapabilityRatingChangeCreateRequest, *, user: User
+) -> CapabilityRatingChange:
+    """经理提交实践成果证据 + 经理评价生成变更申请，进入 HR 审核队列。
+
+    员工不能为自己提交；证据为空、经理评级越界在 schema 已拦截，这里再校验身份链。
+    """
+    if not _is_manager_caller(db, user):
+        raise BizError(403, "仅部门经理或管理员可提交能力评级变更")
+    if payload.employee_user_id == user.id:
+        raise BizError(400, "不能为本人提交正式能力评级变更")
+    _require_capability_employee(db, payload.employee_user_id)
+    row = CapabilityRatingChange(
+        employee_user_id=payload.employee_user_id,
+        talent_profile_id=payload.talent_profile_id,
+        dimension_name=payload.dimension_name.strip(),
+        evidence_json=[e.model_dump() for e in payload.evidence],
+        manager_user_id=user.id,
+        manager_level=payload.manager_level,
+        manager_comment=payload.manager_comment.strip(),
+        status="pending_hr",
+        created_by=user.id,
+        updated_by=user.id,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def review_capability_rating_change(
+    db: Session, change_id: int, payload: CapabilityRatingReviewRequest, *, user: User
+) -> CapabilityRatingChange:
+    """HR（管理侧）审核：通过则历史版本置非生效并追加新评级版本 + hr_ability 成长事件；拒绝仅落状态。
+
+    课程完成/AI 结果不得自动改写正式评级，本函数是唯一的正式评级写入路径。
+    """
+    require_admin(user)
+    row = db.get(CapabilityRatingChange, change_id)
+    if row is None:
+        raise BizError(404, "能力评级变更申请不存在")
+    if row.status != "pending_hr":
+        raise BizError(400, "该变更申请已处理，不能重复审核")
+    row.hr_user_id = user.id
+    row.hr_comment = (payload.comment or "").strip() or None
+    if not payload.approve:
+        row.status = "rejected"
+        row.updated_by = user.id
+        db.commit()
+        db.refresh(row)
+        return row
+    if payload.final_level is None:
+        raise BizError(400, "审核通过必须给出正式评级 level")
+    row.hr_level = payload.final_level
+    # 关闭同维度旧生效版本
+    for prior in db.scalars(
+        select(CapabilityRating).where(
+            CapabilityRating.employee_user_id == row.employee_user_id,
+            CapabilityRating.talent_profile_id == row.talent_profile_id,
+            CapabilityRating.dimension_name == row.dimension_name,
+            CapabilityRating.effective == 1,
+        )
+    ):
+        prior.effective = 0
+    max_version = db.scalar(
+        select(func.max(CapabilityRating.version)).where(
+            CapabilityRating.employee_user_id == row.employee_user_id,
+            CapabilityRating.talent_profile_id == row.talent_profile_id,
+            CapabilityRating.dimension_name == row.dimension_name,
+        )
+    )
+    new_version = (max_version or 0) + 1
+    db.add(
+        CapabilityRating(
+            employee_user_id=row.employee_user_id,
+            talent_profile_id=row.talent_profile_id,
+            dimension_name=row.dimension_name,
+            level=row.hr_level,
+            version=new_version,
+            effective=1,
+            source_change_id=row.id,
+            basis_json={
+                "evidence": row.evidence_json,
+                "manager_user_id": row.manager_user_id,
+                "manager_level": row.manager_level,
+                "manager_comment": row.manager_comment,
+                "hr_comment": row.hr_comment,
+            },
+            created_by=user.id,
+        )
+    )
+    row.status = "approved"
+    row.updated_by = user.id
+    db.flush()
+    db.add(
+        TrainingGrowthEvent(
+            employee_user_id=row.employee_user_id,
+            talent_profile_id=row.talent_profile_id,
+            source_type="hr_ability",
+            event_type="ability_rating_changed",
+            ref_type="capability_rating_change",
+            ref_id=row.id,
+            summary=f"{row.dimension_name} 正式评级更新为 {row.hr_level}（v{new_version}）",
+            payload_json={
+                "dimension_name": row.dimension_name,
+                "level": row.hr_level,
+                "version": new_version,
+                "change_id": row.id,
+            },
+        )
+    )
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def list_capability_ratings(
+    db: Session, *, user: User, employee_user_id: int | None = None
+) -> list[CapabilityRating]:
+    """管理侧看全量（可按员工过滤）；员工仅看本人正式评级历史。"""
+    if employee_user_id is None and not is_admin(user):
+        employee_user_id = user.id
+    stmt = select(CapabilityRating).order_by(
+        CapabilityRating.dimension_name, CapabilityRating.version.desc()
+    )
+    if not is_admin(user):
+        stmt = stmt.where(CapabilityRating.employee_user_id == user.id)
+    elif employee_user_id is not None:
+        stmt = stmt.where(CapabilityRating.employee_user_id == employee_user_id)
+    return list(db.scalars(stmt))
+
+
+def list_capability_rating_changes(
+    db: Session, *, user: User, status: str | None = None
+) -> list[CapabilityRatingChange]:
+    """管理侧/经理看变更队列；员工仅看本人相关变更。"""
+    stmt = select(CapabilityRatingChange).order_by(CapabilityRatingChange.id.desc())
+    if not is_admin(user):
+        stmt = stmt.where(CapabilityRatingChange.employee_user_id == user.id)
+    if status:
+        stmt = stmt.where(CapabilityRatingChange.status == status)
+    return list(db.scalars(stmt))
+
 
 
 def plan_versions(db: Session, plan: TrainingPlan) -> list[TrainingPlanVersion]:

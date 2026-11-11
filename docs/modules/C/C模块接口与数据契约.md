@@ -23,6 +23,7 @@
 AI 面试间：`ai_interview_sessions`、`ai_interview_questions`、`ai_interview_events`。
 培训：`training_courses`、`training_sessions`、`training_attendances`、`training_feedbacks`、`training_feedback_themes`、`training_plans`、`training_plan_items`、`training_plan_versions`、`training_learning_records`、`training_growth_events`、`training_enrollments`、`training_learning_evidence`。
 岗前培养：`prejob_plans`、`prejob_phases`、`prejob_plan_versions`（F05/C12，面向新入职/待上岗人员的分阶段计划，与在职培训计划分离，迁移 C_0009）。
+正式能力评级：`capability_ratings`、`capability_rating_changes`（F05/C14，按维度版本化的正式评级 + 变更审核链，迁移 C_0010）。`capability_ratings` 仅由 HR 审核通过的变更追加新版本（`effective` 标记当前生效版本，历史不覆盖）；`capability_rating_changes` 记录「实践成果证据 + 经理评价 → HR 审核」状态机（`pending_hr`/`approved`/`rejected`）。
 盘点：`inventory_reviews`、`inventory_talent_pools`、`inventory_disputes`、`inventory_development_plans`、`inventory_events`、`inventory_grid_configs`（F05a/C09，九宫格标准阈值经 HR 批准的版本表）。
 
 关键字段与语义：

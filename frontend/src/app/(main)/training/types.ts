@@ -171,6 +171,42 @@ export interface PrejobPlan {
   updated_at: string;
 }
 
+export interface CapabilityEvidence {
+  source_type: string;
+  description: string;
+  ref?: string | null;
+}
+
+export interface CapabilityRatingChange {
+  id: number;
+  employee_user_id: number;
+  talent_profile_id: number | null;
+  dimension_name: string;
+  evidence: CapabilityEvidence[];
+  manager_user_id: number | null;
+  manager_level: number | null;
+  manager_comment: string | null;
+  hr_user_id: number | null;
+  hr_level: number | null;
+  hr_comment: string | null;
+  status: 'pending_hr' | 'approved' | 'rejected';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CapabilityRating {
+  id: number;
+  employee_user_id: number;
+  talent_profile_id: number | null;
+  dimension_name: string;
+  level: number;
+  version: number;
+  effective: number;
+  source_change_id: number | null;
+  basis: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface LearningEvidence {
   id: number;
   evidence_type: string;

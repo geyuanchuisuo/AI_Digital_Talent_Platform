@@ -467,6 +467,209 @@ class PrejobPlanApiTest(unittest.TestCase):
         self.assertEqual(r.status_code, 403)
 
 
+class CapabilityRatingChainTest(unittest.TestCase):
+    """C14 正式能力评级变更链：经理提交证据+评价 → HR 审核 → 新版本评级；无自动改写。"""
+
+    def setUp(self) -> None:
+        self.h = Harness()
+        self.hr = self.h.create_user("hr", role="hr")
+        self.mgr = self.h.create_user("mgr", role="dept_manager")
+        self.emp = self.h.create_user("capemp", role="employee")
+        self.other_emp = self.h.create_user("capother", role="employee")
+
+    def tearDown(self) -> None:
+        self.h.close()
+
+    def _change_payload(self, **over):
+        payload = {
+            "employee_user_id": self.emp.id,
+            "talent_profile_id": None,
+            "dimension_name": "沟通协作",
+            "evidence": [
+                {"source_type": "project", "description": "主导跨部门项目落地", "ref": "PRJ-1"},
+                {"source_type": "assessment", "description": "360 反馈优良"},
+            ],
+            "manager_level": 4,
+            "manager_comment": "证据充分，建议评为 4 级",
+        }
+        payload.update(over)
+        return payload
+
+    def _submit(self, **over):
+        r = self.h.client.post(
+            "/api/training/capability-rating-changes",
+            json=self._change_payload(**over),
+            headers=Harness.headers(self.mgr),
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        return r.json()["data"]
+
+    def test_manager_submits_then_hr_approves_creates_version(self):
+        change = self._submit()
+        self.assertEqual(change["status"], "pending_hr")
+        self.assertEqual(change["manager_user_id"], self.mgr.id)
+        self.assertEqual(len(change["evidence"]), 2)
+        rv = self.h.client.post(
+            f"/api/training/capability-rating-changes/{change['id']}/review",
+            json={"approve": True, "final_level": 4, "comment": "同意"},
+            headers=Harness.headers(self.hr),
+        )
+        self.assertEqual(rv.status_code, 200, rv.text)
+        self.assertEqual(rv.json()["data"]["status"], "approved")
+        self.assertEqual(rv.json()["data"]["hr_level"], 4)
+        ratings = self.h.client.get(
+            f"/api/training/capability-ratings?employee_user_id={self.emp.id}",
+            headers=Harness.headers(self.hr),
+        ).json()["data"]
+        self.assertEqual(len(ratings), 1)
+        self.assertEqual(ratings[0]["version"], 1)
+        self.assertEqual(ratings[0]["level"], 4)
+        self.assertEqual(ratings[0]["effective"], 1)
+        self.assertEqual(ratings[0]["dimension_name"], "沟通协作")
+
+    def test_approve_appends_growth_event(self):
+        change = self._submit()
+        self.h.client.post(
+            f"/api/training/capability-rating-changes/{change['id']}/review",
+            json={"approve": True, "final_level": 3},
+            headers=Harness.headers(self.hr),
+        )
+        events = self.h.client.get(
+            "/api/training/growth", headers=Harness.headers(self.hr)
+        ).json()["data"]
+        rows = events["items"] if isinstance(events, dict) and "items" in events else events
+        ability = [e for e in rows if e.get("event_type") == "ability_rating_changed"]
+        self.assertTrue(ability)
+        self.assertEqual(ability[0]["ref_type"], "capability_rating_change")
+        self.assertEqual(ability[0]["payload"]["level"], 3)
+
+    def test_second_approval_supersedes_prior_version(self):
+        c1 = self._submit()
+        self.h.client.post(
+            f"/api/training/capability-rating-changes/{c1['id']}/review",
+            json={"approve": True, "final_level": 3},
+            headers=Harness.headers(self.hr),
+        )
+        c2 = self._submit(manager_level=5, manager_comment="后续证据支持更高级")
+        self.h.client.post(
+            f"/api/training/capability-rating-changes/{c2['id']}/review",
+            json={"approve": True, "final_level": 5},
+            headers=Harness.headers(self.hr),
+        )
+        ratings = self.h.client.get(
+            f"/api/training/capability-ratings?employee_user_id={self.emp.id}",
+            headers=Harness.headers(self.hr),
+        ).json()["data"]
+        by_version = {r["version"]: r for r in ratings}
+        self.assertEqual(len(by_version), 2)
+        self.assertEqual(by_version[1]["effective"], 0)
+        self.assertEqual(by_version[2]["effective"], 1)
+        self.assertEqual(by_version[2]["level"], 5)
+
+    def test_hr_reject_creates_no_rating(self):
+        change = self._submit()
+        rv = self.h.client.post(
+            f"/api/training/capability-rating-changes/{change['id']}/review",
+            json={"approve": False, "comment": "证据不足"},
+            headers=Harness.headers(self.hr),
+        )
+        self.assertEqual(rv.json()["data"]["status"], "rejected")
+        ratings = self.h.client.get(
+            f"/api/training/capability-ratings?employee_user_id={self.emp.id}",
+            headers=Harness.headers(self.hr),
+        ).json()["data"]
+        self.assertEqual(ratings, [])
+
+    def test_repeated_review_rejected(self):
+        change = self._submit()
+        self.h.client.post(
+            f"/api/training/capability-rating-changes/{change['id']}/review",
+            json={"approve": True, "final_level": 4},
+            headers=Harness.headers(self.hr),
+        )
+        again = self.h.client.post(
+            f"/api/training/capability-rating-changes/{change['id']}/review",
+            json={"approve": True, "final_level": 5},
+            headers=Harness.headers(self.hr),
+        )
+        self.assertEqual(again.status_code, 400)
+
+    def test_approve_without_level_rejected(self):
+        change = self._submit()
+        rv = self.h.client.post(
+            f"/api/training/capability-rating-changes/{change['id']}/review",
+            json={"approve": True},
+            headers=Harness.headers(self.hr),
+        )
+        self.assertEqual(rv.status_code, 400)
+
+    def test_only_manager_or_admin_can_submit(self):
+        # 员工不能为自己提交
+        self_emp = self.h.client.post(
+            "/api/training/capability-rating-changes",
+            json=self._change_payload(employee_user_id=self.emp.id),
+            headers=Harness.headers(self.emp),
+        )
+        self.assertEqual(self_emp.status_code, 403)
+        # 普通管理员（非经理）可提交：用 hr 身份
+        ok = self.h.client.post(
+            "/api/training/capability-rating-changes",
+            json=self._change_payload(),
+            headers=Harness.headers(self.hr),
+        )
+        self.assertEqual(ok.status_code, 200, ok.text)
+
+    def test_employee_cannot_self_submit_for_self(self):
+        r = self.h.client.post(
+            "/api/training/capability-rating-changes",
+            json=self._change_payload(employee_user_id=self.emp.id),
+            headers=Harness.headers(self.emp),
+        )
+        self.assertEqual(r.status_code, 403)
+
+    def test_manager_cannot_self_rate(self):
+        r = self.h.client.post(
+            "/api/training/capability-rating-changes",
+            json=self._change_payload(employee_user_id=self.mgr.id),
+            headers=Harness.headers(self.mgr),
+        )
+        # mgr 是 dept_manager 不是 employee，_require_capability_employee 拒绝
+        self.assertEqual(r.status_code, 400)
+
+    def test_requires_evidence(self):
+        r = self.h.client.post(
+            "/api/training/capability-rating-changes",
+            json=self._change_payload(evidence=[]),
+            headers=Harness.headers(self.mgr),
+        )
+        self.assertEqual(r.status_code, 422)
+
+    def test_review_requires_admin(self):
+        change = self._submit()
+        r = self.h.client.post(
+            f"/api/training/capability-rating-changes/{change['id']}/review",
+            json={"approve": True, "final_level": 4},
+            headers=Harness.headers(self.mgr),
+        )
+        self.assertEqual(r.status_code, 403)
+
+    def test_employee_only_sees_own_ratings(self):
+        change = self._submit()
+        self.h.client.post(
+            f"/api/training/capability-rating-changes/{change['id']}/review",
+            json={"approve": True, "final_level": 4},
+            headers=Harness.headers(self.hr),
+        )
+        mine = self.h.client.get(
+            "/api/training/capability-ratings", headers=Harness.headers(self.emp)
+        ).json()["data"]
+        self.assertEqual(len(mine), 1)
+        other = self.h.client.get(
+            "/api/training/capability-ratings", headers=Harness.headers(self.other_emp)
+        ).json()["data"]
+        self.assertEqual(other, [])
+
+
 class LearningEvidenceTest(unittest.TestCase):
     def setUp(self) -> None:
         self.h = Harness()

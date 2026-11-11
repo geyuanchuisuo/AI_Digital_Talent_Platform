@@ -39,6 +39,7 @@ import { getErrorMessage } from '@/lib/http';
 import {
   assignPlan,
   assignPrejobPlan,
+  createCapabilityRatingChange,
   createCourse,
   createPlan,
   createPrejobPlan,
@@ -46,6 +47,8 @@ import {
   draftPlan,
   extendPlanItem,
   fetchAttendance,
+  fetchCapabilityRatings,
+  fetchCapabilityRatingChanges,
   fetchCourses,
   fetchFeedbackSummary,
   fetchGrowth,
@@ -58,6 +61,7 @@ import {
   refreshFeedbackThemes,
   revisePlan,
   revisePrejobPlan,
+  reviewCapabilityRatingChange,
   scanTrainingReminders,
   submitFeedback,
   updateCourse,
@@ -67,6 +71,8 @@ import {
   withdrawFeedback,
 } from './api';
 import type {
+  CapabilityRating,
+  CapabilityRatingChange,
   GrowthEvent,
   PrejobPlan,
   TrainingAttendance,
@@ -1413,11 +1419,246 @@ function PrejobPlans({ isAdmin }: { isAdmin: boolean }) {
   );
 }
 
+function CapabilityRatings({ canReview, canSubmit }: { canReview: boolean; canSubmit: boolean }) {
+  const [changes, setChanges] = useState<CapabilityRatingChange[]>([]);
+  const [ratings, setRatings] = useState<CapabilityRating[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [form] = Form.useForm();
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [cs, rs] = await Promise.all([fetchCapabilityRatingChanges(), fetchCapabilityRatings()]);
+      setChanges(cs);
+      setRatings(rs);
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const submit = async () => {
+    const values = await form.validateFields();
+    const payload = {
+      employee_user_id: values.employee_user_id,
+      dimension_name: values.dimension_name,
+      manager_level: values.manager_level,
+      manager_comment: values.manager_comment,
+      evidence: (values.evidence ?? [])
+        .filter((e: { description?: string }) => e && e.description)
+        .map((e: { source_type?: string; description: string; ref?: string }) => ({
+          source_type: e.source_type || 'practice',
+          description: e.description,
+          ref: e.ref || null,
+        })),
+    };
+    try {
+      await createCapabilityRatingChange(payload);
+      message.success('能力评级变更已提交，待 HR 审核');
+      setOpen(false);
+      form.resetFields();
+      void load();
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    }
+  };
+
+  const review = async (row: CapabilityRatingChange, approve: boolean) => {
+    try {
+      const finalLevel = approve ? row.manager_level ?? 3 : undefined;
+      await reviewCapabilityRatingChange(row.id, {
+        approve,
+        final_level: finalLevel ?? null,
+        comment: approve ? '同意经理评价' : '证据不足，暂不调整',
+      });
+      message.success(approve ? '已通过并生成新评级版本' : '已拒绝该变更');
+      void load();
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    }
+  };
+
+  const changeColumns: ColumnsType<CapabilityRatingChange> = [
+    { title: 'ID', dataIndex: 'id', width: 60 },
+    { title: '员工', dataIndex: 'employee_user_id', width: 70, render: (v: number) => `#${v}` },
+    { title: '维度', dataIndex: 'dimension_name' },
+    {
+      title: '证据',
+      dataIndex: 'evidence',
+      render: (evidence: CapabilityRatingChange['evidence']) => (
+        <Space direction="vertical" size={2}>
+          {evidence.map((e, i) => (
+            <Typography.Text key={i} type="secondary">
+              {`[${e.source_type}] ${e.description}${e.ref ? ` (${e.ref})` : ''}`}
+            </Typography.Text>
+          ))}
+        </Space>
+      ),
+    },
+    {
+      title: '经理评级',
+      key: 'manager',
+      width: 130,
+      render: (_, row) => (
+        <Space direction="vertical" size={0}>
+          <Tag color="blue">经理 {row.manager_level ?? '—'}/5</Tag>
+          {row.manager_comment ? <Typography.Text type="secondary">{row.manager_comment}</Typography.Text> : null}
+        </Space>
+      ),
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      width: 100,
+      render: (v: string) =>
+        v === 'approved' ? (
+          <Tag color="success">已通过</Tag>
+        ) : v === 'rejected' ? (
+          <Tag color="error">已拒绝</Tag>
+        ) : (
+          <Tag color="warning">待 HR 审核</Tag>
+        ),
+    },
+    {
+      title: 'HR 结论',
+      key: 'hr',
+      width: 120,
+      render: (_, row) => (row.hr_level ? <Tag color="purple">HR {row.hr_level}/5</Tag> : '—'),
+    },
+    ...(canReview
+      ? [
+          {
+            title: '操作',
+            key: 'action',
+            width: 110,
+            render: (_: unknown, row: CapabilityRatingChange) =>
+              row.status === 'pending_hr' ? (
+                <Space size={8}>
+                  <a onClick={() => void review(row, true)}>通过</a>
+                  <a onClick={() => void review(row, false)}>拒绝</a>
+                </Space>
+              ) : (
+                '—'
+              ),
+          },
+        ]
+      : []),
+  ];
+
+  const ratingColumns: ColumnsType<CapabilityRating> = [
+    { title: '员工', dataIndex: 'employee_user_id', width: 70, render: (v: number) => `#${v}` },
+    { title: '维度', dataIndex: 'dimension_name' },
+    { title: '评级', dataIndex: 'level', width: 70, render: (v: number) => `${v}/5` },
+    { title: '版本', dataIndex: 'version', width: 60, render: (v: number) => `v${v}` },
+    {
+      title: '生效',
+      dataIndex: 'effective',
+      width: 80,
+      render: (v: number) => (v === 1 ? <Tag color="success">生效</Tag> : <Tag>历史</Tag>),
+    },
+    {
+      title: '更新时间',
+      dataIndex: 'created_at',
+      width: 160,
+      render: (v: string) => (v ? new Date(v).toLocaleString() : '—'),
+    },
+  ];
+
+  return (
+    <Card
+      title="正式能力评级"
+      extra={
+        canSubmit ? (
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>
+            提交评级变更
+          </Button>
+        ) : null
+      }
+      loading={loading}
+    >
+      <Typography.Paragraph type="secondary">
+        正式评级仅由「实践成果证据 + 经理评价 → HR 审核」链路更新，课程完成与 AI 结果不会自动改写；每次通过追加新版本，历史不覆盖。
+      </Typography.Paragraph>
+      <Divider orientation="left" plain>
+        评级变更审核
+      </Divider>
+      <Table rowKey="id" size="small" columns={changeColumns} dataSource={changes} pagination={false} />
+      <Divider orientation="left" plain>
+        评级版本历史
+      </Divider>
+      <Table rowKey="id" size="small" columns={ratingColumns} dataSource={ratings} pagination={false} />
+      <Modal
+        title="提交能力评级变更"
+        open={open}
+        width={640}
+        onOk={() => void submit()}
+        onCancel={() => setOpen(false)}
+      >
+        <Form form={form} layout="vertical" initialValues={{ evidence: [{ source_type: 'practice' }] }}>
+          <Space size={8} style={{ display: 'flex' }}>
+            <Form.Item name="employee_user_id" label="员工 user_id" style={{ flex: 1 }} rules={[{ required: true }]}>
+              <InputNumber min={1} style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item name="dimension_name" label="能力维度" style={{ flex: 1 }} rules={[{ required: true }]}>
+              <Input placeholder="如：沟通协作" />
+            </Form.Item>
+          </Space>
+          <Form.Item name="manager_level" label="经理评级（1-5）" rules={[{ required: true }]}>
+            <InputNumber min={1} max={5} style={{ width: 120 }} />
+          </Form.Item>
+          <Form.Item name="manager_comment" label="经理评价" rules={[{ required: true }]}>
+            <Input.TextArea rows={2} />
+          </Form.Item>
+          <Form.List name="evidence">
+            {(fields, { add, remove }) => (
+              <>
+                {fields.map((field) => (
+                  <Space key={field.key} align="baseline" style={{ display: 'flex', marginBottom: 4 }}>
+                    <Form.Item name={[field.name, 'source_type']} noStyle>
+                      <Select
+                        style={{ width: 120 }}
+                        options={[
+                          { value: 'practice', label: '实践成果' },
+                          { value: 'project', label: '项目' },
+                          { value: 'assessment', label: '测评/360' },
+                        ]}
+                      />
+                    </Form.Item>
+                    <Form.Item name={[field.name, 'description']} noStyle rules={[{ required: true }]}>
+                      <Input style={{ width: 260 }} placeholder="证据说明" />
+                    </Form.Item>
+                    <Form.Item name={[field.name, 'ref']} noStyle>
+                      <Input style={{ width: 120 }} placeholder="引用(可选)" />
+                    </Form.Item>
+                    <a onClick={() => remove(field.name)}>删除</a>
+                  </Space>
+                ))}
+                <Button block icon={<PlusOutlined />} onClick={() => add({ source_type: 'practice' })}>
+                  新增证据
+                </Button>
+              </>
+            )}
+          </Form.List>
+        </Form>
+      </Modal>
+    </Card>
+  );
+}
+
 export default function TrainingPage() {
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isManager, setIsManager] = useState(false);
 
   useEffect(() => {
     setIsAdmin(isManagement());
+    const user = getUser();
+    setIsManager(user?.role === 'dept_manager');
   }, []);
 
   return (
@@ -1429,11 +1670,30 @@ export default function TrainingPage() {
                 { key: 'courses', label: '课程目录', children: <CourseAdmin /> },
                 { key: 'plans', label: '培训计划', children: <PlanAdmin /> },
                 { key: 'prejob', label: '岗前计划', children: <PrejobPlans isAdmin /> },
+                {
+                  key: 'capability',
+                  label: '能力评级',
+                  children: <CapabilityRatings canReview canSubmit />,
+                },
               ]
-            : [
-                { key: 'mine', label: '我的培训', children: <MyTraining /> },
-                { key: 'prejob', label: '我的岗前计划', children: <PrejobPlans isAdmin={false} /> },
-              ]
+            : isManager
+              ? [
+                  { key: 'mine', label: '我的培训', children: <MyTraining /> },
+                  {
+                    key: 'capability',
+                    label: '能力评级变更',
+                    children: <CapabilityRatings canReview={false} canSubmit />,
+                  },
+                ]
+              : [
+                  { key: 'mine', label: '我的培训', children: <MyTraining /> },
+                  { key: 'prejob', label: '我的岗前计划', children: <PrejobPlans isAdmin={false} /> },
+                  {
+                    key: 'capability',
+                    label: '我的能力评级',
+                    children: <CapabilityRatings canReview={false} canSubmit={false} />,
+                  },
+                ]
         }
       />
     </Card>

@@ -13,6 +13,8 @@ from app.core.response import ok, paginated
 from app.database import get_db
 from app.modules.training import service
 from app.modules.training.models import (
+    CapabilityRating,
+    CapabilityRatingChange,
     PrejobPhase,
     PrejobPlan,
     TrainingAttendance,
@@ -26,6 +28,8 @@ from app.modules.training.models import (
 )
 from app.modules.training.schemas import (
     AttendanceMarkRequest,
+    CapabilityRatingChangeCreateRequest,
+    CapabilityRatingReviewRequest,
     CourseCreateRequest,
     CourseUpdateRequest,
     DraftRequest,
@@ -689,6 +693,86 @@ def revise_prejob_plan(
 ):
     plan = service.revise_prejob_plan(db, plan_id, admin=user)
     return ok(_prejob_out(plan, service.get_prejob_plan(db, plan_id, user=user)[1]))
+
+
+# ---------------------------------------------------------------- 正式能力评级变更链（C14）
+
+def _capability_change_out(row: CapabilityRatingChange) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "employee_user_id": row.employee_user_id,
+        "talent_profile_id": row.talent_profile_id,
+        "dimension_name": row.dimension_name,
+        "evidence": list(row.evidence_json or []),
+        "manager_user_id": row.manager_user_id,
+        "manager_level": row.manager_level,
+        "manager_comment": row.manager_comment,
+        "hr_user_id": row.hr_user_id,
+        "hr_level": row.hr_level,
+        "hr_comment": row.hr_comment,
+        "status": row.status,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+    }
+
+
+def _capability_rating_out(row: CapabilityRating) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "employee_user_id": row.employee_user_id,
+        "talent_profile_id": row.talent_profile_id,
+        "dimension_name": row.dimension_name,
+        "level": row.level,
+        "version": row.version,
+        "effective": row.effective,
+        "source_change_id": row.source_change_id,
+        "basis": dict(row.basis_json or {}),
+        "created_at": row.created_at,
+    }
+
+
+@router.post("/capability-rating-changes", summary="提交能力评级变更（经理，证据+评价）")
+def create_capability_change(
+    payload: CapabilityRatingChangeCreateRequest,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    row = service.create_capability_rating_change(db, payload, user=user)
+    return ok(_capability_change_out(row))
+
+
+@router.get("/capability-rating-changes", summary="能力评级变更队列（管理侧全量 / 员工本人）")
+def list_capability_changes(
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+    status: Annotated[str | None, Query(max_length=20)] = None,
+):
+    rows = service.list_capability_rating_changes(db, user=user, status=status)
+    return ok([_capability_change_out(row) for row in rows])
+
+
+@router.post(
+    "/capability-rating-changes/{change_id}/review",
+    summary="HR 审核能力评级变更（通过则生成新正式评级版本）",
+)
+def review_capability_change(
+    change_id: int,
+    payload: CapabilityRatingReviewRequest,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    row = service.review_capability_rating_change(db, change_id, payload, user=user)
+    return ok(_capability_change_out(row))
+
+
+@router.get("/capability-ratings", summary="正式能力评级历史（管理侧可按员工过滤 / 员工本人）")
+def list_capability_ratings(
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+    employee_user_id: Annotated[int | None, Query(ge=1)] = None,
+):
+    rows = service.list_capability_ratings(db, user=user, employee_user_id=employee_user_id)
+    return ok([_capability_rating_out(row) for row in rows])
 
 
 # ---------------------------------------------------------------- 学习与成长
