@@ -38,5 +38,6 @@ def default_grade_short_answer(question_snapshot: dict[str, Any], answer_text: s
         f"考生作答：<ANSWER>{(answer_text or '').strip()}</ANSWER>\n"
         "请按评分说明给出 0–100 的分数。"
     )
-    result = chat_json(prompt, ShortAnswerGrade, system_prompt=SYSTEM_PROMPT, max_tokens=512)
+    result = chat_json(prompt, ShortAnswerGrade, system_prompt=SYSTEM_PROMPT, max_tokens=512,
+                       purpose="short_answer_grading")
     return float(result.score)

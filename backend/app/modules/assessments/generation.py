@@ -50,6 +50,7 @@ def default_generate_questions(request: dict[str, Any]) -> list[dict[str, Any]]:
         "请输出符合要求的 JSON。"
     )
     result = chat_json(
-        prompt, GeneratedQuestionList, system_prompt=SYSTEM_PROMPT, max_tokens=2048
+        prompt, GeneratedQuestionList, system_prompt=SYSTEM_PROMPT, max_tokens=2048,
+        purpose="question_generation",
     )
     return [item.model_dump() for item in result.questions]

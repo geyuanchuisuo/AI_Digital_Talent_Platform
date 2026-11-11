@@ -111,7 +111,8 @@ def _call(prompt: str) -> ResumeSchema:
     sink = _call_sink.get()
     try:
         kwargs = {"on_result":lambda event:sink({"kind":"raw", **event})} if sink is not None else {}
-        output = llm_client.chat_json(prompt, ResumeSchema, prompt_name="parse", **kwargs)
+        output = llm_client.chat_json(prompt, ResumeSchema, prompt_name="parse",
+                                      purpose="resume_parse", **kwargs)
     except llm_client.LLMError as exc:
         # 适配层已重试过 1 次；这里不再重试，避免 4 次调用把单任务拖到 8 分钟
         raise ParseError(f"Prompt A 调用失败：{exc}") from exc

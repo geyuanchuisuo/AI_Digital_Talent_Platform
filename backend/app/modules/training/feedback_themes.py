@@ -42,7 +42,8 @@ def extract_themes(comments: list[str]) -> list[list[str]]:
         ensure_ascii=False,
     )
     prompt = f"匿名课程意见数据：\n<DATA>{payload}</DATA>\n请按要求归纳主题。"
-    result = chat_json(prompt, ThemeResult, system_prompt=SYSTEM_PROMPT, max_tokens=1024)
+    result = chat_json(prompt, ThemeResult, system_prompt=SYSTEM_PROMPT, max_tokens=1024,
+                       purpose="feedback_themes")
 
     themes_by_index: dict[int, list[str]] = {}
     for item in result.items:

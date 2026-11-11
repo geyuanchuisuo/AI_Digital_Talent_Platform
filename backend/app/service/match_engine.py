@@ -397,7 +397,7 @@ def evaluate(
         f"【岗位条件】\n{build_job_summary(job)}\n\n"
         f"{build_rule_review_text(reasons)}"
     )
-    output = chat_json(user_text, MatchScoreOutput, prompt_name="match")
+    output = chat_json(user_text, MatchScoreOutput, prompt_name="match", purpose="match_scoring")
 
     dimensions: dict[str, float] = {}
     llm_hits: list[str] = []
