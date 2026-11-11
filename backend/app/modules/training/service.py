@@ -1473,9 +1473,34 @@ def confirm_formal_completion(db: Session, learning_record_id: int, *, admin: Us
             f"有效学习证据得分 {best:g} 未达到完成阈值 {FORMAL_COMPLETION_MIN_SCORE:g}，"
             "不能认定正式完成",
         )
+    was_formal = bool(record.formal_completed)
     record.formal_completed = 1
     record.status = "completed"
     record.evidence_score = best
+    if not was_formal:
+        # 正式完成（区别于员工自报 course_completed）追加成长事件，引用真实计划版本与可信证据
+        item = db.get(TrainingPlanItem, record.plan_item_id)
+        plan = db.get(TrainingPlan, item.plan_id) if item is not None else None
+        title = (item.course_snapshot_json or {}).get("title") if item is not None else None
+        db.add(
+            TrainingGrowthEvent(
+                employee_user_id=record.employee_user_id,
+                talent_profile_id=plan.talent_profile_id if plan is not None else None,
+                source_type="training",
+                event_type="course_formally_completed",
+                ref_type="training_plan_item",
+                ref_id=record.plan_item_id,
+                summary=f"正式完成课程：{title or (item.course_id if item is not None else record.plan_item_id)}",
+                payload_json={
+                    "plan_id": plan.id if plan is not None else None,
+                    "version": plan.version if plan is not None else None,
+                    "learning_record_id": record.id,
+                    "self_reported": False,
+                    "evidence_score": best,
+                    "evidence_providers": sorted({row.verified_by for row in rows if row.verified_by}),
+                },
+            )
+        )
     db.commit()
     db.refresh(record)
     return record

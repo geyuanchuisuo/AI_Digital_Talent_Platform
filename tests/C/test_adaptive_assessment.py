@@ -348,6 +348,113 @@ class AdaptiveApiFlowTest(unittest.TestCase):
         self.assertEqual(assignment["mode"], "adaptive")
         self.assertIsNone(assignment.get("paper_id"))
 
+    def test_adaptive_publish_freezes_content_against_later_edits(self):
+        from sqlalchemy import select
+        from app.modules.assessments.models import AssessmentSelection
+
+        originals = {}
+        for name, dimension_type in (("专业", "professional"), ("通用", "general")):
+            for difficulty in adaptive.DIFFICULTY_ORDER:
+                for index in range(2):
+                    stem = f"{name}-{difficulty}-{index}"
+                    response = self._post(
+                        "/api/assessments/questions",
+                        {
+                            "dimension_name": name,
+                            "dimension_type": dimension_type,
+                            "difficulty": difficulty,
+                            "question_type": "single_choice",
+                            "stem": stem,
+                            "options": ["A", "B", "C"],
+                            "correct_answer": "A",
+                        },
+                    )
+                    self.assertEqual(response.status_code, 200, response.text)
+                    qid = response.json()["data"]["id"]
+                    originals[qid] = stem
+                    self._approve(qid)
+        plan_id = self._create_adaptive_plan().json()["data"]["id"]
+        self.assertEqual(self._post(f"/api/assessments/plans/{plan_id}/publish", {}).status_code, 200)
+        assignment_id = self._assign(plan_id)["id"]
+
+        # 发布后改题并重新审核：stem 加标记、标准答案翻转为 B
+        for qid, stem in originals.items():
+            patch = self.client.patch(
+                f"/api/assessments/questions/{qid}",
+                json={"stem": stem + "【改】", "correct_answer": "B"},
+                headers=self.harness.headers(self.admin),
+            )
+            self.assertEqual(patch.status_code, 200, patch.text)
+            self._approve(qid)
+
+        # 旧方案出题仍读发布时冻结的原内容，而非当前题库
+        first = self._next(assignment_id)
+        question = first["question"]
+        self.assertEqual(question["stem"], originals[question["question_id"]])
+        self.assertNotIn("【改】", question["stem"])
+        db = self.harness.session()
+        try:
+            selection = db.scalars(
+                select(AssessmentSelection).where(AssessmentSelection.assignment_id == assignment_id)
+            ).first()
+            self.assertIsNotNone(selection)
+            self.assertEqual(selection.question_snapshot_json["correct_answer"], "A")
+            self.assertEqual(selection.question_snapshot_json["stem"], originals[selection.question_id])
+        finally:
+            db.close()
+
+    def test_adaptive_excludes_questions_disabled_after_publish(self):
+        from app.modules.assessments.models import AssessmentQuestion
+
+        ids_by_dim = {"专业": [], "通用": []}
+        for name, dimension_type in (("专业", "professional"), ("通用", "general")):
+            for difficulty in adaptive.DIFFICULTY_ORDER:
+                for index in range(2):
+                    response = self._post(
+                        "/api/assessments/questions",
+                        {
+                            "dimension_name": name,
+                            "dimension_type": dimension_type,
+                            "difficulty": difficulty,
+                            "question_type": "single_choice",
+                            "stem": f"{name}-{difficulty}-{index}",
+                            "options": ["A", "B", "C"],
+                            "correct_answer": "A",
+                        },
+                    )
+                    self.assertEqual(response.status_code, 200, response.text)
+                    qid = response.json()["data"]["id"]
+                    ids_by_dim[name].append(qid)
+                    self._approve(qid)
+        plan_id = self._create_adaptive_plan().json()["data"]["id"]
+        self.assertEqual(self._post(f"/api/assessments/plans/{plan_id}/publish", {}).status_code, 200)
+        assignment_id = self._assign(plan_id)["id"]
+        first = self._next(assignment_id)
+        issued_id = first["question"]["question_id"]
+        issued_dim = first["question"]["dimension_name"]
+        # 停用一道同维度尚未出题的题目；旧任务后续出题不得选到它
+        other = next(qid for qid in ids_by_dim[issued_dim] if qid != issued_id)
+        db = self.harness.session()
+        try:
+            db.get(AssessmentQuestion, other).status = "disabled"
+            db.commit()
+        finally:
+            db.close()
+        seen = {issued_id}
+        data = first
+        for _ in range(10):
+            if data["done"]:
+                break
+            current = data["question"]
+            self.client.put(
+                f"/api/assessments/assignments/{assignment_id}/answers/{current['question_id']}",
+                json={"selected_option": "A"}, headers=self.harness.headers(self.employee),
+            )
+            data = self._next(assignment_id)
+            if not data["done"]:
+                seen.add(data["question"]["question_id"])
+        self.assertNotIn(other, seen)
+
     def test_adaptive_rejects_publish_when_bank_insufficient(self):
         self._create_questions()
         plan = self._create_adaptive_plan(total=13)
