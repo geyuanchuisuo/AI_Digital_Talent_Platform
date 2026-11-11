@@ -334,6 +334,13 @@ def test_update_settings_roundtrip_and_audit(env):
         "interval_minutes": 30,
         "definition_codes": [code, "other"],
         "actor_user_id": 1,
+        # 数字员工定时默认关闭（独立开关，未配置时零副作用）
+        "digital": {
+            "enabled": False,
+            "interval_minutes": schedule.DIGITAL_DEFAULT_INTERVAL_MINUTES,
+            "task_types": [],
+            "notify_admin_ids": [],
+        },
     }
     # 审计：updated_by 落行
     with env.factory() as db:
