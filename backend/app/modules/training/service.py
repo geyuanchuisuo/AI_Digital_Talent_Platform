@@ -932,6 +932,159 @@ def list_capability_rating_changes(
     return list(db.scalars(stmt))
 
 
+# ---------------------------------------------------------------- 跨域成长轨迹（C13）
+
+GROWTH_DOMAINS = ("assessment", "interview", "training", "hr_ability")
+_DOMAIN_LABEL = {
+    "assessment": "能力测评",
+    "interview": "人工面试",
+    "training": "培训成长",
+    "hr_ability": "正式能力评级",
+}
+
+
+def growth_trajectory(
+    db: Session,
+    *,
+    user: User,
+    employee_user_id: int | None = None,
+    talent_profile_id: int | None = None,
+) -> dict[str, Any]:
+    """聚合测评/面试/培训/正式评级四域的成长轨迹（契约 §4/C13）。
+
+    - 时间线引用真实来源与版本，区分自报（self_reported）与正式完成；
+    - 维度状态：有生效正式评级=formal，有最新测评分=assessed，两者皆无=not_assessed（未评估）；
+    - 只做历史追加与事实归集，不推断能力提升幅度。
+    """
+    if is_admin(user):
+        target = employee_user_id if employee_user_id is not None else user.id
+    else:
+        target = user.id
+
+    ev_stmt = (
+        select(TrainingGrowthEvent)
+        .where(TrainingGrowthEvent.employee_user_id == target)
+        .order_by(TrainingGrowthEvent.created_at.asc(), TrainingGrowthEvent.id.asc())
+    )
+    if talent_profile_id is not None:
+        ev_stmt = ev_stmt.where(TrainingGrowthEvent.talent_profile_id == talent_profile_id)
+    events = list(db.scalars(ev_stmt))
+
+    # 维度宇宙 = 生效正式评级维度 ∪ 最新员工测评覆盖维度 ∪ 事件里显式带维度的项
+    formal_by_dim: dict[str, CapabilityRating] = {}
+    for row in db.scalars(
+        select(CapabilityRating).where(
+            CapabilityRating.employee_user_id == target, CapabilityRating.effective == 1
+        )
+    ):
+        formal_by_dim[row.dimension_name] = row
+
+    assessed_by_dim: dict[str, dict[str, Any]] = {}
+    assignment_ids = list(
+        db.scalars(
+            select(AssessmentAssignment.id).where(AssessmentAssignment.user_id == target)
+        )
+    )
+    if assignment_ids:
+        latest_results = list(
+            db.scalars(
+                select(AssessmentResult)
+                .where(AssessmentResult.assignment_id.in_(assignment_ids))
+                .order_by(AssessmentResult.assignment_id.asc(), AssessmentResult.version.desc())
+            )
+        )
+        seen_assignment: set[int] = set()
+        for res in latest_results:
+            if res.assignment_id in seen_assignment:
+                continue
+            seen_assignment.add(res.assignment_id)
+            for d in res.dimension_scores_json or []:
+                name = str(d.get("name") or "").strip()
+                if name and name not in assessed_by_dim:
+                    assessed_by_dim[name] = {"score": d.get("score"), "version": res.version}
+
+    dimension_names = sorted(set(formal_by_dim) | set(assessed_by_dim))
+
+    # 时间线 + 自报/正式区分
+    timeline: list[dict[str, Any]] = []
+    domain_count: dict[str, dict[str, Any]] = {
+        d: {"label": _DOMAIN_LABEL[d], "event_count": 0, "formal_count": 0, "self_reported_count": 0,
+            "first_at": None, "last_at": None}
+        for d in GROWTH_DOMAINS
+    }
+    for ev in events:
+        payload = dict(ev.payload_json or {})
+        source = ev.source_type if ev.source_type in domain_count else "training"
+        self_reported = bool(payload.get("self_reported", False))
+        is_formal = ev.event_type in {
+            "course_formally_completed", "ability_rating_changed", "plan_assigned", "prejob_assigned"
+        } or source in {"assessment", "interview", "hr_ability"}
+        created = ev.created_at
+        bucket = domain_count[source]
+        bucket["event_count"] += 1
+        if self_reported:
+            bucket["self_reported_count"] += 1
+        if is_formal and not self_reported:
+            bucket["formal_count"] += 1
+        if bucket["first_at"] is None:
+            bucket["first_at"] = created
+        bucket["last_at"] = created
+        timeline.append(
+            {
+                "id": ev.id,
+                "source_type": source,
+                "event_type": ev.event_type,
+                "self_reported": self_reported,
+                "formal": bool(is_formal and not self_reported),
+                "ref_type": ev.ref_type,
+                "ref_id": ev.ref_id,
+                "version": payload.get("version"),
+                "summary": ev.summary,
+                "created_at": created,
+            }
+        )
+
+    dimensions: list[dict[str, Any]] = []
+    for name in dimension_names:
+        formal = formal_by_dim.get(name)
+        assessed = assessed_by_dim.get(name)
+        if formal is not None:
+            status, level, version, src_ref = (
+                "formal", formal.level, formal.version,
+                {"ref_type": "capability_rating", "ref_id": formal.id,
+                 "source_change_id": formal.source_change_id},
+            )
+        elif assessed is not None:
+            status, level, version, src_ref = (
+                "assessed", None, assessed.get("version"),
+                {"ref_type": "assessment_result", "version": assessed.get("version")},
+            )
+        else:  # pragma: no cover - dimension_names 只含 formal/assessed
+            status, level, version, src_ref = "not_assessed", None, None, None
+        dimensions.append(
+            {
+                "dimension_name": name,
+                "status": status,
+                "formal_level": formal.level if formal else None,
+                "formal_version": formal.version if formal else None,
+                "latest_assessment_score": assessed.get("score") if assessed else None,
+                "source": src_ref,
+            }
+        )
+
+    return {
+        "employee_user_id": target,
+        "talent_profile_id": talent_profile_id,
+        "domains": [
+            {"source_type": d, **domain_count[d]} for d in GROWTH_DOMAINS
+        ],
+        "dimensions": dimensions,
+        "timeline": timeline,
+        "note": "轨迹按真实事件追加，维度未评估项不代表能力为 0，仅表示无正式评级与最新测评覆盖。",
+    }
+
+
+
 
 def plan_versions(db: Session, plan: TrainingPlan) -> list[TrainingPlanVersion]:
     return list(

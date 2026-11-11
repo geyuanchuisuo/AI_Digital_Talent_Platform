@@ -813,3 +813,17 @@ def growth(
         limit=page.limit,
     )
     return paginated([_growth_out(row) for row in rows], total, page.page, page.page_size)
+
+
+@router.get("/growth/trajectory", summary="跨域成长轨迹聚合（测评/面试/培训/正式评级，区分自报与正式）")
+def growth_trajectory(
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+    employee_user_id: int | None = Query(None),
+    talent_profile_id: int | None = Query(None),
+):
+    return ok(
+        service.growth_trajectory(
+            db, user=user, employee_user_id=employee_user_id, talent_profile_id=talent_profile_id
+        )
+    )

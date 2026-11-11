@@ -133,6 +133,47 @@ export interface GrowthEvent {
   created_at: string;
 }
 
+export interface GrowthTrajectoryNode {
+  id: number;
+  source_type: string;
+  event_type: string;
+  self_reported: boolean;
+  formal: boolean;
+  ref_type: string | null;
+  ref_id: number | null;
+  version: number | null;
+  summary: string | null;
+  created_at: string;
+}
+
+export interface GrowthTrajectoryDomain {
+  source_type: string;
+  label: string;
+  event_count: number;
+  formal_count: number;
+  self_reported_count: number;
+  first_at: string | null;
+  last_at: string | null;
+}
+
+export interface GrowthTrajectoryDimension {
+  dimension_name: string;
+  status: 'formal' | 'assessed' | 'not_assessed';
+  formal_level: number | null;
+  formal_version: number | null;
+  latest_assessment_score: number | null;
+  source: Record<string, unknown> | null;
+}
+
+export interface GrowthTrajectory {
+  employee_user_id: number;
+  talent_profile_id: number | null;
+  domains: GrowthTrajectoryDomain[];
+  dimensions: GrowthTrajectoryDimension[];
+  timeline: GrowthTrajectoryNode[];
+  note: string;
+}
+
 export interface TrainingEnrollment {
   id: number;
   course_id: number;

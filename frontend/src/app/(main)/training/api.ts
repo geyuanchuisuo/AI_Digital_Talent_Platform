@@ -5,6 +5,7 @@ import type { PageData } from '@/lib/types';
 
 import type {
   GrowthEvent,
+  GrowthTrajectory,
   LearningEvidence,
   TrainingAttendance,
   TrainingCourse,
@@ -121,6 +122,11 @@ export function updateProgress(itemId: number, payload: { status: string; note?:
 
 export function fetchGrowth(params: { employee_user_id?: number; page: number; page_size: number }) {
   return get<PageData<GrowthEvent>>('/training/growth', { params });
+}
+
+/** 跨域成长轨迹聚合（C13）：测评/面试/培训/正式评级四域时间线 + 维度状态（formal/assessed/未评估） */
+export function fetchGrowthTrajectory(params: { employee_user_id?: number; talent_profile_id?: number }) {
+  return get<GrowthTrajectory>('/training/growth/trajectory', { params });
 }
 
 /** 期次与出勤（管理员） */

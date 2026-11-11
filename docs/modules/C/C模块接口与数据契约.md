@@ -100,6 +100,7 @@ AI 面试间：`ai_interview_sessions`、`ai_interview_questions`、`ai_intervie
 - `PUT /plan-items/{item_id}/progress`（员工本人自报学习状态）
 - `POST /plans/draft-from-assessment/{assignment_id}`（固定流程入口；招聘测评返回 `generated=false` 与跳过原因，不生成候选人培训）
 - `GET /growth`（管理员按员工/人员查询；员工查本人）
+- `GET /growth/trajectory`（C13/F05 跨域成长轨迹聚合：管理员可按 `employee_user_id`/`talent_profile_id` 查询，员工强制查本人。返回 `domains`（assessment/interview/training/hr_ability 四域事件计数与正式/自报拆分）、`dimensions`（维度状态 `formal`/`assessed`/`not_assessed`，正式取生效能力评级版本、测评取最新结果分，皆无则标未评估）、`timeline`（按真实事件追加，逐条引用 `source_type`/`ref_type`/`ref_id`/`version` 并标 `self_reported`/`formal`）。仅归集已登记事实，不推断能力提升幅度；未评估维度不代表能力为 0。测评完成事件带 `source_type=assessment`、面试轮次完成事件带 `source_type=interview`、正式评级变更带 `source_type=hr_ability` 作为轨迹来源。）
 - `POST /courses/{id}/sessions`、`GET /courses/{id}/sessions`、`POST /sessions/{id}/attendance`、`GET /sessions/{id}/attendance`（管理员：期次与实际出勤）
 - `GET /courses/{id}/feedback/mine`（员工本人状态）、`POST /courses/{id}/feedback`、`PATCH /courses/{id}/feedback`、`POST /courses/{id}/feedback/withdraw`（员工本人，窗口内）
 - `GET /courses/{id}/feedback/summary`、`POST /courses/{id}/feedback-themes/refresh`、`PUT /courses/{id}/feedback-note`（管理员：匿名汇总、主题归纳、统一改进说明）

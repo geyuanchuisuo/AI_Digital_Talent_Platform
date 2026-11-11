@@ -52,6 +52,7 @@ import {
   fetchCourses,
   fetchFeedbackSummary,
   fetchGrowth,
+  fetchGrowthTrajectory,
   fetchMyPlans,
   fetchPlans,
   fetchPrejobPlans,
@@ -74,6 +75,8 @@ import type {
   CapabilityRating,
   CapabilityRatingChange,
   GrowthEvent,
+  GrowthTrajectory,
+  GrowthTrajectoryDimension,
   PrejobPlan,
   TrainingAttendance,
   TrainingCourse,
@@ -1419,6 +1422,115 @@ function PrejobPlans({ isAdmin }: { isAdmin: boolean }) {
   );
 }
 
+function GrowthTrajectoryAdmin() {
+  const [employeeUserId, setEmployeeUserId] = useState<number | undefined>(undefined);
+  return (
+    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      <Space>
+        <Typography.Text>员工 user_id</Typography.Text>
+        <InputNumber min={1} value={employeeUserId} onChange={(v) => setEmployeeUserId(v ?? undefined)} />
+        <Button onClick={() => setEmployeeUserId(employeeUserId)}>查询轨迹</Button>
+      </Space>
+      {employeeUserId ? (
+        <GrowthTrajectoryPanel employeeUserId={employeeUserId} />
+      ) : (
+        <Empty description="输入员工 user_id 查看其跨域成长轨迹" />
+      )}
+    </Space>
+  );
+}
+
+function GrowthTrajectoryPanel({ employeeUserId }: { employeeUserId?: number }) {
+  const [data, setData] = useState<GrowthTrajectory | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setData(await fetchGrowthTrajectory({ employee_user_id: employeeUserId }));
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }, [employeeUserId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const domainColor: Record<string, string> = {
+    assessment: 'geekblue',
+    interview: 'cyan',
+    training: 'green',
+    hr_ability: 'purple',
+  };
+
+  const dimensionStatus = (d: GrowthTrajectoryDimension) => {
+    if (d.status === 'formal') return <Tag color="purple">正式 {d.formal_level}/5 · v{d.formal_version}</Tag>;
+    if (d.status === 'assessed') return <Tag color="blue">测评 {d.latest_assessment_score ?? '—'}</Tag>;
+    return <Tag>未评估</Tag>;
+  };
+
+  return (
+    <Card title="跨域成长轨迹" loading={loading}>
+      <Typography.Paragraph type="secondary">{data?.note}</Typography.Paragraph>
+      <Space size={8} wrap style={{ marginBottom: 12 }}>
+        {(data?.domains ?? []).map((d) => (
+          <Tag key={d.source_type} color={domainColor[d.source_type] ?? 'default'}>
+            {`${d.label}：${d.event_count} 项（正式 ${d.formal_count} / 自报 ${d.self_reported_count}）`}
+          </Tag>
+        ))}
+      </Space>
+      <Divider orientation="left" plain>
+        能力维度状态
+      </Divider>
+      {data && data.dimensions.length > 0 ? (
+        <Table
+          rowKey="dimension_name"
+          size="small"
+          pagination={false}
+          dataSource={data.dimensions}
+          columns={[
+            { title: '维度', dataIndex: 'dimension_name' },
+            { title: '状态', key: 'status', render: (_, row: GrowthTrajectoryDimension) => dimensionStatus(row) },
+            {
+              title: '来源/版本',
+              key: 'source',
+              render: (_, row: GrowthTrajectoryDimension) =>
+                row.source ? <Typography.Text type="secondary">{JSON.stringify(row.source)}</Typography.Text> : '—',
+            },
+          ]}
+        />
+      ) : (
+        <Empty description="暂无维度数据（不代表能力为 0）" />
+      )}
+      <Divider orientation="left" plain>
+        事件时间线（引用真实来源与版本）
+      </Divider>
+      {data && data.timeline.length > 0 ? (
+        <Timeline
+          items={data.timeline.map((node) => ({
+            color: domainColor[node.source_type] ?? 'gray',
+            children: (
+              <Space direction="vertical" size={0}>
+                <Typography.Text strong>{node.summary ?? node.event_type}</Typography.Text>
+                <Typography.Text type="secondary">
+                  {`${node.source_type} · ${node.version ? `v${node.version} · ` : ''}${
+                    node.self_reported ? '自报' : node.formal ? '正式' : '记录'
+                  } · ${new Date(node.created_at).toLocaleString()}`}
+                </Typography.Text>
+              </Space>
+            ),
+          }))}
+        />
+      ) : (
+        <Empty description="尚无成长事件" />
+      )}
+    </Card>
+  );
+}
+
 function CapabilityRatings({ canReview, canSubmit }: { canReview: boolean; canSubmit: boolean }) {
   const [changes, setChanges] = useState<CapabilityRatingChange[]>([]);
   const [ratings, setRatings] = useState<CapabilityRating[]>([]);
@@ -1675,6 +1787,7 @@ export default function TrainingPage() {
                   label: '能力评级',
                   children: <CapabilityRatings canReview canSubmit />,
                 },
+                { key: 'trajectory', label: '成长轨迹', children: <GrowthTrajectoryAdmin /> },
               ]
             : isManager
               ? [
@@ -1684,6 +1797,7 @@ export default function TrainingPage() {
                     label: '能力评级变更',
                     children: <CapabilityRatings canReview={false} canSubmit />,
                   },
+                  { key: 'trajectory', label: '成长轨迹', children: <GrowthTrajectoryPanel /> },
                 ]
               : [
                   { key: 'mine', label: '我的培训', children: <MyTraining /> },
@@ -1693,6 +1807,7 @@ export default function TrainingPage() {
                     label: '我的能力评级',
                     children: <CapabilityRatings canReview={false} canSubmit={false} />,
                   },
+                  { key: 'trajectory', label: '我的成长轨迹', children: <GrowthTrajectoryPanel /> },
                 ]
         }
       />

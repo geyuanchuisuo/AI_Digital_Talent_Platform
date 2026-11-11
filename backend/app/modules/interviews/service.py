@@ -163,6 +163,7 @@ def update_round(
             raise BizError(400, "面试轮次状态只支持 pending → in_progress → completed")
     row.version += 1
     row.updated_by = admin.id
+    became_completed = before["status"] != "completed" and row.status == "completed"
     after = {
         "round_name": row.round_name,
         "scheduled_at": str(row.scheduled_at) if row.scheduled_at else None,
@@ -183,6 +184,21 @@ def update_round(
         before=before,
         after=after,
     )
+    if became_completed and row.candidate_user_id is not None:
+        from app.modules.training.models import TrainingGrowthEvent  # noqa: PLC0415 - 跨域成长事件，避免环
+
+        db.add(
+            TrainingGrowthEvent(
+                employee_user_id=row.candidate_user_id,
+                talent_profile_id=row.talent_profile_id,
+                source_type="interview",
+                event_type="interview_round_completed",
+                ref_type="interview_round",
+                ref_id=row.id,
+                summary=f"完成人工面试轮次：{row.round_name}",
+                payload_json={"round_id": row.id, "version": row.version},
+            )
+        )
     db.commit()
     db.refresh(row)
     return row

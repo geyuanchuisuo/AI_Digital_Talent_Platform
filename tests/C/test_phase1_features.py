@@ -670,6 +670,125 @@ class CapabilityRatingChainTest(unittest.TestCase):
         self.assertEqual(other, [])
 
 
+class GrowthTrajectoryTest(unittest.TestCase):
+    """C13 跨域成长轨迹：时间线区分自报/正式，维度标 formal/assessed/未评估。"""
+
+    def setUp(self) -> None:
+        from app.modules.assessments.models import AssessmentAssignment, AssessmentResult
+        from app.modules.training.models import CapabilityRating, TrainingGrowthEvent
+
+        self._AssessmentAssignment = AssessmentAssignment
+        self._AssessmentResult = AssessmentResult
+        self._CapabilityRating = CapabilityRating
+        self._GrowthEvent = TrainingGrowthEvent
+
+        self.h = Harness()
+        self.hr = self.h.create_user("trhr", role="hr")
+        self.emp = self.h.create_user("trend", role="employee")
+        self.other = self.h.create_user("trother", role="employee")
+
+    def tearDown(self) -> None:
+        self.h.close()
+
+    def _seed(self):
+        G, C = self._GrowthEvent, self._CapabilityRating
+        AA, AR = self._AssessmentAssignment, self._AssessmentResult
+        db = self.h.session()
+        try:
+            db.add_all([
+                G(employee_user_id=self.emp.id, source_type="assessment",
+                  event_type="assessment_completed", ref_type="assessment_result", ref_id=1,
+                  summary="完成测评", payload_json={"version": 1}),
+                G(employee_user_id=self.emp.id, source_type="interview",
+                  event_type="interview_round_completed", ref_type="interview_round", ref_id=2,
+                  summary="完成面试", payload_json={"version": 1}),
+                G(employee_user_id=self.emp.id, source_type="training",
+                  event_type="course_completed", ref_type="training_plan_item", ref_id=3,
+                  summary="自报完成", payload_json={"version": 2, "self_reported": True}),
+                G(employee_user_id=self.emp.id, source_type="training",
+                  event_type="course_formally_completed", ref_type="training_learning_record", ref_id=4,
+                  summary="正式完成", payload_json={"version": 2, "self_reported": False}),
+                G(employee_user_id=self.emp.id, source_type="hr_ability",
+                  event_type="ability_rating_changed", ref_type="capability_rating_change", ref_id=5,
+                  summary="评级更新", payload_json={"version": 1, "dimension_name": "沟通协作", "level": 4}),
+                C(employee_user_id=self.emp.id, dimension_name="沟通协作", level=4,
+                  version=1, effective=1, basis_json={}),
+            ])
+            # 最新测评结果覆盖另一个维度"数据分析"，无正式评级 → assessed
+            a = AA(user_id=self.emp.id, purpose="employee", status="completed", mode="paper",
+                   plan_id=1, plan_version=1, idempotency_key="traj-a-1")
+            db.add(a)
+            db.flush()
+            db.add(AR(assignment_id=a.id, version=1,
+                      dimension_scores_json=[{"name": "数据分析", "type": "k", "weight": 1,
+                                              "question_count": 2, "score": 78.5}],
+                      total_score=78.5, pass_score=60, passed=1, grading_snapshot_json={}))
+            db.commit()
+        finally:
+            db.close()
+
+    def _get(self, user, params=""):
+        return self.h.client.get(
+            f"/api/training/growth/trajectory{params}", headers=Harness.headers(user)
+        )
+
+    def test_domains_and_self_vs_formal(self):
+        self._seed()
+        data = self._get(self.emp).json()["data"]
+        self.assertEqual(data["employee_user_id"], self.emp.id)
+        domains = {d["source_type"]: d for d in data["domains"]}
+        self.assertEqual(domains["assessment"]["event_count"], 1)
+        self.assertEqual(domains["interview"]["event_count"], 1)
+        self.assertEqual(domains["hr_ability"]["formal_count"], 1)
+        self.assertEqual(domains["training"]["self_reported_count"], 1)
+        self.assertEqual(domains["training"]["formal_count"], 1)
+        # timeline 每条都带 source_type + 自报/正式标记
+        by_event = {t["event_type"]: t for t in data["timeline"]}
+        self.assertTrue(by_event["course_completed"]["self_reported"])
+        self.assertFalse(by_event["course_formally_completed"]["self_reported"])
+        self.assertTrue(by_event["course_formally_completed"]["formal"])
+
+    def test_dimension_status_formal_assessed_notassessed(self):
+        self._seed()
+        # 追加一个仅出现在培训维度目录里、无任何评级/测评的维度不会自动纳入宇宙；
+        # 这里验证 formal/assessed 两态
+        data = self._get(self.emp).json()["data"]
+        dims = {d["dimension_name"]: d for d in data["dimensions"]}
+        self.assertEqual(dims["沟通协作"]["status"], "formal")
+        self.assertEqual(dims["沟通协作"]["formal_level"], 4)
+        self.assertEqual(dims["数据分析"]["status"], "assessed")
+        self.assertEqual(dims["数据分析"]["latest_assessment_score"], 78.5)
+        self.assertIsNone(dims["数据分析"]["formal_level"])
+
+    def test_no_data_dimension_is_not_assessed_not_zero(self):
+        self._seed()
+        # 增加一个带维度但无正式评级/无测评覆盖的维度：仅通过测评结果历史表达
+        data = self._get(self.emp).json()["data"]
+        # 未出现在 formal/assessed 宇宙中的维度不凭空生成，且明确无推断提升
+        self.assertIn("不代表能力为 0", data["note"])
+
+    def test_admin_queries_target_employee(self):
+        self._seed()
+        data = self._get(self.hr, f"?employee_user_id={self.emp.id}").json()["data"]
+        self.assertEqual(data["employee_user_id"], self.emp.id)
+        self.assertEqual(len(data["timeline"]), 5)
+
+    def test_employee_cannot_query_other(self):
+        self._seed()
+        # 非管理侧忽略 employee_user_id，只返回本人轨迹
+        data = self._get(self.other, f"?employee_user_id={self.emp.id}").json()["data"]
+        self.assertEqual(data["employee_user_id"], self.other.id)
+        self.assertEqual(data["timeline"], [])
+        self.assertEqual(data["dimensions"], [])
+
+    def test_empty_trajectory(self):
+        data = self._get(self.other).json()["data"]
+        self.assertEqual(data["timeline"], [])
+        self.assertEqual(data["dimensions"], [])
+        # 域摘要仍存在但计数为 0
+        self.assertTrue(all(d["event_count"] == 0 for d in data["domains"]))
+
+
 class LearningEvidenceTest(unittest.TestCase):
     def setUp(self) -> None:
         self.h = Harness()

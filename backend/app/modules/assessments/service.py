@@ -1238,6 +1238,7 @@ def _create_result(
             TrainingGrowthEvent(
                 employee_user_id=assignment.user_id,
                 talent_profile_id=assignment.talent_profile_id,
+                source_type="assessment",
                 event_type="assessment_completed",
                 ref_type="assessment_result",
                 ref_id=result.id,
