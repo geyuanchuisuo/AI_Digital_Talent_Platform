@@ -94,6 +94,8 @@ def _run_batch(db: Session, batch: MatchBatch) -> None:
     # A03：成员评分输入在创建批次时冻结；worker / retry 只读此列，不重读当前档案内容
     frozen = batch.frozen_inputs_json
     written = match_dao.result_talent_ids(db, batch.id)
+    failed_ids = match_dao.failed_result_talent_ids(db, batch.id)
+    written = written - failed_ids
 
     job_vector, degraded = _job_vector(snapshot)
     if degraded:
@@ -110,9 +112,32 @@ def _run_batch(db: Session, batch: MatchBatch) -> None:
         profile_input = frozen_profile_input(frozen, talent_id)
         if profile_input is None:
             profile_input = _legacy_current_input(db, profile)
-        result = match_engine.evaluate(
-            snapshot, profile_input, use_vector=True, job_vector=job_vector
-        )
+        try:
+            result = match_engine.evaluate(
+                snapshot, profile_input, use_vector=True, job_vector=job_vector
+            )
+        except Exception as exc:  # noqa: BLE001 - T-A42 逐结果失败：落行留痕，批次继续
+            logger.warning("匹配批次 %s 单份 %s 评分失败：%s", batch.id, talent_id, exc)
+            match_dao.create_result(
+                db,
+                model_version=model_version,
+                prompt_version=prompt_version,
+                attempt=1,
+                profile_input_snapshot_json=profile_input,
+                match_batch_id=batch.id,
+                talent_profile_id=talent_id,
+                hard_fail=0,
+                score=0,
+                dimension_scores_json={},
+                hits_json=[],
+                misses_json=[],
+                reason=None,
+                failure_reason=f"{type(exc).__name__}: {exc}"[:2000],
+            )
+            batch.progress += 1
+            batch.heartbeat_at = datetime.now()
+            db.commit()
+            continue
         if match_dao.get_result_by_talent(db, batch.id, talent_id) is not None:
             continue
         if result.vector_degraded:

@@ -125,8 +125,10 @@ def _run_batch(db: Session, batch: ScreenBatch) -> None:
     resolved_ids: list[int] = scope.get("resolved_ids") or []
     # A03：成员评分输入在创建批次时冻结；worker / retry 只读此列，绝不重读当前档案内容
     frozen = batch.frozen_inputs_json
-    # 断点续跑：已写结果的成员直接跳过（retry 只补缺）
+    # 断点续跑：已写成功结果的成员跳过；失败行（failure_reason 非空）重跑（T-A42）
     written = screen_dao.result_talent_ids(db, batch.id)
+    failed_ids = screen_dao.failed_result_talent_ids(db, batch.id)
+    written = written - failed_ids
     engine_job = snapshot  # 引擎入参与快照同构（T-23 约定）
 
     for talent_id in resolved_ids:
@@ -140,7 +142,26 @@ def _run_batch(db: Session, batch: ScreenBatch) -> None:
         profile_input = frozen_profile_input(frozen, talent_id)
         if profile_input is None:
             profile_input = _legacy_current_input(db, profile)
-        result = match_engine.evaluate(engine_job, profile_input, use_vector=False)
+        try:
+            result = match_engine.evaluate(engine_job, profile_input, use_vector=False)
+        except Exception as exc:  # noqa: BLE001 - T-A42 逐结果失败：落行留痕，批次继续
+            logger.warning("筛选批次 %s 单份 %s 评分失败：%s", batch.id, talent_id, exc)
+            screen_dao.create_result(
+                db,
+                model_version=model_version,
+                prompt_version=prompt_version,
+                attempt=1,
+                profile_input_snapshot_json=profile_input,
+                screen_batch_id=batch.id,
+                job_profile_id=batch.job_profile_id,
+                talent_profile_id=talent_id,
+                verdict="failed",
+                failure_reason=f"{type(exc).__name__}: {exc}"[:2000],
+            )
+            batch.progress += 1
+            batch.heartbeat_at = datetime.now()
+            db.commit()
+            continue
         # 双重幂等：写前再查一次（并发/重试窗口内唯一键兜底）
         if screen_dao.get_result_by_talent(db, batch.id, talent_id) is not None:
             continue

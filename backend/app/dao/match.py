@@ -78,6 +78,19 @@ def get_result_by_talent(db: Session, batch_id: int, talent_profile_id: int) -> 
     ).scalar_one_or_none()
 
 
+def failed_result_talent_ids(db: Session, batch_id: int) -> set[int]:
+    """T-A42：本批失败行的人才 id 集合（retry 只重跑失败项）。"""
+    from app.models import MatchResult
+
+    rows = db.execute(
+        select(MatchResult.talent_profile_id).where(
+            getattr(MatchResult, "match_batch_id") == batch_id,
+            MatchResult.failure_reason.is_not(None),
+        )
+    ).scalars().all()
+    return set(rows)
+
+
 def create_result(db: Session, **fields: Any) -> MatchResult:
     row = MatchResult(**fields)
     db.add(row)
