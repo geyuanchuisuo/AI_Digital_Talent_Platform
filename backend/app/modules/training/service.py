@@ -1081,12 +1081,29 @@ def _next_session_id(db: Session, course_id: int, *, now: datetime) -> int | Non
     )
 
 
+def _reserved_awaiting_count(db: Session, course_id: int) -> int:
+    """已通知候补但员工尚未确认的名额预留数：不算正式占位，但限制超发。"""
+    return int(
+        db.scalar(
+            select(func.count())
+            .select_from(TrainingEnrollment)
+            .where(TrainingEnrollment.course_id == course_id, TrainingEnrollment.status == "awaiting_confirmation")
+        )
+        or 0
+    )
+
+
 def _promote_waitlist(db: Session, course_id: int, *, now: datetime, actor_user_id: int | None = None) -> TrainingEnrollment | None:
-    """名额释放后把最早候补转为 pending 占位，并通知本人（无期次引用则跳过通知）。"""
+    """名额释放后通知最早候补：进入 `awaiting_confirmation`（非正式占位），24h 内需本人确认。
+
+    需求 F05：有空位通知下一位、员工 24 小时内确认、超时通知下位、确认仍走课程审批规则、不自动报名。
+    预留口径：正式占位（pending/approved）+ 待确认预留不得超过容量，避免超发。
+    """
     course = db.get(TrainingCourse, course_id)
     if not course or not course.capacity:
         return None
-    if _occupying_count(db, course_id) >= course.capacity:
+    reserved = _occupying_count(db, course_id) + _reserved_awaiting_count(db, course_id)
+    if reserved >= course.capacity:
         return None
     row = db.scalar(
         select(TrainingEnrollment)
@@ -1095,7 +1112,7 @@ def _promote_waitlist(db: Session, course_id: int, *, now: datetime, actor_user_
     )
     if not row:
         return None
-    row.status = "pending"
+    row.status = "awaiting_confirmation"
     row.expires_at = now + timedelta(hours=ENROLLMENT_TTL_HOURS)
     row.decided_by = None
     row.decided_at = None
@@ -1152,6 +1169,8 @@ def decide_enrollment(
     row = db.get(TrainingEnrollment, enrollment_id)
     if not row:
         raise BizError(404, "报名记录不存在")
+    if row.status == "awaiting_confirmation":
+        raise BizError(400, "候补名额待员工确认，确认后方可进入审批")
     if row.status not in ("pending", "waitlisted") and not (
         row.status == "approved" and payload.status == "cancelled"
     ):
@@ -1201,15 +1220,50 @@ def decide_enrollment(
     return row
 
 
+def confirm_waitlist_offer(
+    db: Session, enrollment_id: int, *, user: User
+) -> TrainingEnrollment:
+    """员工确认候补名额（24h 内）：`awaiting_confirmation` → `pending`，随后仍走课程审批规则。
+
+    确认不等于自动报名成功，仅把预留转为待审批占位；超期或状态不符均拒绝。
+    """
+    _require_employee_caller(user)
+    row = db.get(TrainingEnrollment, enrollment_id)
+    if not row:
+        raise BizError(404, "报名记录不存在")
+    if row.employee_user_id != user.id:
+        raise BizError(403, "只能确认本人的候补名额")
+    if row.status != "awaiting_confirmation":
+        raise BizError(400, "当前状态不可确认候补名额")
+    now = datetime.now()
+    if row.expires_at and row.expires_at < now:
+        row.status = "expired"
+        db.commit()
+        _promote_waitlist(db, row.course_id, now=now, actor_user_id=user.id)
+        db.commit()
+        raise BizError(400, "候补名额已超时释放，请重新报名或等待下一次通知")
+    course = _require_course(db, row.course_id)
+    if course.capacity and _occupying_count(db, row.course_id) >= int(course.capacity):
+        raise BizError(400, "名额已满，暂无法确认，请联系培训管理员")
+    row.status = "pending"
+    row.expires_at = now + timedelta(hours=ENROLLMENT_TTL_HOURS)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
 def release_expired_enrollments(db: Session, *, now: datetime | None = None, actor: User | None = None) -> dict[str, int]:
-    """扫描超时未决定的 pending 占位并释放，随后对每个受影响课程递补候补。"""
+    """扫描超时未决定的占位并释放，随后对每个受影响课程递补候补。
+
+    覆盖两类超时：`pending` 审批占位超时，以及 `awaiting_confirmation` 候补确认超时（超时通知下位）。
+    """
     if actor is not None:
         require_admin(actor)
     moment = now or datetime.now()
     rows = list(
         db.scalars(
             select(TrainingEnrollment).where(
-                TrainingEnrollment.status == "pending",
+                TrainingEnrollment.status.in_(("pending", "awaiting_confirmation")),
                 TrainingEnrollment.expires_at.is_not(None),
                 TrainingEnrollment.expires_at < moment,
             )

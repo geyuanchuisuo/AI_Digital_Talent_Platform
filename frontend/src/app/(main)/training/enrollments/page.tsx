@@ -28,6 +28,7 @@ import { getErrorMessage } from '@/lib/http';
 
 import {
   applyEnrollment,
+  confirmEnrollment,
   confirmFormalCompletion,
   decideEnrollment,
   fetchCourses,
@@ -45,6 +46,7 @@ const ENROLL_STATUS: Record<string, { color: string; text: string }> = {
   approved: { color: 'success', text: '已通过' },
   rejected: { color: 'error', text: '已拒绝' },
   waitlisted: { color: 'warning', text: '候补' },
+  awaiting_confirmation: { color: 'gold', text: '待确认名额' },
   cancelled: { color: 'default', text: '已取消' },
   expired: { color: 'default', text: '超时释放' },
 };
@@ -111,6 +113,16 @@ function EnrollmentTable({ isAdmin }: { isAdmin: boolean }) {
     }
   };
 
+  const confirmSeat = async (row: TrainingEnrollment) => {
+    try {
+      await confirmEnrollment(row.id);
+      message.success('名额已确认，进入审批');
+      void load();
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    }
+  };
+
   const columns: ColumnsType<TrainingEnrollment> = [
     { title: '报名 ID', dataIndex: 'id', width: 80 },
     { title: '课程 ID', dataIndex: 'course_id', width: 90 },
@@ -145,7 +157,19 @@ function EnrollmentTable({ isAdmin }: { isAdmin: boolean }) {
               ),
           },
         ]
-      : []),
+      : [
+          {
+            title: '操作',
+            key: 'action',
+            width: 120,
+            render: (_: unknown, row: TrainingEnrollment) =>
+              row.status === 'awaiting_confirmation' ? (
+                <a onClick={() => void confirmSeat(row)}>确认名额</a>
+              ) : (
+                '—'
+              ),
+          },
+        ]),
   ];
 
   return (
@@ -159,7 +183,7 @@ function EnrollmentTable({ isAdmin }: { isAdmin: boolean }) {
       <Typography.Paragraph type="secondary">
         {isAdmin
           ? '待审批报名需在截止时间内处理，超时未审批可点「释放超时占位」自动释放并递补候补。'
-          : '报名后等待管理员审批；超时未审批会自动取消，可重新报名。'}
+          : '报名后等待管理员审批；名额满时进入候补，收到递补通知后需在 24 小时内确认，确认后仍走审批规则，超时未确认名额将释放给下一位。'}
       </Typography.Paragraph>
       <Table rowKey="id" size="small" loading={loading} columns={columns} dataSource={rows} pagination={false} />
     </Card>

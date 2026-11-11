@@ -138,7 +138,7 @@ export interface TrainingEnrollment {
   course_id: number;
   employee_user_id: number;
   priority: 'required' | 'elective';
-  status: 'pending' | 'approved' | 'rejected' | 'waitlisted' | 'cancelled' | 'expired';
+  status: 'pending' | 'approved' | 'rejected' | 'waitlisted' | 'awaiting_confirmation' | 'cancelled' | 'expired';
   expires_at: string | null;
   note: string | null;
 }

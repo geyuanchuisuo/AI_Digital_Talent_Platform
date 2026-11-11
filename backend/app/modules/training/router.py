@@ -328,6 +328,16 @@ def post_enrollment(
     return ok({"id": row.id, "status": row.status, "expires_at": row.expires_at.isoformat() if row.expires_at else None})
 
 
+@router.post("/enrollments/{enrollment_id}/confirm", summary="员工确认候补名额（24h 内）")
+def post_enrollment_confirm(
+    enrollment_id: int,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    row = service.confirm_waitlist_offer(db, enrollment_id, user=user)
+    return ok({"id": row.id, "status": row.status, "expires_at": row.expires_at.isoformat() if row.expires_at else None})
+
+
 @router.post("/enrollments/{enrollment_id}/decide", summary="审批报名")
 def post_enrollment_decide(
     enrollment_id: int,

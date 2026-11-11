@@ -272,15 +272,28 @@ class TrainingEnrollmentTest(unittest.TestCase):
         self.h.client.post(
             f"/api/training/enrollments/{first['id']}/decide", json={"status": "approved"},
             headers=Harness.headers(self.admin))
-        # 通过后取消即释放名额，最早候补递补为 pending 占位
+        # 通过后取消即释放名额，最早候补进入 awaiting_confirmation（非正式占位，待本人确认）
         cancelled = self.h.client.post(
             f"/api/training/enrollments/{first['id']}/decide", json={"status": "cancelled"},
             headers=Harness.headers(self.admin))
         self.assertEqual(cancelled.json()["data"]["status"], "cancelled")
         rows = self.h.client.get("/api/training/enrollments", headers=Harness.headers(self.admin)).json()["data"]
         statuses = {row["id"]: row["status"] for row in rows}
-        self.assertEqual(statuses[second["id"]], "pending")
-        # 候补通过时若名额已满则拒绝
+        self.assertEqual(statuses[second["id"]], "awaiting_confirmation")
+        # 待确认阶段管理员不能直接审批，须员工先确认
+        prem = self.h.client.post(
+            f"/api/training/enrollments/{second['id']}/decide", json={"status": "approved"},
+            headers=Harness.headers(self.admin))
+        self.assertEqual(prem.status_code, 400)
+        # 他人不能确认本人名额
+        other = self.h.client.post(
+            f"/api/training/enrollments/{second['id']}/confirm", headers=Harness.headers(self.emp))
+        self.assertEqual(other.status_code, 403)
+        # 本人确认 → pending，随后仍走审批规则
+        confirmed = self.h.client.post(
+            f"/api/training/enrollments/{second['id']}/confirm", headers=Harness.headers(emp2))
+        self.assertEqual(confirmed.status_code, 200)
+        self.assertEqual(confirmed.json()["data"]["status"], "pending")
         self.h.client.post(
             f"/api/training/enrollments/{second['id']}/decide", json={"status": "approved"},
             headers=Harness.headers(self.admin))
@@ -293,6 +306,57 @@ class TrainingEnrollmentTest(unittest.TestCase):
             f"/api/training/enrollments/{third['id']}/decide", json={"status": "approved"},
             headers=Harness.headers(self.admin))
         self.assertEqual(blocked.status_code, 400)
+
+    def test_waitlist_offer_confirmation_timeout(self):
+        """候补名额通知后 24h 未确认：释放并通知下一位（超时通知下位）。"""
+        from datetime import datetime, timedelta
+
+        from app.modules.training.models import TrainingEnrollment
+
+        course = self.h.client.post(
+            "/api/training/courses",
+            json={"title": "限1", "description": "x", "material_url": "http://x", "capacity": 1},
+            headers=Harness.headers(self.admin)).json()["data"]
+        emp2 = self.h.create_user("w2", role="employee")
+        emp3 = self.h.create_user("w3", role="employee")
+        first = self.h.client.post(
+            "/api/training/enrollments", json={"course_id": course["id"]},
+            headers=Harness.headers(self.emp)).json()["data"]
+        self.h.client.post(
+            f"/api/training/enrollments/{first['id']}/decide", json={"status": "approved"},
+            headers=Harness.headers(self.admin))
+        self.h.client.post(
+            "/api/training/enrollments", json={"course_id": course["id"]},
+            headers=Harness.headers(emp2))
+        self.h.client.post(
+            "/api/training/enrollments", json={"course_id": course["id"]},
+            headers=Harness.headers(emp3))
+        # 释放名额 → emp2 递补为待确认
+        self.h.client.post(
+            f"/api/training/enrollments/{first['id']}/decide", json={"status": "cancelled"},
+            headers=Harness.headers(self.admin))
+        # 人为把 emp2 的确认期限调到过去
+        rows = self.h.client.get("/api/training/enrollments", headers=Harness.headers(self.admin)).json()["data"]
+        awaiting = next(r for r in rows if r["status"] == "awaiting_confirmation")
+        db = self.h.session()
+        try:
+            row = db.get(TrainingEnrollment, awaiting["id"])
+            row.expires_at = datetime.now() - timedelta(hours=1)
+            db.commit()
+        finally:
+            db.close()
+        # 定时任务释放超时待确认名额并递补下一位
+        released = self.h.client.post(
+            "/api/training/enrollments/release-expired", headers=Harness.headers(self.admin))
+        self.assertEqual(released.json()["data"]["released"], 1)
+        after = self.h.client.get("/api/training/enrollments", headers=Harness.headers(self.admin)).json()["data"]
+        st = {r["id"]: r["status"] for r in after}
+        self.assertEqual(st[awaiting["id"]], "expired")
+        self.assertIn("awaiting_confirmation", st.values())
+        # 已失效名额不能再确认
+        late = self.h.client.post(
+            f"/api/training/enrollments/{awaiting['id']}/confirm", headers=Harness.headers(emp2))
+        self.assertEqual(late.status_code, 400)
 
     def test_release_expired_and_requires_admin(self):
         from datetime import datetime, timedelta

@@ -101,8 +101,8 @@ AI 面试间：`ai_interview_sessions`、`ai_interview_questions`、`ai_intervie
 - `POST /courses/{id}/sessions`、`GET /courses/{id}/sessions`、`POST /sessions/{id}/attendance`、`GET /sessions/{id}/attendance`（管理员：期次与实际出勤）
 - `GET /courses/{id}/feedback/mine`（员工本人状态）、`POST /courses/{id}/feedback`、`PATCH /courses/{id}/feedback`、`POST /courses/{id}/feedback/withdraw`（员工本人，窗口内）
 - `GET /courses/{id}/feedback/summary`、`POST /courses/{id}/feedback-themes/refresh`、`PUT /courses/{id}/feedback-note`（管理员：匿名汇总、主题归纳、统一改进说明）
-- `POST /enrollments`、`GET /enrollments`、`POST /enrollments/{id}/decide`（员工报名必修/选修；管理员审批/候补；有 `capacity` 时按 pending 占位、approved 占用计数，满额直接进入 waitlisted；approved 可取消并递补最早候补）
-- `POST /enrollments/release-expired`（管理员/外部调度：把超时未决定的 pending 置为 `expired` 释放占位，并按课程递补候补；有期次时投递 `course.waitlist_promoted`）
+- `POST /enrollments`、`GET /enrollments`、`POST /enrollments/{id}/decide`、`POST /enrollments/{id}/confirm`（员工报名必修/选修；管理员审批/候补；有 `capacity` 时按 pending 占位、approved 占用计数，满额进入 waitlisted。名额释放后 `_promote_waitlist` 把最早候补转为 `awaiting_confirmation`（预留，非正式占位）并投递 `course.waitlist_promoted`，员工 24h 内经 `confirm` 确认→`pending` 走正常审批；未确认或审批超时由 `release-expired` 置 `expired` 并递补下一位。`awaiting_confirmation` 阶段不允许管理员直接 decide。预留口径：pending+approved+awaiting_confirmation ≤ capacity，防超发；候补通知≠正式占位，确认≠自动报名。）
+- `POST /enrollments/release-expired`（管理员/外部调度：把超时未决定的 pending 与超期未确认的 awaiting_confirmation 置为 `expired` 释放占位/预留，并按课程递补候补；有期次时投递 `course.waitlist_promoted`）
 - `POST /learning-records/{id}/study-sessions`（员工本人领取服务端签名的学习会话凭证，含有效期）
 - `POST /learning-evidence`、`GET /learning-records/{id}/evidence`（员工提交学习证据：出勤/已通过测评/学习会话时长；分数与验证人由服务端计算，客户端字段 `score`/`verified_by` 被严格拒绝；列表本人或管理员可见）
 - `POST /learning-records/{id}/confirm-completion`（管理员依据服务端校验证据认定正式完成：无证据或证据未达完成阈值返回 400）

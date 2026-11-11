@@ -193,6 +193,13 @@ export function decideEnrollment(
   return post<{ id: number; status: string }>(`/training/enrollments/${enrollmentId}/decide`, payload);
 }
 
+/** 员工确认候补名额（24h 内），确认后进入正常审批 */
+export function confirmEnrollment(enrollmentId: number) {
+  return post<{ id: number; status: string; expires_at: string | null }>(
+    `/training/enrollments/${enrollmentId}/confirm`,
+  );
+}
+
 export function fetchEnrollments(params?: { course_id?: number }) {
   return get<TrainingEnrollment[]>('/training/enrollments', { params });
 }
