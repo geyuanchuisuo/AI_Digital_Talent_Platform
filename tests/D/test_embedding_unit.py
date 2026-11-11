@@ -305,3 +305,95 @@ def test_local_mode_dimension_mismatch_raises(monkeypatch):
     monkeypatch.setattr(client, "_ensure_local_model", lambda: WrongDim())
     with pytest.raises(EmbeddingDimensionError, match="Milvus collection"):
         client.embed_texts(["x"])
+
+
+# ---- 模式分流 + 并发（T-D-SELF-06 收尾）----
+
+def test_mode_switch_routes_to_correct_backend(monkeypatch):
+    """EMBEDDING_MODE=api/local 切换即时生效：同一配置下两种模式路由到不同后端。"""
+    local_calls: list[list[str]] = []
+
+    class FakeST:
+        def __init__(self, path, device=None):
+            self.path = path
+
+        def encode(self, batch, **k):
+            local_calls.append(list(batch))
+            return [[0.5] * DIM for _ in batch]
+
+    fake_st = types.ModuleType("sentence_transformers")
+    fake_st.SentenceTransformer = FakeST
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake_st)
+
+    # local 模式 → 进程内推理（不发 HTTP）
+    monkeypatch.setattr("app.config.settings.embedding_mode", "local")
+    monkeypatch.setattr("app.config.settings.embedding_local_model_path", "E:/fake-model")
+    local_client = EmbeddingClient()
+    local_client.embed_texts(["本地模式"])
+    assert local_calls == [["本地模式"]], "local 模式必须走进程内推理"
+
+    # api 模式 → OpenAI HTTP（不发本地推理）
+    monkeypatch.setattr("app.config.settings.embedding_mode", "api")
+    api_client = EmbeddingClient(api_key="k", base_url="http://127.0.0.1:9")
+
+    class FakeResp:
+        data = [type("D", (), {"embedding": [0.2] * DIM})()]
+    class FakeEmbeddings:
+        def create(self, model, input):
+            assert input == ["API 模式"], "api 模式必须走 HTTP"
+            return FakeResp()
+    class FakeClient:
+        embeddings = FakeEmbeddings()
+
+    monkeypatch.setattr(api_client, "_client", FakeClient())
+    api_client.embed_texts(["API 模式"])
+    assert local_calls == [["本地模式"]], "切回 api 模式后不得再触发本地推理"
+
+
+def test_concurrent_embed_texts_all_complete_and_ordered(monkeypatch):
+    """并发调用：N 线程同时 embed_texts，全部完成、各线程结果与输入同序（无串扰）。"""
+    import threading
+
+    monkeypatch.setattr("app.config.settings.embedding_mode", "api")
+    client = EmbeddingClient(api_key="k", base_url="http://127.0.0.1:9")
+
+    call_lock = threading.Lock()
+    live_batches: list[list[str]] = []
+
+    class FakeEmbeddings:
+        def create(self, model, input):
+            with call_lock:
+                live_batches.append(list(input))  # 记录调用时刻的批次内容
+            return type("R", (), {"data": [
+                type("D", (), {"embedding": [float(len(text))] * DIM})() for text in input
+            ]})()
+    class FakeClient:
+        embeddings = FakeEmbeddings()
+
+    monkeypatch.setattr(client, "_client", FakeClient())
+
+    errors: list[Exception] = []
+    results: dict[int, list[list[float]]] = {}
+
+    def worker(tid: int):
+        try:
+            texts = [f"线程{tid}-文本{i}" for i in range(3)]
+            vecs = client.embed_texts(texts)
+            results[tid] = vecs
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+
+    assert errors == [], f"并发调用不得抛错：{errors[:2]}"
+    assert len(results) == 8, "8 线程全部完成"
+    for tid, vecs in results.items():
+        assert len(vecs) == 3
+        for i, v in enumerate(vecs):
+            assert all(x == float(len(f"线程{tid}-文本{i}")) for x in v), (
+                "各线程向量必须与自己的输入对应（无串扰）"
+            )
