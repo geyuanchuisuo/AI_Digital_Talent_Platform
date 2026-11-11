@@ -5,7 +5,7 @@
 
 - 表无行且 value 非空 → `number`（大数字卡）
 - 表有行且配置了 label/value 列 → `bar`（类目幅度对比；序列截断至 20 项防长尾）
-- 暂无数据 / 无可绘图列 → `none`（前端不渲染图区）
+- 暂无数据 / 无可绘图列 / 数值列含非数值 → `none`（前端不渲染图区，避免误导图形）
 """
 
 from __future__ import annotations
@@ -58,9 +58,12 @@ def build_chart(
     series = []
     for row in rows[:_MAX_SERIES]:
         v = row.get(value_col)
+        # 非数值（含 None/bool/字符串）不绘图：宁可 none + 可读原因，也不渲染误导柱高
+        if v is None or isinstance(v, bool) or not isinstance(v, (int, float)):
+            return {"chart_type": "none", "reason": "数值列含非数值，无法绘图"}
         series.append({
             "name": str(row.get(label_col)),
-            "value": float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else v,
+            "value": float(v),
         })
     return {
         "chart_type": "bar",

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import AnalyticsPage from './page';
 import { createFeedback, fetchActiveJobs, fetchFeedback, streamActiveJobsEvents } from './api';
-import type { ActiveJobsData, MetricData } from './api';
+import type { ActiveJobsData, MetricData, MetricFeedbackItem } from './api';
 
 // jsdom 无 canvas：mock 图表组件，仅验证「拿到数据即渲染」与传入的数据形态
 vi.mock('@ant-design/charts', () => ({
@@ -199,6 +199,151 @@ describe('AnalyticsPage（T-D01b 切片 + T-D10 多维分析 + T-D12 反馈）',
       const btn = screen.getByText('标记不准确').closest('button') as HTMLButtonElement;
       expect(btn.disabled).toBeTruthy();
     });
+  });
+
+  it('反馈提交中重复点击不重复提交（confirmLoading 忽略二次点击）', async () => {
+    let release: (v: MetricFeedbackItem) => void = () => {};
+    createFeedbackMock.mockReturnValue(
+      new Promise<MetricFeedbackItem>((res) => {
+        release = res;
+      }),
+    );
+    render(<AnalyticsPage />);
+    const markBtn = await waitFor(() => {
+      const btn = screen.getByText('标记不准确').closest('button') as HTMLButtonElement;
+      expect(btn.disabled).toBeFalsy();
+      return btn;
+    });
+    fireEvent.click(markBtn);
+    fireEvent.click(await waitFor(() => screen.getByText('提交反馈')));
+    await waitFor(() => expect(createFeedbackMock).toHaveBeenCalledTimes(1));
+    // 提交中再点一次确定：antd Button loading 态忽略点击，不重复触发
+    fireEvent.click(screen.getByText('提交反馈').closest('button') as HTMLButtonElement);
+    expect(createFeedbackMock).toHaveBeenCalledTimes(1);
+    release({
+      id: 10, snapshot_id: 1, comment: null, created_by: 2,
+      created_at: '2026-11-08T12:00:00', snapshot_metric_id: 'jobs.active',
+    });
+    // 成功后才走刷新分支：证明已离开提交态（加载快照 id 刷新不重复提交）
+    await waitFor(() => expect(fetchFeedbackMock).toHaveBeenCalledTimes(2));
+  });
+
+  it('反馈提交失败后保持弹窗打开（只有成功才关闭，避免误以为已提交）', async () => {
+    createFeedbackMock.mockRejectedValue(new Error('仅结果创建者可标记反馈'));
+    render(<AnalyticsPage />);
+    const markBtn = await waitFor(() => {
+      const btn = screen.getByText('标记不准确').closest('button') as HTMLButtonElement;
+      expect(btn.disabled).toBeFalsy();
+      return btn;
+    });
+    fireEvent.click(markBtn);
+    fireEvent.click(await waitFor(() => screen.getByText('提交反馈')));
+    await waitFor(() => expect(createFeedbackMock).toHaveBeenCalledTimes(1));
+    // 失败：弹窗仍在（成功分支才 setFbOpen(false)），可修改后重试
+    expect(screen.getByText('标记结果不准确')).toBeTruthy();
+    expect(screen.getByText('提交反馈')).toBeTruthy();
+  });
+
+  it('反馈提交成功后关闭弹窗并刷新列表（兜底防重复提交）', async () => {
+    createFeedbackMock.mockResolvedValue({
+      id: 11, snapshot_id: 1, comment: '口径存疑', created_by: 2,
+      created_at: '2026-11-08T12:00:00', snapshot_metric_id: 'jobs.active',
+    });
+    render(<AnalyticsPage />);
+    const markBtn = await waitFor(() => {
+      const btn = screen.getByText('标记不准确').closest('button') as HTMLButtonElement;
+      expect(btn.disabled).toBeFalsy();
+      return btn;
+    });
+    fireEvent.click(markBtn);
+    fireEvent.click(await waitFor(() => screen.getByText('提交反馈')));
+    await waitFor(() => expect(createFeedbackMock).toHaveBeenCalledTimes(1));
+    // 成功后才走刷新分支；且弹窗隐藏（antd 默认不销毁 DOM，用 display:none）
+    await waitFor(() => expect(fetchFeedbackMock).toHaveBeenCalledTimes(2));
+    const wrap = document.querySelector('.ant-modal-wrap') as HTMLElement | null;
+    expect(wrap === null || wrap.style.display === 'none').toBeTruthy();
+  });
+
+  // ---- T-D-SELF-12 图表一致性：截断可见 / 空结果可读 / 单序列 ----
+
+  it('截断时显示「仅显示前 N 项（共 M 项）」提示，不静默裁掉长尾', async () => {
+    const rows = Array.from({ length: 25 }, (_, i) => ({
+      department: `部门${i}`,
+      active_jobs: i,
+    }));
+    fetchMock.mockResolvedValue(
+      data({
+        group_by: 'department',
+        table: { columns: ['department', 'active_jobs'], rows },
+        chart: {
+          chart_type: 'bar',
+          x_field: 'name',
+          y_field: 'value',
+          data: rows.slice(0, 20).map((r) => ({ name: r.department, value: r.active_jobs })),
+          truncated_series: true,
+        },
+        interpretation: { generator: 'rule', segments: [] },
+      }),
+    );
+    render(<AnalyticsPage />);
+    fireEvent.click(screen.getByRole('switch'));
+    await waitFor(() => expect(screen.getByTestId('bar-chart')).toBeTruthy());
+    expect(screen.getByText('仅显示前 20 项', { exact: false })).toBeTruthy();
+    expect(screen.getByText(/共 25 项/)).toBeTruthy();
+  });
+
+  it('未截断时不显示截断提示', async () => {
+    fetchMock.mockResolvedValue(
+      data({
+        group_by: 'department',
+        chart: {
+          chart_type: 'bar',
+          x_field: 'name',
+          y_field: 'value',
+          data: [{ name: '技术部', value: 4 }],
+        },
+        interpretation: { generator: 'rule', segments: [] },
+      }),
+    );
+    render(<AnalyticsPage />);
+    fireEvent.click(screen.getByRole('switch'));
+    await waitFor(() => expect(screen.getByTestId('bar-chart')).toBeTruthy());
+    expect(screen.queryByText(/仅显示前/)).toBeNull();
+  });
+
+  it('chart_type=none 渲染可读原因且不渲染图形', async () => {
+    fetchMock.mockResolvedValue(
+      data({
+        chart: { chart_type: 'none', reason: '数值列含非数值，无法绘图' },
+        interpretation: { generator: 'rule', segments: [] },
+      }),
+    );
+    render(<AnalyticsPage />);
+    await waitFor(() => expect(screen.getByText('数值列含非数值，无法绘图')).toBeTruthy());
+    expect(screen.queryByTestId('bar-chart')).toBeNull();
+    expect(screen.queryByText('仅显示前')).toBeNull();
+  });
+
+  it('单序列也渲染柱图（1 个点不误判为空）', async () => {
+    fetchMock.mockResolvedValue(
+      data({
+        group_by: 'department',
+        chart: {
+          chart_type: 'bar',
+          x_field: 'name',
+          y_field: 'value',
+          data: [{ name: '技术部', value: 4 }],
+        },
+        interpretation: { generator: 'rule', segments: [] },
+      }),
+    );
+    render(<AnalyticsPage />);
+    fireEvent.click(screen.getByRole('switch'));
+    await waitFor(() => expect(screen.getByTestId('bar-chart')).toBeTruthy());
+    const payload = JSON.parse(
+      (screen.getByTestId('bar-chart') as HTMLElement).textContent ?? '[]',
+    );
+    expect(payload).toEqual([{ name: '技术部', value: 4 }]);
   });
 
   // ---- 错误态防御（T-A02 缺陷修复：错误响应不喂给下游 antd 组件） ----

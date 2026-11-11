@@ -37,6 +37,8 @@ from app.modules.analytics.router import router
 U_HR = SimpleNamespace(id=2, role="hr", person_id=None)
 U_HR2 = SimpleNamespace(id=4, role="hr", person_id=None)  # 另一管理侧用户
 U_PERSONAL = SimpleNamespace(id=5, role="personal", person_id=1)
+# 跨部门角色：非管理侧（feedback 仅管理侧结果创建者可用）
+U_DEPT_MANAGER = SimpleNamespace(id=6, role="dept_manager", person_id=None, department_id=10)
 
 CORE_TABLES = (
     JobProfile.__table__,
@@ -215,3 +217,58 @@ def test_feedback_http_personal_403(env):
     assert env.client.post("/api/analytics/feedback",
                            json={"snapshot_id": snap_id}).status_code == 403
     assert env.client.get("/api/analytics/feedback").status_code == 403
+
+
+# ---- T-D-SELF-04：组织/角色隔离反例、快照状态边界与审计 ----
+
+def test_dept_manager_denied_on_feedback(env):
+    """跨部门角色（dept_manager）反馈入口一律 403：反馈仅管理侧结果创建者可用。"""
+    snap_id = _make_snapshot(env, U_HR)
+    with pytest.raises(BizError) as ei:
+        _run(feedback_service.create_feedback(U_DEPT_MANAGER, snap_id, "x"))
+    assert ei.value.code == 403
+    with pytest.raises(BizError) as ei2:
+        _run(feedback_service.list_feedback(U_DEPT_MANAGER))
+    assert ei2.value.code == 403
+
+
+def test_forbidden_message_does_not_leak_snapshot_existence(env):
+    """403 文案不区分「快照不存在」与「无权」，不泄露对象存在性。"""
+    snap_id = _make_snapshot(env, U_HR)
+    with pytest.raises(BizError) as ei:
+        _run(feedback_service.create_feedback(U_HR2, snap_id, "x"))
+    assert ei.value.message == feedback_service._FEEDBACK_FORBIDDEN
+    assert "不存在" not in ei.value.message and "404" not in ei.value.message
+
+
+def test_feedback_without_interpretation_allowed(env):
+    """无解读（result_json 无 interpretation）仍可反馈。"""
+    with env.factory() as db:
+        row = AnalyticsQuerySnapshot(
+            metric_id="jobs.active", params_json=None, data_time=None,
+            result_json={"value": 1}, source="primary", cache_hit=0, created_by=2,
+        )
+        db.add(row)
+        db.commit()
+        snap_id = int(row.id)
+    out = _run(feedback_service.create_feedback(U_HR, snap_id, None))
+    assert out["snapshot_id"] == snap_id and out["comment"] is None
+
+
+def test_feedback_audit_fields_recorded(env):
+    """反馈行自带审计字段（created_by / created_at）。"""
+    snap_id = _make_snapshot(env, U_HR)
+    out = _run(feedback_service.create_feedback(U_HR, snap_id, "口径存疑"))
+    assert out["created_by"] == 2
+    assert out["created_at"] is not None
+
+
+def test_feedback_list_does_not_leak_sensitive_fields(env):
+    """反馈列表序列化结果不含敏感字段（SENSITIVE_FIELDS 硬底线）。"""
+    from app.core.auth.scope import SENSITIVE_FIELDS
+
+    snap_id = _make_snapshot(env, U_HR)
+    _run(feedback_service.create_feedback(U_HR, snap_id, "x"))
+    items = _run(feedback_service.list_feedback(U_HR))
+    blob = str(items)
+    assert not any(name in blob for name in SENSITIVE_FIELDS)

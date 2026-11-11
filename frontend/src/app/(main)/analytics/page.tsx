@@ -180,14 +180,23 @@ export default function AnalyticsPage() {
         />
       )}
       {chart?.chart_type === 'bar' && chart.data && chart.data.length > 0 && (
-        <div style={{ marginTop: 16, height: 240 }}>
-          <Bar
-            data={chart.data}
-            xField="value"
-            yField="name"
-            height={230}
-            axis={{ x: { title: false }, y: { title: false } }}
-          />
+        <div style={{ marginTop: 16 }}>
+          <div style={{ height: 240 }}>
+            <Bar
+              data={chart.data}
+              xField="value"
+              yField="name"
+              height={230}
+              axis={{ x: { title: false }, y: { title: false } }}
+            />
+          </div>
+          {/* T-D-SELF-12：截断必须可见，避免「图表只画前 20 项」被误读为全量 */}
+          {chart.truncated_series && (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              仅显示前 {chart.data.length} 项
+              （共 {data?.table?.rows?.length ?? chart.data.length} 项，其余未绘制）
+            </Text>
+          )}
         </div>
       )}
       {chart?.chart_type === 'none' && (
