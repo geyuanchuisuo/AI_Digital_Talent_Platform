@@ -59,6 +59,20 @@ C_DOMAIN_TABLES = frozenset(
 
 # 逐表期望列名（含 id / created_at / updated_at），来源：数据库设计 v1.2 §3~§6
 EXPECTED_COLUMNS: dict[str, set[str]] = {
+    "graph_sources": {"id", "source_kind", "source_id", "source_version", "generation", "operation", "created_at", "updated_at"},
+    "graph_sync_jobs": {"id", "source_kind", "source_id", "source_version", "generation", "operation", "requested_by", "fingerprint",
+        "status", "stage", "attempt_count", "max_attempts", "lease_token", "started_at", "heartbeat_at", "finished_at", "error", "created_at", "updated_at"},
+    "knowledge_documents": {"id", "title", "access_scope", "uploaded_by", "latest_version", "published_revision_id",
+        "published_at", "published_by", "enabled", "expires_at", "deleted_at", "created_at", "updated_at"},
+    "knowledge_revisions": {"id", "document_id", "version", "filename", "stored_path", "file_ext", "file_hash", "file_size",
+        "uploaded_by", "requested_by", "index_token", "status", "stage", "attempt_count", "max_attempts", "lease_token",
+        "started_at", "heartbeat_at", "finished_at", "error", "created_at", "updated_at"},
+    "knowledge_chunks": {"id", "revision_id", "chunk_no", "page_no", "source_type", "offset_start", "offset_end", "text", "created_at"},
+    "knowledge_question_jobs": {"id", "asked_by", "idempotency_key", "request_hash", "request_json", "progress_json", "audit_json",
+        "status", "stage", "attempt_count", "max_attempts", "lease_token", "started_at", "heartbeat_at", "finished_at", "error", "created_at", "updated_at"},
+    "talent_question_jobs": {"id", "asked_by", "idempotency_key", "request_hash", "request_json", "progress_json",
+        "status", "stage", "attempt_count", "max_attempts", "lease_token", "started_at", "heartbeat_at",
+        "finished_at", "error", "created_at", "updated_at"},
     "talent_profile_versions": {"id", "talent_profile_id", "version", "change_type", "profile_snapshot_json", "changed_by", "created_at"},
     "talent_field_evidence": {"id", "talent_profile_id", "profile_version", "field_name", "resume_file_id", "source_page", "source_text", "source", "confidence", "review_status", "created_at"},
     "talent_profile_edits": {"id", "talent_profile_id", "profile_version", "field_name", "old_value", "new_value", "edited_by", "created_at"},
@@ -66,7 +80,7 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     "parse_attempts": {"id", "parse_task_id", "attempt_no", "status", "stage", "error_message", "started_at", "finished_at", "trace_json"},
     "users": {
         "id", "username", "password_hash", "display_name", "role", "person_id",
-        "department_id", "is_active", "last_login_at", "created_at", "updated_at",
+        "department_id", "data_scope_mode", "is_active", "last_login_at", "created_at", "updated_at",
     },
     "sys_settings": {
         "id", "setting_key", "setting_value", "value_type", "description",

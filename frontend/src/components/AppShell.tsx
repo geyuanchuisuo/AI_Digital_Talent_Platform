@@ -33,6 +33,7 @@ const { Header, Sider, Content } = Layout;
 const MENU_ITEMS = [
   { key: '/screen', icon: <FileSearchOutlined />, label: '简历筛选' },
   { key: '/talents', icon: <TeamOutlined />, label: '人才画像' },
+  { key: '/knowledge', icon: <ReadOutlined />, label: '知识库' },
   { key: '/job-profiles', icon: <ProfileOutlined />, label: '岗位条件' },
   { key: '/match', icon: <BarChartOutlined />, label: '岗位匹配' },
   // C 模块三域（C 请求 §5.3，页面已位于 app/(main)/ 下）

@@ -39,6 +39,82 @@ pytestmark = pytest.mark.integration
 BASE_FILE_ID = 9_000_000
 
 
+@pytest.mark.parametrize('kind_name,stage', [('knowledge_ingest', 'indexing'), ('knowledge_qa', 'retrieving'), ('graph_sync', 'syncing')])
+def test_knowledge_recovery_is_fenced_finite_and_preserves_failure_stage(kind_name, stage):
+    from app.tasks.runner import KINDS
+    kind = next(k for k in KINDS if k.name == kind_name)
+    if kind_name == 'knowledge_ingest':
+        row = kind.model(document_id=999999, version=int(uuid4().hex[:6], 16), filename='synthetic.txt',
+            stored_path='synthetic-only', file_ext='txt', file_hash='synthetic', file_size=1,
+            uploaded_by=1, requested_by=1, status='running', stage=stage, attempt_count=3,
+            lease_token='old', max_attempts=3)
+    elif kind_name == 'graph_sync':
+        row = kind.model(source_kind='job', source_id=int(uuid4().hex[:8],16), source_version=1,
+            generation=1, operation='invalidate', status='running', stage=stage,
+            attempt_count=3, lease_token='old', max_attempts=3)
+    else:
+        row = kind.model(asked_by=1, idempotency_key=uuid4().hex, request_hash='synthetic', request_json={},
+            progress_json={}, audit_json={}, status='running', stage=stage, attempt_count=3, lease_token='old', max_attempts=3)
+    with SessionLocal() as db:
+        db.add(row)
+        db.commit()
+        task_id = row.id
+    try:
+        TaskRunner()._startup_recovery()
+        with SessionLocal() as db:
+            current = db.get(kind.model, task_id)
+            assert current.status == 'failed' and current.lease_token is None
+            assert current.stage == stage
+        # Other producers can have legitimate pending work in the isolated DB.
+        assert all(claim[0] != task_id for claim in TaskRunner()._claim(kind, 1))
+    finally:
+        with SessionLocal() as db:
+            db.execute(delete(kind.model).where(kind.model.id == task_id))
+            db.commit()
+
+
+def test_qa_claim_fences_old_attempt_and_stops_at_retry_limit():
+    from app.models.talent import ProfileQuestionJob
+    from app.tasks.runner import KINDS
+    kind = next(k for k in KINDS if k.name == 'profile_qa')
+    with SessionLocal() as db:
+        row = ProfileQuestionJob(asked_by=1, idempotency_key=uuid4().hex, request_hash='synthetic',
+            request_json={'targets': [], 'question': 'synthetic'}, progress_json={'items': []}, max_attempts=2)
+        db.add(row)
+        db.commit()
+        jid = row.id
+    first, second = TaskRunner(), TaskRunner()
+    try:
+        from concurrent.futures import ThreadPoolExecutor
+        barrier = threading.Barrier(2)
+        def claim(runner):
+            barrier.wait(timeout=5)
+            return runner._claim(kind, 1)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(claim, [first, second]))
+        claims = results[0] or results[1]
+        assert sum(len(result) for result in results) == 1
+        assert len(claims) == 1 and claims[0][0] == jid
+        token = claims[0][1]
+        assert second._claim(kind, 1) == []
+        second._startup_recovery()
+        next_claim = second._claim(kind, 1)
+        assert next_claim[0][0] == jid and next_claim[0][1] != token
+        first._mark_failed(kind, jid, RuntimeError('late'), token)
+        with SessionLocal() as db:
+            row = db.get(ProfileQuestionJob, jid)
+            assert row.status == 'running' and row.attempt_count == 2
+        second._startup_recovery()
+        assert second._claim(kind, 1) == []
+        with SessionLocal() as db:
+            row = db.get(ProfileQuestionJob, jid)
+            assert row.status == 'failed' and row.lease_token is None
+    finally:
+        with SessionLocal() as db:
+            db.execute(delete(ProfileQuestionJob).where(ProfileQuestionJob.id == jid))
+            db.commit()
+
+
 def _now() -> datetime:
     return datetime.now()
 

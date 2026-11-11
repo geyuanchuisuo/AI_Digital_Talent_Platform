@@ -48,6 +48,28 @@ def make_payload(**overrides) -> JobProfileWriteRequest:
     return JobProfileWriteRequest(**base)
 
 
+def test_job_graph_intent_shares_crud_transaction():
+    from app.modules.talents.graph_models import GraphSource, GraphSyncJob
+    from sqlalchemy import select
+    with SessionLocal() as db:
+        row = svc.create_job(db, make_payload(title='B09 synthetic ' + uuid4().hex), user_id=1)
+        job_id = row.id
+        try:
+            state = db.scalar(select(GraphSource).where(GraphSource.source_kind=='job',GraphSource.source_id==job_id))
+            assert state.generation==1 and state.source_version==1
+            svc.put_job(db,job_id,make_payload(title='B09 revised synthetic'),user_id=1)
+            assert state.generation==2 and state.source_version==2
+            svc.delete_job(db,job_id)
+            assert state.generation==3 and state.operation=='invalidate'
+            intents=list(db.scalars(select(GraphSyncJob).where(GraphSyncJob.source_kind=='job',GraphSyncJob.source_id==job_id).order_by(GraphSyncJob.id)))
+            assert [r.status for r in intents]==['cancelled','cancelled','pending']
+        finally:
+            db.execute(sa_delete(JobProfile).where(JobProfile.id==job_id))
+            db.execute(sa_delete(GraphSyncJob).where(GraphSyncJob.source_kind=='job',GraphSyncJob.source_id==job_id))
+            db.execute(sa_delete(GraphSource).where(GraphSource.source_kind=='job',GraphSource.source_id==job_id))
+            db.commit()
+
+
 # --------------------------------------------------------------------------- #
 # L1：校验纯逻辑（不触 DB）
 # --------------------------------------------------------------------------- #

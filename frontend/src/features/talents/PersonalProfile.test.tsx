@@ -10,12 +10,13 @@ beforeEach(() => { clearAuth(); api.get.mockReset(); api.downloadFile.mockReset(
 
 it('shows only the signed-in persons profile and supports its source download', async () => {
   setAuth('test', {id: 2, username:'personal', role:'personal', person_id:129});
-  api.get.mockResolvedValue({profile:{name:'Synthetic Person',city:'Test city',skills:['Python']},
+  api.get.mockImplementation((path:string)=>Promise.resolve(path.startsWith('/talents/question-jobs')?null:{profile:{name:'Synthetic Person',city:'Test city',skills:['Python']},
     projects:[{name:'Synthetic project'}], resume_files:[{resume_file_id:134,filename:'source.docx'}],
-    screen_history:[{effective_verdict:'INTERNAL ONLY'}]});
+    screen_history:[{effective_verdict:'INTERNAL ONLY'}]}));
   render(<PersonalProfile />);
   expect(await screen.findByText('Synthetic Person')).toBeTruthy();
-  await waitFor(() => expect(api.get.mock.calls.map(c => c[0])).toEqual(['/talents/129','/talents/129/evidence']));
+  await waitFor(() => expect(api.get.mock.calls.map(c => c[0])).toEqual([
+    '/talents/129','/talents/129/evidence','/talents/question-jobs?person_ids=129']));
   expect(screen.queryByText('INTERNAL ONLY')).toBeNull();
   expect(screen.queryByRole('button',{name:/删除|编辑|查重/})).toBeNull();
   fireEvent.click(screen.getByRole('button',{name:/下载原件/}));

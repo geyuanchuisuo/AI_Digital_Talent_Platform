@@ -61,3 +61,41 @@ def test_independent_manual_skill_tag_survives_an_unrelated_skills_edit():
     assert ('rust', 'skill', 'manual') in rows
     assert ('python', 'skill', 'manual') not in rows
     assert ('go', 'skill', 'manual') in rows
+
+
+def test_multiple_contexts_keep_negative_and_positive_evidence_separate():
+    result = tag_catalog.suggest({'person_id': 7, 'profile_version': 3, 'source_pages': [
+        {'file_id': 9, 'page_no': 1, 'text': '不熟悉Java。计划学习Go。'},
+        {'file_id': 9, 'page_no': 2, 'text': '项目中使用Java开发服务。'}]})
+    rows = {r['name']: r for r in result['items']}
+    assert rows['Java']['context_status'] == 'mixed'
+    assert [e['context_status'] for e in rows['Java']['evidence']] == ['negated', 'mentioned']
+    assert rows['Go']['context_status'] == 'aspirational'
+    assert len(rows['Java']['candidate_id']) == 64
+    assert rows['Java']['review_status'] == 'pending_review'
+
+
+def test_context_stops_at_contrast_and_not_only_is_not_negation():
+    result = tag_catalog.suggest({'person_id': 7, 'profile_version': 3, 'source_pages': [
+        {'file_id': 9, 'page_no': 1, 'text': '不会Java，但使用Python。Not only Go but also Rust.'}]})
+    rows = {r['name']: r for r in result['items']}
+    assert rows['Java']['context_status'] == 'negated'
+    assert rows['Python']['context_status'] == 'mentioned'
+    assert rows['Go']['context_status'] == 'mentioned'
+
+
+def test_evidence_is_bounded_and_ids_change_with_person_or_version():
+    saved = {'person_id': 7, 'profile_version': 3, 'source_pages': [
+        {'file_id': 9, 'page_no': 1, 'text': 'Python。'*12}]}
+    a = tag_catalog.suggest(saved)['items'][0]
+    assert len(a['evidence']) == 8 and a['evidence_truncated']
+    b = tag_catalog.suggest({**saved, 'person_id': 8})['items'][0]
+    c = tag_catalog.suggest({**saved, 'profile_version': 4})['items'][0]
+    assert len({a['candidate_id'], b['candidate_id'], c['candidate_id']}) == 3
+
+
+def test_catalog_counts_are_reproducible_and_not_personal_tag_targets():
+    value = tag_catalog.catalog()
+    assert sum(value['coverage']['by_type'].values()) == len(value['items'])
+    assert value['coverage']['vocabulary_size'] == 168
+    assert value['coverage']['business_review_status'] == 'pending'

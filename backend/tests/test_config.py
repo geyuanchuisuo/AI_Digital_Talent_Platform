@@ -13,6 +13,14 @@ from app.config import BASE_DIR, Settings, settings
 REQUIRED_KEYS = ("LLM_BASE_URL", "LLM_API_KEY", "MYSQL_PASSWORD", "JWT_SECRET")
 
 
+def test_graph_defaults_are_disabled_and_secret_is_masked():
+    cfg = Settings(_env_file=None, llm_base_url='http://unit.invalid', llm_api_key='unit',
+        mysql_password='unit', jwt_secret='unit', neo4j_password='graph-secret')
+    assert cfg.neo4j_enabled is False
+    assert cfg.neo4j_namespace == ''
+    assert 'graph-secret' not in repr(cfg)
+
+
 def test_four_required_keys_present():
     """todolist T-01 验收点：config 加载不报 ValidationError。"""
     assert settings.llm_base_url

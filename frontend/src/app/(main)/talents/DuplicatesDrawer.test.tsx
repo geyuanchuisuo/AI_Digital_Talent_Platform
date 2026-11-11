@@ -97,6 +97,33 @@ describe('DuplicatesDrawer', () => {
     await waitFor(() => expect(screen.getByText('暂无待确认的重复简历')).toBeTruthy());
   });
 
+  it('展示分层依据、冲突和候选数量，不将规则分称为概率', async () => {
+    fetchDuplicatesMock.mockResolvedValue({ items: [dupItem({ id: 9, reason: 'phone_match',
+      detection: { policy_version: 'identity-v1', confidence: 'medium', score: 70,
+        matched_fields: ['name', 'phone'], conflict_fields: ['email'],
+        block_reasons: ['multiple_candidates'], candidate_count: 2, automatic: false },
+    })], total: 1, page: 1, page_size: 50 });
+    render(<DuplicatesDrawer open onClose={vi.fn()} onChanged={vi.fn()} />);
+    expect(await screen.findByText('中置信 · 人工确认')).toBeTruthy();
+    expect(screen.getByText('一致项：姓名、手机号')).toBeTruthy();
+    expect(screen.getByText('冲突项：邮箱')).toBeTruthy();
+    expect(screen.getByText('关联候选：2 个，需核对身份')).toBeTruthy();
+    expect(screen.queryByText(/70%/)).toBeNull();
+  });
+
+  it('已合并记录标识自动执行并保留撤销入口', async () => {
+    fetchDuplicatesMock.mockResolvedValue({ items: [dupItem({ id: 9, reason: 'name_phone_match',
+      status: 'merged', detection: { policy_version: 'identity-v1', confidence: 'high', score: 100,
+        matched_fields: ['name', 'phone', 'email'], conflict_fields: [],
+        block_reasons: [], candidate_count: 1, automatic: true },
+    })], total: 1, page: 1, page_size: 50 });
+    render(<DuplicatesDrawer open onClose={vi.fn()} onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '已合并记录' }));
+    expect(await screen.findByText('高置信')).toBeTruthy();
+    expect(screen.getByText('已自动合并')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '撤销合并' })).toBeTruthy();
+  });
+
   it('切到已合并记录，填写原因后撤销并刷新', async () => {
     const onChanged=vi.fn();
     fetchDuplicatesMock.mockImplementation(async (_page,_size,status)=>({

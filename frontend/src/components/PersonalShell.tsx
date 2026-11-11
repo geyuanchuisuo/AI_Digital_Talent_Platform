@@ -25,6 +25,7 @@ const { Header, Content } = Layout;
 const NAV_ITEMS = [
   { key: '/home', label: '首页' },
   { key: '/my-profile', label: '我的档案' },
+  { key: '/knowledge-qa', label: '制度问答' },
   { key: '/applications', label: '我的岗位申请' },
 ];
 

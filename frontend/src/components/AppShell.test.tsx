@@ -30,6 +30,7 @@ describe('AppShell', () => {
     for (const label of [
       '简历筛选',
       '人才画像',
+      '知识库',
       '岗位条件',
       '岗位匹配',
       '岗位测评',

@@ -13,9 +13,10 @@ from app.core import worker_state
 from app.tasks.runner import KINDS, MAX_CONCURRENCY, MIN_CONCURRENCY, TaskRunner
 
 
-def test_kinds_cover_three_task_tables():
-    assert [kind.name for kind in KINDS] == ["parse", "screen", "match"]
-    assert [kind.model.__tablename__ for kind in KINDS] == ["parse_tasks", "screen_batches", "match_batches"]
+def test_kinds_cover_legacy_and_fenced_qa_tables():
+    assert [kind.name for kind in KINDS] == ["parse", "screen", "match", "profile_qa", "knowledge_ingest", "knowledge_qa", "graph_sync"]
+    assert [kind.model.__tablename__ for kind in KINDS] == ["parse_tasks", "screen_batches", "match_batches", "talent_question_jobs", "knowledge_revisions", "knowledge_question_jobs", "graph_sync_jobs"]
+    assert [kind.fenced for kind in KINDS] == [False, False, False, True, True, True, True]
 
 
 def test_register_rejects_unknown_kind():
@@ -26,8 +27,8 @@ def test_register_rejects_unknown_kind():
 
 def test_register_accepts_all_known_kinds():
     runner = TaskRunner()
-    for kind in ("parse", "screen", "match"):
-        runner.register(kind, lambda _tid: None)
+    for kind in (item.name for item in KINDS):
+        runner.register(kind, lambda *args: None)
 
 
 def test_snapshot_has_health_shape_before_start():

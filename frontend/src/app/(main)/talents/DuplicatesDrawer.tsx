@@ -23,6 +23,10 @@ import type { DuplicateItem, KeepResolveData, MergeResolveData } from './types';
 import { duplicateReasonMeta, formatTime } from './utils';
 
 const { Text } = Typography;
+const identityLabels: Record<string, string> = {
+  name: '姓名', phone: '手机号', email: '邮箱', birth_year: '出生年', gender: '性别',
+};
+const fieldNames = (fields: string[]) => fields.map(field => identityLabels[field] ?? field).join('、');
 
 export interface DuplicatesDrawerProps {
   open: boolean;
@@ -200,11 +204,24 @@ export default function DuplicatesDrawer({ open, onClose, onChanged }: Duplicate
                 title={
                   <Space wrap size={4}>
                     <Tag color={reason.color}>{reason.label}</Tag>
+                    {item.detection && <Tag color={item.detection.confidence === 'high' ? 'green' : 'orange'}>
+                      {item.detection.confidence === 'high' ? '高置信' : '中置信 · 人工确认'}
+                    </Tag>}
+                    {item.detection?.automatic && <Tag color="blue">已自动合并</Tag>}
                     <Text strong>{item.parsed_resume?.filename ?? `解析 #${item.parsed_resume?.id}`}</Text>
                   </Space>
                 }
                 description={
                   <Space direction="vertical" size={0}>
+                    {item.detection && <>
+                      <Text type="secondary">一致项：{fieldNames(item.detection.matched_fields) || '—'}</Text>
+                      {item.detection.conflict_fields.length > 0 &&
+                        <Text type="danger">冲突项：{fieldNames(item.detection.conflict_fields)}</Text>}
+                      {item.detection.candidate_count > 1 &&
+                        <Text type="warning">关联候选：{item.detection.candidate_count} 个，需核对身份</Text>}
+                      {item.detection.block_reasons.includes('source_unverified') &&
+                        <Text type="warning">原文身份信息未全部核实，需人工确认</Text>}
+                    </>}
                     <Text type="secondary">
                       命中值：<Text code>{item.matched_value ?? '—'}</Text>（已脱敏）
                     </Text>

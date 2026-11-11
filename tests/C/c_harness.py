@@ -71,6 +71,7 @@ CREATE TABLE users (
     password_hash VARCHAR(100) NOT NULL,
     display_name VARCHAR(50),
     role VARCHAR(20) NOT NULL DEFAULT 'hr',
+    data_scope_mode VARCHAR(20) NOT NULL DEFAULT 'legacy',
     -- person_id BIGINT: synced with A's migration A_0002_users_person (2026-11-07,
     -- edited by A under the user's cooperation rule; nullable, unique in MySQL)
     person_id BIGINT,

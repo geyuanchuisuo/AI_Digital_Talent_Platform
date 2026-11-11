@@ -17,9 +17,10 @@ def test_round1_models_exist():
 def db():
     from app.models import Base
     from app.modules.talents.history import HISTORY_MODELS
+    from app.modules.talents.graph_models import GRAPH_MODELS
     engine = create_engine('sqlite://')
     metadata = MetaData()
-    for model in [talent.TalentProfile, talent.TalentTag, resume.ParsedResume, resume.ResumeFile, resume.ParseTask, *HISTORY_MODELS]:
+    for model in [talent.TalentProfile, talent.TalentTag, resume.ParsedResume, resume.ResumeFile, resume.ParseTask, *HISTORY_MODELS, *GRAPH_MODELS]:
         table = model.__table__.to_metadata(metadata)
         for col in table.columns:
             if col.primary_key or col.name in ('truncated', 'retries', 'file_size'):

@@ -54,6 +54,16 @@ export interface DuplicateItem {
   reason: 'phone_match' | 'email_match' | 'name_phone_match';
   matched_value: string | null;
   status: 'pending' | 'merged' | 'kept';
+  detection?: {
+    policy_version: string;
+    confidence: 'high' | 'medium';
+    score: number;
+    matched_fields: string[];
+    conflict_fields: string[];
+    block_reasons: string[];
+    candidate_count: number;
+    automatic: boolean;
+  } | null;
   profile_a: { id: number; name: string; current_title: string | null; created_at: string } | null;
   profile_b: { id: number; name: string; current_title: string | null; created_at: string } | null;
   parsed_resume: { id: number; filename: string | null; name: string | null; phone: string | null } | null;
@@ -152,6 +162,7 @@ export interface TalentPatchPayload {
   skills?: string[];
   /** 字符串或 {tag, tag_type} 对象混合 */
   tags?: (string | { tag: string; tag_type?: string })[];
+  tag_proofs?: import('@/features/talents/tagTypes').TagProofDraft[];
   ability_scores?: Record<string, { score: number; basis: string }>;
 }
 

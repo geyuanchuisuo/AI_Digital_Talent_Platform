@@ -34,6 +34,7 @@ describe('PersonalShell', () => {
     expect(screen.getByText('个人端')).toBeTruthy();
     expect(screen.getByText('演示个人账号')).toBeTruthy();
     expect(screen.getByText('个人内容')).toBeTruthy();
+    expect(screen.getByText('制度问答')).toBeTruthy();
     // 已绑定档案（person_id=398）不出现未绑定提示
     expect(screen.queryByText(/尚未绑定人才档案/)).toBeNull();
   });

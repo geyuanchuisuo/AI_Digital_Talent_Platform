@@ -198,3 +198,42 @@ def test_sysadmin_reads_operation_logs(env):
     assert body["code"] == 0
     # 前面的部门/角色写操作应至少产生一条审计
     assert body["data"]["total"] >= 1
+
+
+@pytest.mark.parametrize("mode_before_unbind", ["legacy", "scoped"])
+def test_last_binding_revocation_persists_scoped_mode(env, mode_before_unbind):
+    from app.core.auth.scope import get_account_scope, get_role_codes, resolve_data_scope
+
+    c, h = env["client"], _hdr(env["sysadmin_token"])
+    tag = uuid.uuid4().hex[:8]
+    with SessionLocal() as db:
+        target = User(username=f"a06_revoke_{tag}", password_hash=hash_password(PWD), role="hr")
+        role = SysRole(code=f"a06_revoke_{tag}", name="Synthetic limited HR", data_scope="self")
+        db.add_all([target, role])
+        db.commit()
+        uid, rid = target.id, role.id
+        assert target.data_scope_mode == "legacy"
+    try:
+        response = c.post(f"/api/system/roles/{rid}/users", headers=h, json={"user_id": uid})
+        assert response.status_code == 200, response.text
+        with SessionLocal() as db:
+            target = db.get(User, uid)
+            assert target.data_scope_mode == "scoped"
+            assert resolve_data_scope(db, target) == "self"
+            # Covers old bindings removed without any prior authorization read.
+            target.data_scope_mode = mode_before_unbind
+            db.commit()
+        response = c.delete(f"/api/system/roles/{rid}/users/{uid}", headers=h)
+        assert response.status_code == 200, response.text
+        with SessionLocal() as db:
+            target = db.get(User, uid)
+            assert target.data_scope_mode == "scoped"
+            assert resolve_data_scope(db, target) == "self"
+            assert get_role_codes(db, uid) == ("personal",)
+            assert not get_account_scope(target).can_view_all_persons
+    finally:
+        with SessionLocal() as db:
+            db.execute(delete(SysUserRole).where(SysUserRole.user_id == uid))
+            db.execute(delete(SysRole).where(SysRole.id == rid))
+            db.execute(delete(User).where(User.id == uid))
+            db.commit()

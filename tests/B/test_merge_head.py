@@ -9,7 +9,16 @@ def test_integrated_b_and_d_have_one_migration_head():
     script = ScriptDirectory.from_config(config)
     assert len(script.get_heads()) == 1
     head = script.get_revision(script.get_current_head())
-    assert head.revision == 'B_0010_merge_a13'
+    assert head.revision == 'B_0013_graph_outbox'
+    assert head.down_revision == 'B_0012_knowledge'
+    head = script.get_revision(head.down_revision)
+    assert head.down_revision == 'B_0011_question_jobs'
+    head = script.get_revision(head.down_revision)
+    assert head.down_revision == 'A_0014_account_scope_mode'
+    head = script.get_revision(head.down_revision)
+    assert head.down_revision == 'B_0010_merge_a13'
+    assert [s.revision.revision for s in script._upgrade_revs(head.revision, head.down_revision)] == [head.revision]
+    head = script.get_revision(head.down_revision)
     assert set(head.down_revision) == {'A_0013_demand_approval','B_0009_merge_a11'}
     assert {s.revision.revision for s in script._upgrade_revs(head.revision,'B_0009_merge_a11')} == {
         'A_0012_profile_freeze','A_0013_demand_approval','B_0010_merge_a13'}

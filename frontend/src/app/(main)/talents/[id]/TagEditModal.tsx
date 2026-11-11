@@ -19,6 +19,7 @@ import { getErrorMessage } from '@/lib/http';
 
 import { patchTalent } from '../api';
 import TagSuggestions from '@/features/talents/TagSuggestions';
+import type {TagProofDraft} from '@/features/talents/tagTypes';
 import type { PatchTalentData, TalentProfileOut } from '../types';
 
 const TAG_TYPES = [
@@ -37,7 +38,7 @@ export interface TagEditModalProps {
 
 export default function TagEditModal({ open, profile, onClose, onPatched }: TagEditModalProps) {
   /** 草稿：tag → 显式 type（undefined = 沿用既有行） */
-  const [rows, setRows] = useState<{ tag: string; tag_type?: string; existed: boolean }[]>([]);
+  const [rows, setRows] = useState<{ tag: string; tag_type?: string; existed: boolean; proof?:TagProofDraft }[]>([]);
   const [newTag, setNewTag] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -74,6 +75,7 @@ export default function TagEditModal({ open, profile, onClose, onPatched }: TagE
     try {
       const data = await patchTalent(profile.id, {
         tags: rows.map((row) => ({ tag: row.tag, tag_type: row.tag_type ?? 'general' })),
+        ...(rows.some(row=>row.proof)?{tag_proofs:rows.flatMap(row=>row.proof?[row.proof]:[])}:{}),
       });
       message.success(
         data.vector_status === 'failed' ? '已保存，但向量同步失败（可在本页稍后重建）' : '标签已更新',
@@ -106,9 +108,10 @@ export default function TagEditModal({ open, profile, onClose, onPatched }: TagE
         message="由技能字段生成的标签在此只读；独立添加的人工标签可在此编辑，不会被自动解析覆盖。"
       />
       <Space direction="vertical" size={8} style={{ width: '100%' }}>
-        {open&&<TagSuggestions personId={profile.id} onChoose={(tag,tag_type)=>{
+        {open&&<TagSuggestions personId={profile.id} onChoose={(tag,tag_type,proof)=>{
           setRows(previous=>previous.some(row=>row.tag.toLocaleLowerCase()===tag.toLocaleLowerCase())
-            ?previous:[...previous,{tag,tag_type,existed:false}]);
+            ?previous.map(row=>row.tag.toLocaleLowerCase()===tag.toLocaleLowerCase()?{...row,tag_type,proof}:row)
+            :[...previous,{tag,tag_type,existed:false,proof}]);
         }}/>}
         {skillRows.length > 0 && (
           <Space wrap size={4}>
@@ -129,10 +132,11 @@ export default function TagEditModal({ open, profile, onClose, onPatched }: TagE
               value={row.tag_type ?? 'general'}
               options={TAG_TYPES}
               onChange={(value) =>
-                setRows((prev) => prev.map((r) => (r.tag === row.tag ? { ...r, tag_type: value } : r)))
+                setRows((prev) => prev.map((r) => (r.tag === row.tag ? { ...r, tag_type: value, proof:undefined } : r)))
               }
             />
             {row.existed && <Tag color={sourceColor(profile, row.tag)}>来源：{sourceLabel(profile, row.tag)}</Tag>}
+            {row.proof&&<Tag color="blue">已附原文核对 · 版本 {row.proof.profile_version}，保存后生效</Tag>}
             <Button
               size="small"
               type="text"
