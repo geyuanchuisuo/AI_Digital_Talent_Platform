@@ -197,25 +197,31 @@ _LLM_ENHANCE_TEXT_MAX = 200
 
 
 def _llm_enhance_prompt(metric_id: str, name: str, rule_segments: list[dict]) -> str | None:
-    """从规则分段提取事实部分拼 Prompt；无可用事实返回 None（不空转 LLM）。"""
+    """从规则分段提取事实部分拼 Prompt；无可用事实返回 None（不空转 LLM）。
+
+    事实**按序号编号**（1 起）呈现，LLM 用 basis 引用序号——本模块的 basis 契约
+    统一为「事实序号」，映射回事实段 key 后才落库（见 build_interpretation_with_llm）。
+    """
     facts = [s for s in rule_segments if s.get("kind") == "fact"][:_LLM_ENHANCE_MAX_FACTS_IN_PROMPT]
     if not facts:
         return None
     lines = [f"指标：{name}（{metric_id}）"]
-    for s in facts:
-        lines.append(f"- 事实：{s['text']}")
+    for idx, s in enumerate(facts, start=1):
+        lines.append(f"- 事实 {idx}：{s['text']}")
     lines.append("")
     lines.append("请基于以上事实给出至多 2 条补充解读建议。要求：")
     lines.append("1. 只输出 JSON 对象 {\"items\": [{\"text\": \"...\", \"basis\": [依据的事实编号]}]}；")
-    lines.append("2. 每条 ≤100 字，使用建议/描述措辞；")
-    lines.append("3. 严禁出现以下因果措辞：导致、因为、由于、造成、使得、归因于、引发、引起、源于；")
-    lines.append("4. 不得虚构任何数字，只能引用上述事实中出现的数值。")
+    lines.append("2. basis 必须填上面列出的事实编号（如 [\"1\"]），不得填其他内容；")
+    lines.append("3. 每条 ≤100 字，使用建议/描述措辞；")
+    lines.append("4. 严禁出现以下因果措辞：导致、因为、由于、造成、使得、归因于、引发、引起、源于；")
+    lines.append("5. 不得虚构任何数字，只能引用上述事实中出现的数值。")
     return "\n".join(lines)
 
 
 class _EnhanceItem(BaseModel):
     text: str
-    basis: list[str] = []
+    # LLM 可能返回数字或字符串编号，统一按标量接收（消费侧转字符串后映射事实序号）
+    basis: list[Any] = []
 
 
 class _EnhanceList(BaseModel):
@@ -267,20 +273,31 @@ def build_interpretation_with_llm(
         logger.warning("D25 LLM 返回结构非法，回退规则式（metric=%s）", metric_id)
         return result
 
-    existing_keys = {s["key"] for s in result["segments"]}
+    # 事实序号 → 事实段 key 映射（Prompt 以序号呈现事实，LLM 按序号引用）
+    fact_keys = [s["key"] for s in result["segments"]
+                 if s.get("kind") == "fact"][:_LLM_ENHANCE_MAX_FACTS_IN_PROMPT]
+    index_to_key = {str(i): key for i, key in enumerate(fact_keys, start=1)}
+    key_set = set(fact_keys)
+
     enhanced: list[dict] = []
     for item in raw.items[:_LLM_ENHANCE_MAX_INFERENCES]:
         text = (item.text or "").strip()[:_LLM_ENHANCE_TEXT_MAX]
         if not text:
             continue
-        cand = {"kind": "inference", "key": f"llm_{len(enhanced)+1}",
-                "text": text, "basis": list(item.basis or [])}
-        # basis 只引用真实存在的事实段 key（LLM 给的编号不可信，过滤后无依据则丢弃）
-        basis = [k for k in cand["basis"] if k in existing_keys]
+        # basis 兼容两种引用：事实序号（Prompt 约定，"1"）与事实段 key（"headline"）；
+        # 两种都解析不到 → 无有效依据，整段丢弃。
+        basis: list[str] = []
+        for raw_ref in (item.basis or []):
+            ref = str(raw_ref).strip()
+            if ref in index_to_key:
+                basis.append(index_to_key[ref])
+            elif ref in key_set:
+                basis.append(ref)
         if not basis:
             logger.warning("D25 LLM 增补段无有效事实依据，整段丢弃：%s", text[:80])
             continue
-        cand["basis"] = basis
+        cand = {"kind": "inference", "key": f"llm_{len(enhanced)+1}",
+                "text": text, "basis": basis}
         if has_causal_language([cand]):
             logger.warning("D25 LLM 增补段含因果措辞，整段丢弃：%s", text[:80])
             continue

@@ -222,9 +222,9 @@
 ### T-D-SELF-10　D25 真实 LLM 解读验收准备　【P2 建议】
 
 - **目标**：把 D25 从「隔离测试通过」推进到「真实模型 + 真实数据验收」。
-- **现状**：`insight.py` 的 `build_interpretation_with_llm()` 已接线，6 例专项测试通过；默认开关关闭；真实 LLM/MySQL/浏览器未验。
+- **现状**：`insight.py` 的 `build_interpretation_with_llm()` 已接线；**真实网关冒烟通过（2026-11-11 23:10，`agnes-3.0-flash`，`generator=rule+llm` + 因果守卫零命中，见 [记录](../../updates/D/20261111-231000-D25basis契约修正与真实网关冒烟.md)）**；默认开关关闭；真实 MySQL 数据集与浏览器未验。
 - **可自主推进的子任务**：
-  - [ ] `⬜` 真实网关冒烟：`rule+llm` 输出、purpose=`insight_llm_enhance` 审计、失败回退。
+  - [x] `✅` 真实网关冒烟：`rule+llm` 输出、purpose=`insight_llm_enhance` 审计、失败回退（basis 契约修正：事实序号/key 双向解析，15 例测试）。
   - [ ] `⬜` 开关与配置：`ANALYTICS_LLM_INSIGHT_ENABLED` 显式开启/关闭行为。
   - [ ] `⬜` 数据一致性：解读只引用真实事实段，不虚构数字；因果守卫违规整段丢弃。
   - [ ] `⬜` 浏览器验收：解读段在指标页正确渲染 fact/inference 标签。
