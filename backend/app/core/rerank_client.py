@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from dataclasses import dataclass, field
 from typing import Any, Protocol, Sequence
 
 from app.config import settings
@@ -222,3 +223,82 @@ def rerank_texts(query: str, texts: Sequence[str]) -> list[str] | None:
     if result is None:
         return None
     return [texts[i] for i, _ in result]
+
+
+# --------------------------------------------------------------------------- #
+# 候选抽象与明确降级（T-D-SELF-02 接入框架）
+# --------------------------------------------------------------------------- #
+
+@dataclass(frozen=True)
+class RerankCandidate:
+    """重排候选：id 回写检索结果，text 用于重排打分，score 为召回分。"""
+
+    id: str
+    text: str
+    score: float = 0.0
+    rerank_score: float | None = None
+
+
+@dataclass(frozen=True)
+class RerankOutcome:
+    """重排结果：candidates 为最终顺序；reranked=False 表示降级为原序。"""
+
+    candidates: list[RerankCandidate]
+    reranked: bool
+    error: str | None = None
+
+
+def rank_candidates(
+    query: str,
+    candidates: Sequence[RerankCandidate],
+    *,
+    mode: str | None = None,
+    top_n: int | None = None,
+) -> RerankOutcome:
+    """候选重排入口（接入框架契约层）。
+
+    降级策略（保持候选集合不变，只改顺序；不静默重排）：
+    - ``mode=off`` / 空候选 / 单候选 → 原序返回，``reranked=False``；
+    - 重排调用失败（网络/超时/配置）→ 原序返回，``reranked=False``，``error`` 说明原因；
+    - 重排结果数量与候选不一致 → 原序返回，``reranked=False``；
+    - 成功 → 按重排分降序，``reranked=True``；``top_n`` 截断在重排后应用。
+
+    ``mode=None`` 时读 ``settings.rerank_mode``；分数仅供同一次召回内排序，
+    跨模式（api vs local）分制不可比。
+    """
+    if not candidates:
+        return RerankOutcome(candidates=[], reranked=False)
+    if len(candidates) == 1:
+        return RerankOutcome(candidates=list(candidates), reranked=False)
+
+    effective_mode = (mode or settings.rerank_mode or "off").strip().lower()
+    if effective_mode == "off":
+        return RerankOutcome(candidates=list(candidates), reranked=False)
+
+    try:
+        results = rerank(query, [c.text for c in candidates])
+    except RerankError as exc:
+        return RerankOutcome(candidates=list(candidates), reranked=False, error=str(exc))
+
+    if results is None:
+        return RerankOutcome(candidates=list(candidates), reranked=False)
+
+    reranked: list[RerankCandidate] = []
+    for idx, score in results:
+        if 0 <= idx < len(candidates):
+            c = candidates[idx]
+            reranked.append(RerankCandidate(
+                id=c.id, text=c.text, score=c.score, rerank_score=float(score),
+            ))
+
+    # 候选集合完整性：数量不一致说明重排器行为异常，降级为原序
+    if len(reranked) != len(candidates):
+        return RerankOutcome(
+            candidates=list(candidates), reranked=False,
+            error="重排结果数量与候选不一致",
+        )
+
+    if top_n is not None and top_n >= 0:
+        reranked = reranked[:top_n]
+
+    return RerankOutcome(candidates=reranked, reranked=True)

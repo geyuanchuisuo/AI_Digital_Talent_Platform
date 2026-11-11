@@ -21,7 +21,10 @@ from app.core import embedding_client, rerank_client
 from app.core.rerank_client import (
     ApiReranker,
     LocalReranker,
+    RerankCandidate,
     RerankError,
+    RerankOutcome,
+    rank_candidates,
     rerank,
     rerank_texts,
     reset_reranker,
@@ -83,6 +86,133 @@ def test_empty_inputs(monkeypatch):
         rerank("  ", DOCS)
     with pytest.raises(RerankError, match="空文本"):
         rerank("q", ["a", " "])
+
+
+# ---- rank_candidates 接入框架（T-D-SELF-02）----
+
+def _cands(*texts: str) -> list[RerankCandidate]:
+    return [RerankCandidate(id=f"id{i}", text=t, score=float(len(texts) - i))
+            for i, t in enumerate(texts)]
+
+
+def test_rank_candidates_off_mode_returns_original(monkeypatch):
+    """off 模式：原序返回，reranked=False，零模型调用。"""
+    monkeypatch.setattr("app.config.settings.rerank_mode", "off")
+    monkeypatch.setattr("httpx.post", lambda *a, **k: pytest.fail("off 不应调用 HTTP"))
+    cands = _cands("a", "b", "c")
+    out = rank_candidates("q", cands)
+    assert out.reranked is False and out.error is None
+    assert [c.id for c in out.candidates] == ["id0", "id1", "id2"]
+
+
+def test_rank_candidates_empty_and_single(monkeypatch):
+    """空候选与单候选：直接原序返回，不触发重排。"""
+    monkeypatch.setattr("app.config.settings.rerank_mode", "api")
+    assert rank_candidates("q", []).candidates == []
+    one = _cands("only")
+    out = rank_candidates("q", one)
+    assert out.reranked is False and [c.id for c in out.candidates] == ["id0"]
+
+
+def test_rank_candidates_success_sorted(monkeypatch):
+    """成功重排：按分降序，候选集合不变。"""
+    monkeypatch.setattr("app.config.settings.rerank_mode", "api")
+    monkeypatch.setattr("app.config.settings.rerank_base_url", "http://127.0.0.1:9")
+
+    class FakeResp:
+        status_code = 200
+        text = ""
+        def json(self):
+            return {"results": [
+                {"index": 2, "relevance_score": 0.9},
+                {"index": 0, "relevance_score": 0.5},
+                {"index": 1, "relevance_score": 0.7},
+            ]}
+
+    monkeypatch.setattr("httpx.post", lambda *a, **k: FakeResp())
+    reset_reranker()
+
+    cands = _cands("a", "b", "c")
+    out = rank_candidates("q", cands)
+    assert out.reranked is True and out.error is None
+    assert [c.id for c in out.candidates] == ["id2", "id1", "id0"]
+    assert [c.rerank_score for c in out.candidates] == [0.9, 0.7, 0.5]
+    assert {c.id for c in out.candidates} == {c.id for c in cands}  # 集合不变
+
+
+def test_rank_candidates_failure_falls_back_to_original(monkeypatch):
+    """重排失败：原序返回，reranked=False，error 说明原因（不静默重排）。"""
+    monkeypatch.setattr("app.config.settings.rerank_mode", "api")
+    monkeypatch.setattr("app.config.settings.rerank_base_url", "http://127.0.0.1:9")
+
+    class BadResp:
+        status_code = 500
+        text = "boom"
+        def json(self):
+            return {}
+
+    monkeypatch.setattr("httpx.post", lambda *a, **k: BadResp())
+    reset_reranker()
+
+    cands = _cands("a", "b", "c")
+    out = rank_candidates("q", cands)
+    assert out.reranked is False
+    assert [c.id for c in out.candidates] == ["id0", "id1", "id2"]
+    assert out.error is not None and "HTTP 500" in out.error
+
+
+def test_rank_candidates_inconsistent_count_falls_back(monkeypatch):
+    """重排结果数量与候选不一致：降级为原序。"""
+    monkeypatch.setattr("app.config.settings.rerank_mode", "api")
+    monkeypatch.setattr("app.config.settings.rerank_base_url", "http://127.0.0.1:9")
+
+    class PartialResp:
+        status_code = 200
+        text = ""
+        def json(self):
+            return {"results": [{"index": 0, "relevance_score": 0.9}]}  # 只返回 1 条
+
+    monkeypatch.setattr("httpx.post", lambda *a, **k: PartialResp())
+    reset_reranker()
+
+    cands = _cands("a", "b", "c")
+    out = rank_candidates("q", cands)
+    assert out.reranked is False
+    assert [c.id for c in out.candidates] == ["id0", "id1", "id2"]
+    assert out.error is not None and "数量" in out.error
+
+
+def test_rank_candidates_top_n_truncation(monkeypatch):
+    """top_n 截断在重排后应用。"""
+    monkeypatch.setattr("app.config.settings.rerank_mode", "api")
+    monkeypatch.setattr("app.config.settings.rerank_base_url", "http://127.0.0.1:9")
+
+    class FakeResp:
+        status_code = 200
+        text = ""
+        def json(self):
+            return {"results": [
+                {"index": 2, "relevance_score": 0.9},
+                {"index": 0, "relevance_score": 0.5},
+                {"index": 1, "relevance_score": 0.7},
+            ]}
+
+    monkeypatch.setattr("httpx.post", lambda *a, **k: FakeResp())
+    reset_reranker()
+
+    cands = _cands("a", "b", "c")
+    out = rank_candidates("q", cands, top_n=2)
+    assert out.reranked is True
+    assert [c.id for c in out.candidates] == ["id2", "id1"]
+
+
+def test_rank_candidates_explicit_mode_overrides_settings(monkeypatch):
+    """显式 mode 参数覆盖 settings。"""
+    monkeypatch.setattr("app.config.settings.rerank_mode", "api")
+    cands = _cands("a", "b", "c")
+    out = rank_candidates("q", cands, mode="off")
+    assert out.reranked is False
+    assert [c.id for c in out.candidates] == ["id0", "id1", "id2"]
 
 
 # ---- API 模式（httpx 假传输）----
