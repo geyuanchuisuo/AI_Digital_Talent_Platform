@@ -56,17 +56,24 @@ def grid_label(cell: str) -> str:
 
 
 def public_safe_review(review: dict[str, Any], *, viewer_role: str) -> dict[str, Any]:
-    """员工本人只看到公开评估（不返回内部评级/九宫格/人才池）。"""
+    """员工本人只看到公开评估（不返回内部评级/九宫格/人才池）。
+
+    部门经理（dept_manager）按 F10 权限矩阵可读本部门当前评级/九宫格，
+    行级部门范围由服务层裁剪，这里只做字段级裁剪。
+    """
     result = dict(review)
-    if viewer_role not in ("admin", "hr"):
+    if viewer_role not in ("admin", "hr", "dept_manager"):
         for key in ("performance_score", "potential_manager_score", "potential_hr_score", "grid_cell"):
             result.pop(key, None)
     return result
 
 
 def visible_summary(rows: list[dict[str, Any]], *, viewer_role: str) -> dict[str, Any]:
-    """部门匿名汇总：cell 计数 <5 的档位合并为"其他"，永不返回个人身份。"""
-    if viewer_role not in ("admin", "hr"):
+    """部门匿名汇总：cell 计数 <5 的档位合并为"其他"，永不返回个人身份。
+
+    部门经理可看本部门汇总（行集由服务层按负责部门预过滤）。
+    """
+    if viewer_role not in ("admin", "hr", "dept_manager"):
         raise BizError(403, "仅管理员可查看汇总")
     counts: dict[str, int] = {}
     for row in rows:

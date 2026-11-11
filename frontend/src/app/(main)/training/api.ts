@@ -9,6 +9,7 @@ import type {
   LearningEvidence,
   TrainingAttendance,
   TrainingCourse,
+  CourseCompletionRules,
   TrainingEnrollment,
   TrainingFeedbackState,
   TrainingFeedbackSummary,
@@ -30,13 +31,29 @@ export function createCourse(payload: {
   material_url: string;
   dimension_names?: string[];
   status?: string;
+  capacity?: number | null;
+  approval_mode?: 'none' | 'manager' | 'admin';
+  has_cost?: boolean;
+  occupies_work_time?: boolean;
+  completion_rules?: CourseCompletionRules | null;
 }) {
   return post<TrainingCourse>('/training/courses', payload);
 }
 
 export function updateCourse(
   id: number,
-  payload: Partial<{ title: string; description: string | null; material_url: string; dimension_names: string[]; status: string }>,
+  payload: Partial<{
+    title: string;
+    description: string | null;
+    material_url: string;
+    dimension_names: string[];
+    status: string;
+    capacity: number | null;
+    approval_mode: 'none' | 'manager' | 'admin';
+    has_cost: boolean;
+    occupies_work_time: boolean;
+    completion_rules: CourseCompletionRules | null;
+  }>,
 ) {
   return patch<TrainingCourse>(`/training/courses/${id}`, payload);
 }
@@ -202,6 +219,28 @@ export function decideEnrollment(
   return post<{ id: number; status: string }>(`/training/enrollments/${enrollmentId}/decide`, payload);
 }
 
+/** C06 直属经理审批（manager 模式，仅负责部门）；涉费/工时通过后转管理员复核 */
+export function managerDecideEnrollment(
+  enrollmentId: number,
+  payload: { status: 'approved' | 'rejected'; note?: string | null },
+) {
+  return post<{ id: number; status: string }>(
+    `/training/enrollments/${enrollmentId}/manager-decide`,
+    payload,
+  );
+}
+
+/** C06 培训管理员复核（经理已通过、涉及费用/工时的报名） */
+export function adminReviewEnrollment(
+  enrollmentId: number,
+  payload: { status: 'approved' | 'rejected'; note?: string | null },
+) {
+  return post<{ id: number; status: string }>(
+    `/training/enrollments/${enrollmentId}/admin-review`,
+    payload,
+  );
+}
+
 /** 员工确认候补名额（24h 内），确认后进入正常审批 */
 export function confirmEnrollment(enrollmentId: number) {
   return post<{ id: number; status: string; expires_at: string | null }>(
@@ -303,9 +342,22 @@ export function submitLearningEvidence(payload: {
 
 /** 员工领取服务端签名的一次性学习会话凭证（study_session 证据前置） */
 export function startLearningSession(recordId: number) {
-  return post<{ learning_record_id: number; session_token: string; expires_at: string }>(
-    `/training/learning-records/${recordId}/study-sessions`,
-  );
+  return post<{
+    learning_record_id: number;
+    session_token: string;
+    expires_at: string;
+    heartbeat_interval_seconds: number;
+  }>(`/training/learning-records/${recordId}/study-sessions`);
+}
+
+/** C08 学习心跳：学习期间周期性上报，服务端按相邻心跳间隔累计有效学时（防挂机） */
+export function sendStudyHeartbeat(recordId: number, sessionToken: string) {
+  return post<{
+    learning_record_id: number;
+    heartbeat_count: number;
+    active_minutes: number;
+    expires_at: string;
+  }>(`/training/learning-records/${recordId}/study-heartbeat`, { session_token: sessionToken });
 }
 
 export function confirmFormalCompletion(recordId: number) {

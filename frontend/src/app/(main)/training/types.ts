@@ -1,5 +1,10 @@
 /** C 培训成长页数据类型。 */
 
+export interface CourseCompletionRules {
+  min_evidence_score?: number | null;
+  required_evidence_types?: ('attendance' | 'assessment' | 'study_session')[] | null;
+}
+
 export interface TrainingCourse {
   id: number;
   title: string;
@@ -9,6 +14,10 @@ export interface TrainingCourse {
   capacity: number | null;
   status: 'active' | 'inactive';
   version: number;
+  approval_mode: 'none' | 'manager' | 'admin';
+  has_cost: boolean;
+  occupies_work_time: boolean;
+  completion_rules: CourseCompletionRules | null;
   feedback_note: string | null;
   feedback_note_at: string | null;
   created_at?: string;
@@ -179,9 +188,21 @@ export interface TrainingEnrollment {
   course_id: number;
   employee_user_id: number;
   priority: 'required' | 'elective';
-  status: 'pending' | 'approved' | 'rejected' | 'waitlisted' | 'awaiting_confirmation' | 'cancelled' | 'expired';
+  status:
+    | 'pending'
+    | 'pending_admin_review'
+    | 'approved'
+    | 'rejected'
+    | 'waitlisted'
+    | 'awaiting_confirmation'
+    | 'cancelled'
+    | 'expired';
   expires_at: string | null;
   note: string | null;
+  manager_decided_by?: number | null;
+  manager_decided_at?: string | null;
+  decided_by?: number | null;
+  decided_at?: string | null;
 }
 
 export interface PrejobPhaseCourse {

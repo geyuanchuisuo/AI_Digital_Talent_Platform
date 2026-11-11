@@ -41,6 +41,7 @@ import {
   fetchPools,
   fetchReviews,
   fetchSummary,
+  managerInitialReview,
   nominatePool,
   decidePool,
   submitReview,
@@ -128,6 +129,113 @@ function MyReviews() {
         <Form form={form} layout="vertical">
           <Form.Item name="content" label="异议说明" rules={[{ required: true, min: 1, max: 2000 }]}>
             <Input.TextArea rows={4} />
+          </Form.Item>
+        </Form>
+      </Modal>
+    </Card>
+  );
+}
+
+function ManagerInitialReview() {
+  const [rows, setRows] = useState<InventoryReview[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [target, setTarget] = useState<InventoryReview | null>(null);
+  const [form] = Form.useForm();
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setRows(await fetchReviews());
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const submit = async () => {
+    if (!target) return;
+    const values = await form.validateFields();
+    try {
+      await managerInitialReview(target.id, {
+        potential_manager_score: values.potential_manager_score,
+        comment: values.comment ?? null,
+      });
+      message.success('经理本人初评已提交');
+      setTarget(null);
+      form.resetFields();
+      void load();
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    }
+  };
+
+  const columns: ColumnsType<InventoryReview> = [
+    { title: '员工', dataIndex: 'employee_user_id', width: 80, render: (v) => `#${v}` },
+    { title: '周期', dataIndex: 'cycle_name' },
+    { title: '状态', dataIndex: 'status', width: 100, render: statusTag },
+    {
+      title: '经理潜力',
+      dataIndex: 'potential_manager_score',
+      width: 90,
+      render: (v) => v ?? '—',
+    },
+    {
+      title: '本人初评',
+      dataIndex: 'reviewer_manager_id',
+      width: 100,
+      render: (v) => (v ? <Tag color="success">已初评</Tag> : <Tag>待初评</Tag>),
+    },
+    {
+      title: '操作',
+      key: 'action',
+      width: 100,
+      render: (_, row) =>
+        row.status === 'draft' ? (
+          <a
+            onClick={() => {
+              setTarget(row);
+              form.setFieldsValue({
+                potential_manager_score: row.potential_manager_score,
+                comment: row.manager_comment ?? '',
+              });
+            }}
+          >
+            初评
+          </a>
+        ) : (
+          '—'
+        ),
+    },
+  ];
+
+  return (
+    <Card>
+      <Typography.Paragraph type="secondary">
+        仅显示本部门员工的盘点复核。经理本人潜力初评须由部门经理通过此入口提交，管理侧代填不计入正式初评；
+        仅草稿阶段可初评，已提交/确认的复核不可修改。
+      </Typography.Paragraph>
+      <Table rowKey="id" loading={loading} columns={columns} dataSource={rows} pagination={false} />
+      <Modal
+        title="经理本人潜力初评"
+        open={Boolean(target)}
+        onOk={() => void submit()}
+        onCancel={() => setTarget(null)}
+      >
+        <Form form={form} layout="vertical">
+          <Form.Item
+            name="potential_manager_score"
+            label="潜力评分（1–5）"
+            rules={[{ required: true, message: '请填写潜力评分' }]}
+          >
+            <InputNumber min={1} max={5} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="comment" label="初评评语">
+            <Input.TextArea rows={3} />
           </Form.Item>
         </Form>
       </Modal>
@@ -679,9 +787,11 @@ function GridConfigPanel() {
 
 export default function InventoryPage() {
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isManager, setIsManager] = useState(false);
 
   useEffect(() => {
     setIsAdmin(isManagement());
+    setIsManager(getUser()?.role === 'dept_manager');
   }, []);
 
   return (
@@ -696,7 +806,9 @@ export default function InventoryPage() {
                 { key: 'config', label: '标准配置', children: <GridConfigPanel /> },
                 { key: 'summary', label: '部门汇总', children: <SummaryPanel /> },
               ]
-            : []),
+            : isManager
+              ? [{ key: 'manager-initial', label: '经理初评', children: <ManagerInitialReview /> }]
+              : []),
         ]}
       />
     </Card>

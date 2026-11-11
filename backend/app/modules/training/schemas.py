@@ -9,10 +9,19 @@ from pydantic import BaseModel, ConfigDict, Field
 
 CourseStatus = Literal["active", "inactive"]
 LearningStatus = Literal["not_started", "learning", "completed"]
+CourseApprovalMode = Literal["none", "manager", "admin"]
+EvidenceType = Literal["attendance", "assessment", "study_session"]
 
 
 class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class CompletionRulesIn(_StrictModel):
+    """课程正式完成条件（C08）：未配置项回退平台默认；正式完成只按本课程条件判定。"""
+
+    min_evidence_score: float | None = Field(default=None, ge=0, le=100)
+    required_evidence_types: list[EvidenceType] | None = Field(default=None, max_length=3)
 
 
 class CourseCreateRequest(_StrictModel):
@@ -22,6 +31,10 @@ class CourseCreateRequest(_StrictModel):
     dimension_names: list[str] = Field(default_factory=list, max_length=20)
     status: CourseStatus = "active"
     capacity: int | None = Field(default=None, ge=1, le=10000)
+    approval_mode: CourseApprovalMode = "admin"
+    has_cost: bool = False
+    occupies_work_time: bool = False
+    completion_rules: CompletionRulesIn | None = None
 
 
 class CourseUpdateRequest(_StrictModel):
@@ -31,6 +44,10 @@ class CourseUpdateRequest(_StrictModel):
     dimension_names: list[str] | None = Field(default=None, max_length=20)
     status: CourseStatus | None = None
     capacity: int | None = Field(default=None, ge=1, le=10000)
+    approval_mode: CourseApprovalMode | None = None
+    has_cost: bool | None = None
+    occupies_work_time: bool | None = None
+    completion_rules: CompletionRulesIn | None = None
 
 
 class PlanItemIn(_StrictModel):
@@ -126,6 +143,20 @@ class EnrollmentDecideRequest(_StrictModel):
     note: str | None = Field(default=None, max_length=500)
 
 
+class EnrollmentManagerDecideRequest(_StrictModel):
+    """C06 直属经理审批（manager 模式）：通过或拒绝；涉及费用/工时再转管理员复核。"""
+
+    status: Literal["approved", "rejected"]
+    note: str | None = Field(default=None, max_length=500)
+
+
+class EnrollmentAdminReviewRequest(_StrictModel):
+    """C06 培训管理员对「经理已通过、涉及费用/工时」的报名做最终复核。"""
+
+    status: Literal["approved", "rejected"]
+    note: str | None = Field(default=None, max_length=500)
+
+
 class EvidenceSubmitRequest(_StrictModel):
     """员工提交学习证据；分数与验证人由服务端可信来源计算，客户端不可指定。
 
@@ -138,6 +169,12 @@ class EvidenceSubmitRequest(_StrictModel):
     learning_record_id: int
     evidence_type: Literal["attendance", "assessment", "study_session"]
     payload: dict = Field(default_factory=dict)
+
+
+class StudyHeartbeatRequest(_StrictModel):
+    """C08 学习心跳：员工学习期间周期性上报，服务端据此累计有效学时（防挂机）。"""
+
+    session_token: str = Field(min_length=1, max_length=300)
 
 
 class ExtensionDecideRequest(_StrictModel):

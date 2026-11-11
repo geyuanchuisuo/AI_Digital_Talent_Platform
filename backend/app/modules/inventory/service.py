@@ -18,8 +18,19 @@ from app.modules.inventory.models import (
     InventoryTalentPool,
 )
 from app.modules.inventory.scoring import grid_cell, public_safe_review, visible_summary
+from app.modules.training import authz
 
 ADMIN_ROLES = {"admin", "hr"}  # 历史行级「自/他 + 管理」判定保留；纯管理门改走 A06 角色门禁
+
+
+def _viewer_role(db: Session, user) -> str:
+    """字段级可见性等价角色：管理侧/经理按内部可见，员工按公开视图（F10 矩阵）。"""
+    tier = authz.viewer_tier(db, user)
+    if tier == authz.MANAGEMENT:
+        return "hr"
+    if tier == authz.MANAGER:
+        return "dept_manager"
+    return "employee"
 
 
 def _require_admin(user) -> None:
@@ -63,7 +74,11 @@ def _provisional_grid(db: Session, review: InventoryReview) -> str | None:
 
 
 def create_review(db: Session, payload, user) -> InventoryReview:
-    _require_admin(user)
+    """发起盘点复核：管理侧或负责部门经理（F10 §4）；员工不可发起。"""
+    tier = authz.viewer_tier(db, user)
+    if tier == authz.EMPLOYEE:
+        raise BizError(403, "仅管理侧或部门经理可发起盘点复核")
+    authz.require_employee_in_scope(db, user, payload.employee_user_id)
     review = InventoryReview(
         employee_user_id=payload.employee_user_id,
         talent_profile_id=payload.talent_profile_id,
@@ -73,8 +88,6 @@ def create_review(db: Session, payload, user) -> InventoryReview:
         performance_source=payload.performance_source,
         potential_manager_score=payload.potential_manager_score,
         potential_hr_score=payload.potential_hr_score,
-        reviewer_manager_id=payload.reviewer_manager_id,
-        reviewer_hr_id=payload.reviewer_hr_id,
         summary=payload.summary,
     )
     review.grid_cell = _provisional_grid(db, review)
@@ -99,6 +112,34 @@ def update_review(db: Session, review_id: int, payload, user) -> InventoryReview
     return review
 
 
+def manager_initial_review(db: Session, review_id: int, payload, user) -> InventoryReview:
+    """部门经理本人提交潜力初评（REQ-INV-002）：仅草稿阶段、仅负责部门员工。
+
+    `reviewer_manager_id` 强制记为初评经理本人，管理侧代填不能替代经理本人初评；
+    已提交/已确认的复核拒绝修改，须走新版本复核。
+    """
+    if authz.viewer_tier(db, user) != authz.MANAGER:
+        raise BizError(403, "仅部门经理可提交经理本人初评")
+    review = db.get(InventoryReview, review_id)
+    if not review:
+        raise BizError(404, "复核不存在")
+    authz.require_employee_in_scope(db, user, review.employee_user_id)
+    if review.status != "draft":
+        raise BizError(400, "仅草稿阶段可提交经理初评，已提交/确认的复核不可修改")
+    review.potential_manager_score = payload.potential_manager_score
+    review.reviewer_manager_id = user.id
+    review.manager_comment = payload.comment.strip() if payload.comment else None
+    review.grid_cell = _provisional_grid(db, review)
+    _event(
+        db,
+        review_id=review.id,
+        event_type="manager_initial_reviewed",
+        operator_id=user.id,
+        payload={"potential_manager_score": payload.potential_manager_score},
+    )
+    return review
+
+
 def submit_review(db: Session, review_id: int, user) -> InventoryReview:
     _require_admin(user)
     review = db.get(InventoryReview, review_id)
@@ -108,8 +149,8 @@ def submit_review(db: Session, review_id: int, user) -> InventoryReview:
         raise BizError(400, "已确认复核不可再提交，请新建复核")
     if not review.performance_score:
         raise BizError(400, "提交前需填齐绩效分")
-    if not review.potential_manager_score:
-        raise BizError(400, "提交前需完成经理初评")
+    if not review.potential_manager_score or not review.reviewer_manager_id:
+        raise BizError(400, "提交前需完成经理本人初评（经理通过初评入口提交，管理侧代填不计）")
     if not review.potential_hr_score:
         raise BizError(400, "提交前需填齐 HR 潜力分")
     review.grid_cell = _provisional_grid(db, review)
@@ -136,8 +177,8 @@ def confirm_review(db: Session, review_id: int, user) -> InventoryReview:
         raise BizError(400, "仅已提交的复核可确认，请先提交")
     if not review.performance_score:
         raise BizError(400, "确认前需填齐绩效分（缺绩效不得入格，保持待评估）")
-    if not review.potential_manager_score:
-        raise BizError(400, "确认前需完成经理初评")
+    if not review.potential_manager_score or not review.reviewer_manager_id:
+        raise BizError(400, "确认前需完成经理本人初评")
     if not review.potential_hr_score:
         raise BizError(400, "确认前需填齐 HR 潜力分")
     cfg = _active_grid_config(db)
@@ -159,13 +200,20 @@ def confirm_review(db: Session, review_id: int, user) -> InventoryReview:
 
 
 def list_reviews(db: Session, user, *, employee_user_id: int | None = None) -> list[dict[str, Any]]:
+    tier = authz.viewer_tier(db, user)
     stmt = select(InventoryReview).order_by(InventoryReview.id.desc())
-    if user.role not in ADMIN_ROLES:
+    if tier == authz.EMPLOYEE:
         stmt = stmt.where(InventoryReview.employee_user_id == user.id)
     elif employee_user_id is not None:
+        authz.require_employee_in_scope(db, user, employee_user_id)
         stmt = stmt.where(InventoryReview.employee_user_id == employee_user_id)
+    else:
+        scoped = authz.scoped_employee_ids(db, user)
+        if scoped is not None:
+            stmt = stmt.where(InventoryReview.employee_user_id.in_(scoped))
     rows = db.execute(stmt).scalars().all()
-    return [public_safe_review(_review_dict(r), viewer_role=user.role) for r in rows]
+    viewer = _viewer_role(db, user)
+    return [public_safe_review(_review_dict(r), viewer_role=viewer) for r in rows]
 
 
 def _review_dict(r: InventoryReview) -> dict[str, Any]:
@@ -176,9 +224,13 @@ def get_review(db: Session, review_id: int, user) -> dict[str, Any]:
     review = db.get(InventoryReview, review_id)
     if not review:
         raise BizError(404, "复核不存在")
-    if user.role not in ADMIN_ROLES and review.employee_user_id != user.id:
-        raise BizError(403, "无权查看他人复核")
-    return public_safe_review(_review_dict(review), viewer_role=user.role)
+    tier = authz.viewer_tier(db, user)
+    if tier == authz.EMPLOYEE:
+        if review.employee_user_id != user.id:
+            raise BizError(403, "无权查看他人复核")
+    else:
+        authz.require_employee_in_scope(db, user, review.employee_user_id)
+    return public_safe_review(_review_dict(review), viewer_role=_viewer_role(db, user))
 
 
 def nominate_pool(db: Session, payload, user) -> InventoryTalentPool:
@@ -256,10 +308,16 @@ def upsert_idp(db: Session, review_id: int, payload, user) -> InventoryDevelopme
 
 
 def department_summary(db: Session, user) -> dict[str, Any]:
-    rows = db.execute(
-        select(InventoryReview).where(InventoryReview.status == "confirmed")
-    ).scalars().all()
-    return visible_summary([_review_dict(r) for r in rows], viewer_role=user.role)
+    """匿名汇总：管理侧全量，经理仅负责部门（F10）；员工拒绝。样本 <5 隐藏。"""
+    tier = authz.viewer_tier(db, user)
+    if tier == authz.EMPLOYEE:
+        raise BizError(403, "仅管理员可查看汇总")
+    stmt = select(InventoryReview).where(InventoryReview.status == "confirmed")
+    scoped = authz.scoped_employee_ids(db, user)
+    if scoped is not None:
+        stmt = stmt.where(InventoryReview.employee_user_id.in_(scoped))
+    rows = db.execute(stmt).scalars().all()
+    return visible_summary([_review_dict(r) for r in rows], viewer_role=_viewer_role(db, user))
 
 
 def export_summary(db: Session, *, user, cycle_name: str | None = None) -> tuple[str, dict[str, Any]]:

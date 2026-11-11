@@ -27,6 +27,16 @@ def update_review(review_id: int, payload: schemas.ReviewUpdate, user: CurrentUs
     return ok({"id": review.id, "grid_cell": review.grid_cell})
 
 
+@router.post("/reviews/{review_id}/manager-assessment", summary="经理本人潜力初评（仅草稿、仅负责部门）")
+def manager_initial_review(
+    review_id: int, payload: schemas.ManagerInitialReview, user: CurrentUser, db: Session = Depends(get_db)
+):
+    review = service.manager_initial_review(db, review_id, payload, user)
+    db.commit()
+    return ok({"id": review.id, "reviewer_manager_id": review.reviewer_manager_id,
+               "potential_manager_score": review.potential_manager_score})
+
+
 @router.post("/reviews/{review_id}/submit")
 def submit_review(review_id: int, user: CurrentUser, db: Session = Depends(get_db)):
     review = service.submit_review(db, review_id, user)

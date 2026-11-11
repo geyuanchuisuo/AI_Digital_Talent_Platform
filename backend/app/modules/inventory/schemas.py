@@ -21,19 +21,21 @@ class ReviewCreate(BaseModel):
     performance_source: str = "none"
     potential_manager_score: int | None = Field(default=None, ge=1, le=5)
     potential_hr_score: int | None = Field(default=None, ge=1, le=5)
-    reviewer_manager_id: int | None = None
-    reviewer_hr_id: int | None = None
     summary: str | None = None
 
 
 class ReviewUpdate(BaseModel):
     performance_score: int | None = Field(default=None, ge=1, le=5)
     performance_source: str | None = None
-    potential_manager_score: int | None = Field(default=None, ge=1, le=5)
     potential_hr_score: int | None = Field(default=None, ge=1, le=5)
-    reviewer_manager_id: int | None = None
-    reviewer_hr_id: int | None = None
     summary: str | None = None
+
+
+class ManagerInitialReview(BaseModel):
+    """经理本人潜力初评：初评人由服务端记为调用经理，不接受客户端指定。"""
+
+    potential_manager_score: int = Field(ge=1, le=5)
+    comment: str | None = Field(default=None, max_length=2000)
 
 
 class PoolNominate(BaseModel):

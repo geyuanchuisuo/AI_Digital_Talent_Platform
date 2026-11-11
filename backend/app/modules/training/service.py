@@ -26,7 +26,7 @@ from app.modules.assessments.models import AssessmentAssignment, AssessmentResul
 from app.modules.assessments.service import is_admin, require_admin
 from app.core.auth.scope import get_role_codes
 from app.modules.notifications import producers as notify
-from app.modules.training import drafting, feedback_themes
+from app.modules.training import authz, drafting, feedback_themes
 from app.modules.training.models import (
     CapabilityRating,
     CapabilityRatingChange,
@@ -45,6 +45,7 @@ from app.modules.training.models import (
     TrainingPlanItem,
     TrainingPlanVersion,
     TrainingSession,
+    TrainingStudySession,
 )
 from app.modules.training.schemas import (
     AttendanceMarkRequest,
@@ -53,7 +54,9 @@ from app.modules.training.schemas import (
     CourseCreateRequest,
     CourseUpdateRequest,
     DraftRequest,
+    EnrollmentAdminReviewRequest,
     EnrollmentDecideRequest,
+    EnrollmentManagerDecideRequest,
     EnrollmentRequest,
     EvidenceSubmitRequest,
     ExtensionDecideRequest,
@@ -65,6 +68,7 @@ from app.modules.training.schemas import (
     PrejobPlanCreateRequest,
     PrejobPlanUpdateRequest,
     SessionCreateRequest,
+    StudyHeartbeatRequest,
 )
 
 DraftGenerator = Callable[..., drafting.DraftResult]
@@ -110,6 +114,15 @@ def _course_columns(payload: CourseCreateRequest | CourseUpdateRequest) -> dict[
         columns["status"] = data["status"]
     if "capacity" in data:
         columns["capacity"] = data["capacity"]
+    if "approval_mode" in data:
+        columns["approval_mode"] = data["approval_mode"]
+    if "has_cost" in data:
+        columns["has_cost"] = 1 if data["has_cost"] else 0
+    if "occupies_work_time" in data:
+        columns["occupies_work_time"] = 1 if data["occupies_work_time"] else 0
+    if "completion_rules" in data:
+        rules = data["completion_rules"]
+        columns["completion_rules_json"] = dict(rules) if rules else None
     return columns
 
 
@@ -793,13 +806,15 @@ def create_capability_rating_change(
 ) -> CapabilityRatingChange:
     """经理提交实践成果证据 + 经理评价生成变更申请，进入 HR 审核队列。
 
-    员工不能为自己提交；证据为空、经理评级越界在 schema 已拦截，这里再校验身份链。
+    员工不能为自己提交；证据为空、经理评级越界在 schema 已拦截，这里再校验身份链
+    与负责范围：经理仅本部门员工，管理侧按授权范围（A06 部门契约）。
     """
     if not _is_manager_caller(db, user):
         raise BizError(403, "仅部门经理或管理员可提交能力评级变更")
     if payload.employee_user_id == user.id:
         raise BizError(400, "不能为本人提交正式能力评级变更")
     _require_capability_employee(db, payload.employee_user_id)
+    authz.require_employee_in_scope(db, user, payload.employee_user_id)
     row = CapabilityRatingChange(
         employee_user_id=payload.employee_user_id,
         talent_profile_id=payload.talent_profile_id,
@@ -824,11 +839,13 @@ def review_capability_rating_change(
     """HR（管理侧）审核：通过则历史版本置非生效并追加新评级版本 + hr_ability 成长事件；拒绝仅落状态。
 
     课程完成/AI 结果不得自动改写正式评级，本函数是唯一的正式评级写入路径。
+    审核人须对目标员工有负责范围授权（负责范围 HR，A06 部门契约）。
     """
     require_admin(user)
     row = db.get(CapabilityRatingChange, change_id)
     if row is None:
         raise BizError(404, "能力评级变更申请不存在")
+    authz.require_employee_in_scope(db, user, row.employee_user_id)
     if row.status != "pending_hr":
         raise BizError(400, "该变更申请已处理，不能重复审核")
     row.hr_user_id = user.id
@@ -907,26 +924,34 @@ def review_capability_rating_change(
 def list_capability_ratings(
     db: Session, *, user: User, employee_user_id: int | None = None
 ) -> list[CapabilityRating]:
-    """管理侧看全量（可按员工过滤）；员工仅看本人正式评级历史。"""
-    if employee_user_id is None and not is_admin(user):
-        employee_user_id = user.id
+    """内部正式评级：管理侧按授权范围、经理仅负责部门；员工不可见（F10）。"""
+    tier = authz.viewer_tier(db, user)
+    if tier == authz.EMPLOYEE:
+        return []
     stmt = select(CapabilityRating).order_by(
         CapabilityRating.dimension_name, CapabilityRating.version.desc()
     )
-    if not is_admin(user):
-        stmt = stmt.where(CapabilityRating.employee_user_id == user.id)
-    elif employee_user_id is not None:
+    if employee_user_id is not None:
+        authz.require_employee_in_scope(db, user, employee_user_id)
         stmt = stmt.where(CapabilityRating.employee_user_id == employee_user_id)
+    else:
+        scoped = authz.scoped_employee_ids(db, user)
+        if scoped is not None:
+            stmt = stmt.where(CapabilityRating.employee_user_id.in_(scoped))
     return list(db.scalars(stmt))
 
 
 def list_capability_rating_changes(
     db: Session, *, user: User, status: str | None = None
 ) -> list[CapabilityRatingChange]:
-    """管理侧/经理看变更队列；员工仅看本人相关变更。"""
+    """变更队列含内部评级过程数据：管理侧/负责部门经理可见；员工不可见（F10）。"""
+    tier = authz.viewer_tier(db, user)
+    if tier == authz.EMPLOYEE:
+        return []
     stmt = select(CapabilityRatingChange).order_by(CapabilityRatingChange.id.desc())
-    if not is_admin(user):
-        stmt = stmt.where(CapabilityRatingChange.employee_user_id == user.id)
+    scoped = authz.scoped_employee_ids(db, user)
+    if scoped is not None:
+        stmt = stmt.where(CapabilityRatingChange.employee_user_id.in_(scoped))
     if status:
         stmt = stmt.where(CapabilityRatingChange.status == status)
     return list(db.scalars(stmt))
@@ -954,54 +979,91 @@ def growth_trajectory(
 
     - 时间线引用真实来源与版本，区分自报（self_reported）与正式完成；
     - 维度状态：有生效正式评级=formal，有最新测评分=assessed，两者皆无=not_assessed（未评估）；
+    - 同维度多次测评取**最新事实**（按完成/提交时间，再按结果版本），不按 assignment 先后；
+    - 员工视角不返回内部正式评级数值（F10），测评只取已公布版本；
     - 只做历史追加与事实归集，不推断能力提升幅度。
     """
-    if is_admin(user):
-        target = employee_user_id if employee_user_id is not None else user.id
+    tier = authz.viewer_tier(db, user)
+    if tier == authz.EMPLOYEE:
+        target = user.id
+    elif employee_user_id is not None:
+        authz.require_employee_in_scope(db, user, employee_user_id)
+        target = employee_user_id
     else:
         target = user.id
+    internal_visible = tier in (authz.MANAGEMENT, authz.MANAGER)
 
     ev_stmt = (
         select(TrainingGrowthEvent)
         .where(TrainingGrowthEvent.employee_user_id == target)
         .order_by(TrainingGrowthEvent.created_at.asc(), TrainingGrowthEvent.id.asc())
     )
+    if not internal_visible:
+        # F10：内部评级事件（含等级数值）对员工不可见
+        ev_stmt = ev_stmt.where(TrainingGrowthEvent.source_type != "hr_ability")
     if talent_profile_id is not None:
         ev_stmt = ev_stmt.where(TrainingGrowthEvent.talent_profile_id == talent_profile_id)
     events = list(db.scalars(ev_stmt))
 
-    # 维度宇宙 = 生效正式评级维度 ∪ 最新员工测评覆盖维度 ∪ 事件里显式带维度的项
+    # 维度宇宙 = 生效正式评级维度（仅内部视角）∪ 最新可见测评覆盖维度
     formal_by_dim: dict[str, CapabilityRating] = {}
-    for row in db.scalars(
-        select(CapabilityRating).where(
-            CapabilityRating.employee_user_id == target, CapabilityRating.effective == 1
-        )
-    ):
-        formal_by_dim[row.dimension_name] = row
+    if internal_visible:
+        for row in db.scalars(
+            select(CapabilityRating).where(
+                CapabilityRating.employee_user_id == target, CapabilityRating.effective == 1
+            )
+        ):
+            formal_by_dim[row.dimension_name] = row
 
     assessed_by_dim: dict[str, dict[str, Any]] = {}
-    assignment_ids = list(
-        db.scalars(
-            select(AssessmentAssignment.id).where(AssessmentAssignment.user_id == target)
-        )
+    assignments = list(
+        db.scalars(select(AssessmentAssignment).where(AssessmentAssignment.user_id == target))
     )
-    if assignment_ids:
-        latest_results = list(
+    assignment_by_id = {a.id: a for a in assignments}
+    if assignment_by_id:
+        results = list(
             db.scalars(
-                select(AssessmentResult)
-                .where(AssessmentResult.assignment_id.in_(assignment_ids))
-                .order_by(AssessmentResult.assignment_id.asc(), AssessmentResult.version.desc())
+                select(AssessmentResult).where(
+                    AssessmentResult.assignment_id.in_(list(assignment_by_id))
+                )
             )
         )
-        seen_assignment: set[int] = set()
-        for res in latest_results:
-            if res.assignment_id in seen_assignment:
+        results_by_assignment: dict[int, list[AssessmentResult]] = {}
+        for res in results:
+            results_by_assignment.setdefault(res.assignment_id, []).append(res)
+        # 每个 assignment 取一个可见版本：员工视角按公开规则（员工测评完成后最新、
+        # 招聘测评仅已公布版本），内部视角取最新版本（含未公布修分）。
+        facts: list[tuple[datetime, int, AssessmentResult]] = []
+        for assignment_id, rows in results_by_assignment.items():
+            a = assignment_by_id[assignment_id]
+            rows.sort(key=lambda r: r.version, reverse=True)
+            if internal_visible:
+                chosen = rows[0]
+            elif a.purpose == "employee":
+                chosen = rows[0] if a.status == "completed" else None
+            elif a.published_result_version is not None:
+                chosen = next(
+                    (r for r in rows if r.version == a.published_result_version), None
+                )
+            else:
+                chosen = None
+            if chosen is None:
                 continue
-            seen_assignment.add(res.assignment_id)
+            fact_at = a.completed_at or a.submitted_at or chosen.created_at
+            facts.append((fact_at, chosen.version, chosen))
+        # 同维度多次测评取最新事实：按完成/提交时间倒序，再按结果版本，不按 assignment 先后
+        facts.sort(key=lambda item: (item[0], item[1], item[2].id), reverse=True)
+        for fact_at, _version, res in facts:
             for d in res.dimension_scores_json or []:
                 name = str(d.get("name") or "").strip()
                 if name and name not in assessed_by_dim:
-                    assessed_by_dim[name] = {"score": d.get("score"), "version": res.version}
+                    assessed_by_dim[name] = {
+                        "score": d.get("score"),
+                        "version": res.version,
+                        "result_id": res.id,
+                        "assignment_id": res.assignment_id,
+                        "assessed_at": fact_at,
+                    }
 
     dimension_names = sorted(set(formal_by_dim) | set(assessed_by_dim))
 
@@ -1057,7 +1119,9 @@ def growth_trajectory(
         elif assessed is not None:
             status, level, version, src_ref = (
                 "assessed", None, assessed.get("version"),
-                {"ref_type": "assessment_result", "version": assessed.get("version")},
+                {"ref_type": "assessment_result", "ref_id": assessed.get("result_id"),
+                 "assignment_id": assessed.get("assignment_id"),
+                 "version": assessed.get("version"), "assessed_at": assessed.get("assessed_at")},
             )
         else:  # pragma: no cover - dimension_names 只含 formal/assessed
             status, level, version, src_ref = "not_assessed", None, None, None
@@ -1196,12 +1260,22 @@ def list_growth(
     offset: int = 0,
     limit: int = 50,
 ) -> tuple[list[TrainingGrowthEvent], int]:
+    tier = authz.viewer_tier(db, user)
     stmt = select(TrainingGrowthEvent)
-    if not is_admin(user):
-        stmt = stmt.where(TrainingGrowthEvent.employee_user_id == user.id)
+    if tier == authz.EMPLOYEE:
+        # F10：员工仅本人，且内部评级事件不可见
+        stmt = stmt.where(
+            TrainingGrowthEvent.employee_user_id == user.id,
+            TrainingGrowthEvent.source_type != "hr_ability",
+        )
     else:
         if employee_user_id is not None:
+            authz.require_employee_in_scope(db, user, employee_user_id)
             stmt = stmt.where(TrainingGrowthEvent.employee_user_id == employee_user_id)
+        else:
+            scoped = authz.scoped_employee_ids(db, user)
+            if scoped is not None:
+                stmt = stmt.where(TrainingGrowthEvent.employee_user_id.in_(scoped))
         if talent_profile_id is not None:
             stmt = stmt.where(TrainingGrowthEvent.talent_profile_id == talent_profile_id)
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
@@ -1599,10 +1673,10 @@ ENROLLMENT_TTL_HOURS = 24
 
 
 def _occupying_count(db: Session, course_id: int, *, exclude_id: int | None = None) -> int:
-    """占用名额的报名数：pending 占位、approved 占用；排除指定行用于审批计算。"""
+    """占用名额的报名数：pending 占位、pending_admin_review 复核占位、approved 占用。"""
     stmt = select(func.count()).select_from(TrainingEnrollment).where(
         TrainingEnrollment.course_id == course_id,
-        TrainingEnrollment.status.in_(("pending", "approved")),
+        TrainingEnrollment.status.in_(("pending", "pending_admin_review", "approved")),
     )
     if exclude_id is not None:
         stmt = stmt.where(TrainingEnrollment.id != exclude_id)
@@ -1671,8 +1745,54 @@ def _promote_waitlist(db: Session, course_id: int, *, now: datetime, actor_user_
     return row
 
 
+def _requires_admin_review(course: TrainingCourse) -> bool:
+    """涉及费用或占用工作时间的课程，经理审批后仍须培训管理员复核（C06）。"""
+    return bool(course.has_cost or course.occupies_work_time)
+
+
+def _finalize_enrollment(
+    db: Session,
+    row: TrainingEnrollment,
+    *,
+    status: str,
+    decider_id: int | None,
+    now: datetime,
+    note: str | None,
+) -> TrainingEnrollment:
+    """落地报名最终决定（approved/rejected/cancelled）：留痕、通知结果、拒绝/取消时递补候补。"""
+    row.status = status
+    row.decided_by = decider_id
+    row.decided_at = now
+    if note is not None:
+        row.note = note
+    if status == "approved":
+        row.expires_at = None
+    db.commit()
+    db.refresh(row)
+    try:
+        notify.course_enrollment_reviewed(
+            db,
+            enrollment_id=row.id,
+            recipient_user_id=row.employee_user_id,
+            result=status,
+            actor_user_id=decider_id,
+        )
+    except Exception:  # noqa: BLE001 - 通知失败不回滚已生效的业务状态
+        db.rollback()
+        db.refresh(row)
+    if status in ("rejected", "cancelled"):
+        _promote_waitlist(db, row.course_id, now=now, actor_user_id=decider_id)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
 def apply_enrollment(db: Session, payload: EnrollmentRequest, *, user: User) -> TrainingEnrollment:
-    """员工自主报名；有名额时 pending 占位 24h，无名额直接进入候补队列。"""
+    """员工自主报名；有名额时按课程审批规则处理，无名额直接进入候补队列。
+
+    C06：免审批且不涉及费用/工时的课程报名即通过；其余 pending 占位 24h，
+    按 approval_mode 走直属经理或培训管理员审批（涉及费用/工时再转管理员复核）。
+    """
     _require_employee_caller(user)
     course = _require_course(db, payload.course_id)
     if course.status != "active":
@@ -1685,17 +1805,38 @@ def apply_enrollment(db: Session, payload: EnrollmentRequest, *, user: User) -> 
     )
     if existing:
         return existing
+    now = datetime.now()
     full = bool(course.capacity) and _occupying_count(db, payload.course_id) >= int(course.capacity)
+    auto_approve = not full and course.approval_mode == "none" and not _requires_admin_review(course)
+    if full:
+        status, expires = "waitlisted", None
+    elif auto_approve:
+        status, expires = "approved", None
+    else:
+        status, expires = "pending", now + timedelta(hours=ENROLLMENT_TTL_HOURS)
     row = TrainingEnrollment(
         course_id=payload.course_id,
         employee_user_id=user.id,
         priority=payload.priority,
-        status="waitlisted" if full else "pending",
-        expires_at=None if full else datetime.now() + timedelta(hours=ENROLLMENT_TTL_HOURS),
+        status=status,
+        expires_at=expires,
+        decided_at=now if auto_approve else None,
     )
     db.add(row)
     db.commit()
     db.refresh(row)
+    if auto_approve:
+        try:
+            notify.course_enrollment_reviewed(
+                db,
+                enrollment_id=row.id,
+                recipient_user_id=row.employee_user_id,
+                result="approved",
+                actor_user_id=None,
+            )
+            db.commit()
+        except Exception:  # noqa: BLE001 - 通知失败不回滚已生效的免审批结果
+            db.rollback()
     return row
 
 
@@ -1712,6 +1853,10 @@ def decide_enrollment(
         row.status == "approved" and payload.status == "cancelled"
     ):
         raise BizError(400, "该报名已处理")
+    course = _require_course(db, row.course_id)
+    if course.approval_mode == "manager" and row.status == "pending" and payload.status != "cancelled":
+        # 经理审批课程：管理员不可越过直属经理环节直接通过/拒绝（C06 职责审批链）
+        raise BizError(400, "该课程须先由直属经理审批，管理员不可越过经理环节")
     now = datetime.now()
     if row.status == "pending" and row.expires_at and row.expires_at < now:
         # 超时占位释放：不再占用名额，员工需重新报名
@@ -1757,6 +1902,75 @@ def decide_enrollment(
     return row
 
 
+def manager_decide_enrollment(
+    db: Session, enrollment_id: int, payload: EnrollmentManagerDecideRequest, *, user: User
+) -> TrainingEnrollment:
+    """C06 直属经理审批（manager 模式）：仅负责部门经理可批本部门员工报名。
+
+    通过且不涉及费用/工时 → approved；涉及费用/工时 → pending_admin_review 转管理员复核；
+    拒绝 → rejected 并递补候补。候补待确认状态不可越过本人确认直接审批。
+    """
+    if not authz.is_manager(db, user):
+        raise BizError(403, "仅直属经理可审批报名")
+    row = db.get(TrainingEnrollment, enrollment_id)
+    if not row:
+        raise BizError(404, "报名记录不存在")
+    authz.require_employee_in_scope(db, user, row.employee_user_id)
+    if row.status == "awaiting_confirmation":
+        raise BizError(400, "候补名额待员工确认，确认后方可进入审批")
+    if row.status != "pending":
+        raise BizError(400, "该报名已处理")
+    course = _require_course(db, row.course_id)
+    if course.approval_mode != "manager":
+        raise BizError(400, "该课程无需直属经理审批")
+    now = datetime.now()
+    if row.expires_at and row.expires_at < now:
+        row.status = "expired"
+        db.commit()
+        _promote_waitlist(db, row.course_id, now=now, actor_user_id=user.id)
+        db.commit()
+        raise BizError(400, "报名已超时释放，需员工重新申请")
+    row.manager_decided_by = user.id
+    row.manager_decided_at = now
+    if payload.status == "rejected":
+        return _finalize_enrollment(
+            db, row, status="rejected", decider_id=user.id, now=now, note=payload.note
+        )
+    if _requires_admin_review(course):
+        # 经理已通过，但涉及费用/占用工时：转培训管理员复核，保留占位 24h
+        row.status = "pending_admin_review"
+        row.expires_at = now + timedelta(hours=ENROLLMENT_TTL_HOURS)
+        if payload.note is not None:
+            row.note = payload.note
+        db.commit()
+        db.refresh(row)
+        return row
+    return _finalize_enrollment(
+        db, row, status="approved", decider_id=user.id, now=now, note=payload.note
+    )
+
+
+def admin_review_enrollment(
+    db: Session, enrollment_id: int, payload: EnrollmentAdminReviewRequest, *, admin: User
+) -> TrainingEnrollment:
+    """C06 培训管理员复核：仅对「经理已通过、涉及费用/工时」(pending_admin_review) 做最终决定。"""
+    require_admin(admin)
+    row = db.get(TrainingEnrollment, enrollment_id)
+    if not row:
+        raise BizError(404, "报名记录不存在")
+    if row.status != "pending_admin_review":
+        raise BizError(400, "该报名不在管理员复核环节")
+    now = datetime.now()
+    if row.expires_at and row.expires_at < now:
+        row.status = "expired"
+        db.commit()
+        _promote_waitlist(db, row.course_id, now=now, actor_user_id=admin.id)
+        db.commit()
+        raise BizError(400, "报名已超时释放，需员工重新申请")
+    status = "approved" if payload.status == "approved" else "rejected"
+    return _finalize_enrollment(db, row, status=status, decider_id=admin.id, now=now, note=payload.note)
+
+
 def confirm_waitlist_offer(
     db: Session, enrollment_id: int, *, user: User
 ) -> TrainingEnrollment:
@@ -1782,6 +1996,25 @@ def confirm_waitlist_offer(
     course = _require_course(db, row.course_id)
     if course.capacity and _occupying_count(db, row.course_id) >= int(course.capacity):
         raise BizError(400, "名额已满，暂无法确认，请联系培训管理员")
+    if course.approval_mode == "none" and not _requires_admin_review(course):
+        # 免审批课程：本人确认后按审批规则即通过（确认这一步本身不可跳过）
+        row.status = "approved"
+        row.expires_at = None
+        row.decided_at = now
+        db.commit()
+        db.refresh(row)
+        try:
+            notify.course_enrollment_reviewed(
+                db,
+                enrollment_id=row.id,
+                recipient_user_id=row.employee_user_id,
+                result="approved",
+                actor_user_id=None,
+            )
+            db.commit()
+        except Exception:  # noqa: BLE001 - 通知失败不回滚已生效的免审批结果
+            db.rollback()
+        return row
     row.status = "pending"
     row.expires_at = now + timedelta(hours=ENROLLMENT_TTL_HOURS)
     db.commit()
@@ -1800,7 +2033,7 @@ def release_expired_enrollments(db: Session, *, now: datetime | None = None, act
     rows = list(
         db.scalars(
             select(TrainingEnrollment).where(
-                TrainingEnrollment.status.in_(("pending", "awaiting_confirmation")),
+                TrainingEnrollment.status.in_(("pending", "pending_admin_review", "awaiting_confirmation")),
                 TrainingEnrollment.expires_at.is_not(None),
                 TrainingEnrollment.expires_at < moment,
             )
@@ -1820,9 +2053,14 @@ def release_expired_enrollments(db: Session, *, now: datetime | None = None, act
 
 def list_enrollments(db: Session, *, course_id: int | None = None, user: User) -> list[TrainingEnrollment]:
     stmt = select(TrainingEnrollment).order_by(TrainingEnrollment.id.desc())
-    if is_admin(user):
-        if course_id is not None:
-            stmt = stmt.where(TrainingEnrollment.course_id == course_id)
+    if course_id is not None:
+        stmt = stmt.where(TrainingEnrollment.course_id == course_id)
+    tier = authz.viewer_tier(db, user)
+    if tier == authz.MANAGEMENT:
+        pass
+    elif tier == authz.MANAGER:
+        # 直属经理可见本部门员工报名（含待经理审批），以便履行审批职责
+        stmt = stmt.where(TrainingEnrollment.employee_user_id.in_(authz.scoped_employee_ids(db, user)))
     else:
         stmt = stmt.where(TrainingEnrollment.employee_user_id == user.id)
     return list(db.scalars(stmt))
@@ -1830,11 +2068,14 @@ def list_enrollments(db: Session, *, course_id: int | None = None, user: User) -
 
 # ---------------------------------------------------------------- 防挂机/有效学习证据
 
-# 一期固定阈值：课程暂未落库“完成条件配置”，先用统一常量；课程可配后替换为按课程取值。
+# 平台默认完成阈值：仅在课程未配置 completion_rules 时回退使用；正式完成按课程条件判定（C08）。
 FORMAL_COMPLETION_MIN_SCORE = 60.0
 COURSE_STUDY_TARGET_MINUTES = 45.0  # 单门课有效学时目标，累计达到即计满分
 MIN_STUDY_SESSION_MINUTES = 5.0  # 单次学习会话最短有效时长，避免“打开即完成”
 STUDY_SESSION_TTL_MINUTES = 120  # 学习会话凭证有效期
+# 防挂机心跳：有效学时只累计「有交互心跳」的区间，静默等待不计学时（C08）。
+STUDY_HEARTBEAT_MAX_GAP_SECONDS = 90  # 相邻心跳间隔超过此值视为离开，间隔不计入有效学时
+STUDY_HEARTBEAT_MIN_COUNT = 3  # 结算所需最少心跳次数，避免“签发即结算”
 
 EVIDENCE_PROVIDER_ATTENDANCE = "system.attendance"
 EVIDENCE_PROVIDER_ASSESSMENT = "system.assessment"
@@ -1875,19 +2116,31 @@ def _sign_study_token(record_id: int, employee_id: int, issued_epoch: int, nonce
 def issue_study_session(
     db: Session, learning_record_id: int, *, user: User, now: datetime | None = None
 ) -> dict[str, Any]:
-    """员工领取一次性学习会话凭证；有效时长由服务端按签发与兑换时间差计算。"""
+    """员工领取学习会话凭证；服务端建会话，有效学时靠学习期间的心跳累计（防挂机）。"""
     record = _evidence_record(db, learning_record_id, user)
     moment = now or datetime.now()
     nonce = secrets.token_hex(8)
+    expires_at = moment + timedelta(minutes=STUDY_SESSION_TTL_MINUTES)
+    db.add(
+        TrainingStudySession(
+            learning_record_id=record.id,
+            employee_user_id=user.id,
+            nonce=nonce,
+            issued_at=moment,
+            expires_at=expires_at,
+        )
+    )
+    db.commit()
     return {
         "learning_record_id": record.id,
         "session_token": _sign_study_token(record.id, user.id, int(moment.timestamp()), nonce),
-        "expires_at": (moment + timedelta(minutes=STUDY_SESSION_TTL_MINUTES)).isoformat(),
+        "expires_at": expires_at.isoformat(),
+        "heartbeat_interval_seconds": STUDY_HEARTBEAT_MAX_GAP_SECONDS,
     }
 
 
-def _parse_study_token(token: str, *, record_id: int, employee_id: int, now: datetime) -> tuple[str, float]:
-    """校验签名/归属/有效期，返回 (nonce, 服务端计算的有效学习分钟数)。"""
+def _verify_study_token(token: str, *, record_id: int, employee_id: int, now: datetime) -> str:
+    """校验签名/归属/有效期，返回 nonce；有效学时不再按签发后经过时间计算。"""
     parts = token.split(":")
     if len(parts) != 5 or not all(part for part in parts):
         raise BizError(400, "学习会话凭证格式无效")
@@ -1907,11 +2160,55 @@ def _parse_study_token(token: str, *, record_id: int, employee_id: int, now: dat
         raise BizError(400, "学习会话凭证签发时间异常")
     if elapsed_minutes > STUDY_SESSION_TTL_MINUTES:
         raise BizError(400, "学习会话凭证已过期，请重新开始学习")
-    if elapsed_minutes < MIN_STUDY_SESSION_MINUTES:
-        raise BizError(
-            400, f"有效学习时长不足 {MIN_STUDY_SESSION_MINUTES:g} 分钟，本次不计入证据"
-        )
-    return nonce, elapsed_minutes
+    return nonce
+
+
+def _load_study_session(
+    db: Session, nonce: str, *, record_id: int, employee_id: int, now: datetime
+) -> TrainingStudySession:
+    session = db.scalar(select(TrainingStudySession).where(TrainingStudySession.nonce == nonce))
+    if session is None:
+        raise BizError(400, "学习会话不存在，请重新领取凭证")
+    if session.learning_record_id != record_id or session.employee_user_id != employee_id:
+        raise BizError(403, "学习会话凭证不属于本人学习记录")
+    if session.consumed:
+        raise BizError(400, "该学习会话已结算，不能重复使用")
+    if now > session.expires_at:
+        raise BizError(400, "学习会话凭证已过期，请重新开始学习")
+    return session
+
+
+def record_study_heartbeat(
+    db: Session, learning_record_id: int, payload: StudyHeartbeatRequest, *, user: User,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """员工学习期间上报心跳；服务端按相邻心跳间隔累计有效学时（防挂机）。
+
+    只有持续交互（心跳间隔不超过上限）才累计学时；签发后静默等待不产生有效学时。
+    """
+    record = _evidence_record(db, learning_record_id, user)
+    moment = now or datetime.now()
+    nonce = _verify_study_token(
+        payload.session_token, record_id=record.id, employee_id=user.id, now=moment
+    )
+    session = _load_study_session(db, nonce, record_id=record.id, employee_id=user.id, now=moment)
+    if session.last_heartbeat_at is not None:
+        gap_seconds = (moment - session.last_heartbeat_at).total_seconds()
+        if gap_seconds < 0:
+            raise BizError(400, "心跳时间异常")
+        if gap_seconds <= STUDY_HEARTBEAT_MAX_GAP_SECONDS:
+            session.active_minutes = float(session.active_minutes) + gap_seconds / 60.0
+        # 间隔过大视为离开：该段静默时间不计入有效学时
+    session.last_heartbeat_at = moment
+    session.heartbeat_count = int(session.heartbeat_count) + 1
+    db.commit()
+    db.refresh(session)
+    return {
+        "learning_record_id": record.id,
+        "heartbeat_count": session.heartbeat_count,
+        "active_minutes": round(float(session.active_minutes), 2),
+        "expires_at": session.expires_at.isoformat(),
+    }
 
 
 def _attendance_evidence(db: Session, record: TrainingLearningRecord) -> tuple[float, str, dict, str]:
@@ -1967,9 +2264,16 @@ def _study_evidence(
     token = str(payload.get("session_token") or "").strip()
     if not token:
         raise BizError(400, "学习会话凭证缺失，请先领取 study-sessions 凭证")
-    nonce, minutes = _parse_study_token(
-        token, record_id=record.id, employee_id=employee_id, now=now
-    )
+    nonce = _verify_study_token(token, record_id=record.id, employee_id=employee_id, now=now)
+    session = _load_study_session(db, nonce, record_id=record.id, employee_id=employee_id, now=now)
+    # 有效学时 = 心跳累计，而非签发后经过时间；无交互等待不能兑换学习证据（C08 防挂机）
+    minutes = float(session.active_minutes)
+    if int(session.heartbeat_count) < STUDY_HEARTBEAT_MIN_COUNT:
+        raise BizError(400, "学习交互不足，请在学习过程中保持心跳后再结算")
+    if minutes < MIN_STUDY_SESSION_MINUTES:
+        raise BizError(
+            400, f"有效学习时长不足 {MIN_STUDY_SESSION_MINUTES:g} 分钟，本次不计入证据"
+        )
     previous = list(
         db.scalars(
             select(TrainingLearningEvidence).where(
@@ -1982,7 +2286,12 @@ def _study_evidence(
     prior_minutes = sum(float((row.payload_json or {}).get("minutes") or 0) for row in previous)
     cumulative = prior_minutes + minutes
     score = min(100.0, round(cumulative / COURSE_STUDY_TARGET_MINUTES * 100, 2))
-    detail = {"minutes": round(minutes, 2), "cumulative_minutes": round(cumulative, 2)}
+    detail = {
+        "minutes": round(minutes, 2),
+        "cumulative_minutes": round(cumulative, 2),
+        "heartbeat_count": int(session.heartbeat_count),
+    }
+    session.consumed = 1  # 结算即作废，防重放（与 evidence_key 唯一约束双保险）
     return score, EVIDENCE_PROVIDER_STUDY, detail, f"study_session:{nonce}"
 
 
@@ -2057,12 +2366,24 @@ def confirm_formal_completion(db: Session, learning_record_id: int, *, admin: Us
     )
     if not rows:
         raise BizError(400, "无有效学习证据，不能认定正式完成")
+    # 按课程配置的完成条件判定（C08）；未配置时回退平台默认阈值，不用全局固定值一刀切
+    item = db.get(TrainingPlanItem, record.plan_item_id)
+    course = db.get(TrainingCourse, item.course_id) if item is not None else None
+    rules = dict(course.completion_rules_json or {}) if course is not None else {}
+    min_score = float(rules.get("min_evidence_score", FORMAL_COMPLETION_MIN_SCORE))
+    required_types = [str(t) for t in (rules.get("required_evidence_types") or [])]
     best = max(float(row.score) for row in rows)
-    if best < FORMAL_COMPLETION_MIN_SCORE:
+    if best < min_score:
         raise BizError(
             400,
-            f"有效学习证据得分 {best:g} 未达到完成阈值 {FORMAL_COMPLETION_MIN_SCORE:g}，"
-            "不能认定正式完成",
+            f"有效学习证据得分 {best:g} 未达到本课程完成阈值 {min_score:g}，不能认定正式完成",
+        )
+    present_types = {row.evidence_type for row in rows}
+    missing = [t for t in required_types if t not in present_types]
+    if missing:
+        raise BizError(
+            400,
+            f"本课程完成条件要求证据类型 {'、'.join(missing)}，当前尚未满足，不能认定正式完成",
         )
     was_formal = bool(record.formal_completed)
     record.formal_completed = 1
@@ -2070,7 +2391,6 @@ def confirm_formal_completion(db: Session, learning_record_id: int, *, admin: Us
     record.evidence_score = best
     if not was_formal:
         # 正式完成（区别于员工自报 course_completed）追加成长事件，引用真实计划版本与可信证据
-        item = db.get(TrainingPlanItem, record.plan_item_id)
         plan = db.get(TrainingPlan, item.plan_id) if item is not None else None
         title = (item.course_snapshot_json or {}).get("title") if item is not None else None
         db.add(
