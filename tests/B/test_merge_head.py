@@ -9,7 +9,10 @@ def test_integrated_b_and_d_have_one_migration_head():
     script = ScriptDirectory.from_config(config)
     assert len(script.get_heads()) == 1
     head = script.get_revision(script.get_current_head())
-    assert head.revision == 'B_0013_graph_outbox'
+    assert head.revision == 'B_0014_merge_c11_d13'
+    assert set(head.down_revision) == {
+        'B_0013_graph_outbox', 'C_0011_enrollment_chain_study_session', 'D_0013_nl2sql_audit_fields'}
+    head = script.get_revision('B_0013_graph_outbox')
     assert head.down_revision == 'B_0012_knowledge'
     head = script.get_revision(head.down_revision)
     assert head.down_revision == 'B_0011_question_jobs'

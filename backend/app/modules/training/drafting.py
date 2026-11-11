@@ -57,5 +57,6 @@ def generate_draft(
         f"真实课程目录：\n<CATALOG>\n{catalog}\n</CATALOG>\n"
         "请从目录中选择 1–8 门课程组成培训计划。"
     )
-    result = chat_json(prompt, DraftResult, system_prompt=SYSTEM_PROMPT, max_tokens=1024)
+    result = chat_json(prompt, DraftResult, system_prompt=SYSTEM_PROMPT, max_tokens=1024,
+                       purpose="training_draft")
     return result

@@ -10,6 +10,7 @@ from sqlalchemy.engine import Engine
 from app.core.auth.scope import DENY_MESSAGE, get_account_scope
 from app.core.errors import BizError
 from app.database import SessionLocal
+from app.modules.analytics.charts import build_nl2sql_chart
 from app.modules.analytics.models import Nl2SqlAudit
 from app.modules.analytics.nl2sql.executor import (
     QueryTimeoutError,
@@ -27,7 +28,7 @@ QUESTION_MAX_CHARS = 500
 
 
 async def nl2sql_query(user, question: str) -> dict:
-    """自由问数全链路。返回 {question, sql, columns, rows, row_count, truncated, duration_ms, source, audit_id}。
+    """自由问数全链路。返回 {question, sql, columns, rows, row_count, truncated, duration_ms, source, audit_id, chart}。
 
     拒绝语义（验收②）：生成器返回 None → 422「无法安全映射」；校验器拦截 → 422「不安全 SQL」；
     LLM 未配置/调用失败 → 503；超时 → 503。每一阶段（含拒绝）均落 nl2sql_audit。
@@ -81,7 +82,7 @@ async def nl2sql_query(user, question: str) -> dict:
         raise BizError(422, f"生成 SQL 未通过安全校验：{vr.reason}")
     sql = vr.sql
     stage = "validated"
-    _audit_update(audit_id, stage=stage, generated_sql=sql)
+    _audit_update(audit_id, stage=stage, executed_sql=sql)
 
     # 受控执行（只读事务 + 超时 + 行上限）
     started = datetime.now()
@@ -107,7 +108,8 @@ async def nl2sql_query(user, question: str) -> dict:
 
     stage = "executed"
     duration = _ms_since(started)
-    _audit_update(audit_id, stage=stage, row_count=result["row_count"], duration_ms=duration)
+    _audit_update(audit_id, stage=stage, row_count=result["row_count"],
+                  duration_ms=duration, truncated=result["truncated"])
     return {
         "question": question,
         "sql": sql,
@@ -118,6 +120,9 @@ async def nl2sql_query(user, question: str) -> dict:
         "duration_ms": duration,
         "source": source,
         "audit_id": audit_id,
+        # T-D-SELF-07 / D23：自由问数结果同样产出图表规格（与登记指标同一契约，
+        # chart_render 可直接消费）；形态不符时如实 none + 原因，不出误导图形。
+        "chart": build_nl2sql_chart(result["columns"], result["rows"]),
     }
 
 

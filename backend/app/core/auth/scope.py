@@ -47,7 +47,8 @@ class AccountScope:
     department_ids: tuple[int, ...] = ()
     granted_scope: tuple[dict, ...] = ()
     allowed_person_ids: tuple[int, ...] | None = None
-    #: 账号生效角色代码集合（sys_user_roles 聚合；无记录时回退 users.role）。
+    #: 账号生效角色代码集合（sys_user_roles 聚合；空=未绑定 sys 角色，回退 users.role 简值）。
+    #: 统一采用公共 A06 `get_role_codes` 的命名口径（原合并候选的 `roles` 同义字段已并入此处）。
     #: A06 职责门禁的权威来源；默认空元组以保持既有纯函数构造向后兼容。
     role_codes: tuple[str, ...] = ()
 

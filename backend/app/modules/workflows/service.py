@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any
 
@@ -367,6 +368,14 @@ def sync_run_status(
     )
     db.commit()
     db.refresh(run)
+    if status in RUN_TERMINAL_STATUSES and run.status == status:
+        # T-D16 运行追踪回写（env 门控，默认关；best-effort，绝不阻塞业务镜像）
+        try:
+            from app.modules.workflows.dify_bridge import writeback  # noqa: PLC0415 局部避免环
+
+            writeback.notify_run_terminal(db, run_id)
+        except Exception:  # noqa: BLE001
+            logging.getLogger("app.dify_bridge").exception("运行追踪回写钩子异常（不阻塞业务）")
     return run
 
 

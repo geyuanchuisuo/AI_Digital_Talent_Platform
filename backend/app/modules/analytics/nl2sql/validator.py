@@ -15,7 +15,6 @@ import re
 from dataclasses import dataclass, field
 
 import sqlparse
-from sqlparse import keywords as _kw
 from sqlparse import sql as _sql
 from sqlparse import tokens as _t
 
@@ -27,6 +26,14 @@ FORBIDDEN_KEYWORDS = frozenset(
         "MERGE", "REPLACE", "SET", "SHOW", "USE", "HANDLER", "LOCK", "UNLOCK",
         "LISTEN", "NOTIFY", "PREPARE", "DECLARE", "FETCH", "REFRESH",
         "IMPORT", "COMMENT",
+        # SELECT ... INTO new_table / INTO OUTFILE（写文件/建表）
+        "INTO",
+        # EXPLAIN ANALYZE 会真实执行查询（DoS 向量）；EXPLAIN 本身也拒绝以保守
+        "EXPLAIN",
+        # ANALYZE 收集统计信息（维护命令）
+        "ANALYZE",
+        # PERFORM expression（执行表达式，可触发函数副作用）
+        "PERFORM",
     }
 )
 
@@ -91,9 +98,17 @@ def validate_sql(
 
 
 def _has_top_level_limit(stmt) -> bool:
-    """顶层（非子查询）是否已有 LIMIT——保守实现：全文含 LIMIT 关键词即认为有。"""
+    """顶层（非子查询）是否已有 LIMIT——按括号深度扫描，子查询内的 LIMIT 不计入。
+
+    修复前用 flatten() 会把子查询里的 LIMIT 误判为顶层，导致外层不限行。
+    """
+    depth = 0
     for tok in stmt.flatten():
-        if tok.ttype in _t.Keyword and tok.normalized == "LIMIT":
+        if tok.ttype in _t.Punctuation and tok.normalized == "(":
+            depth += 1
+        elif tok.ttype in _t.Punctuation and tok.normalized == ")":
+            depth -= 1
+        elif depth == 0 and tok.ttype in _t.Keyword and tok.normalized == "LIMIT":
             return True
     return False
 
@@ -118,7 +133,10 @@ def _walk_tables(tokens, tables: set[str], *, pending: bool = False) -> None:
             pending = False
             continue
         if isinstance(tok, _sql.Identifier):
-            if pending:
+            # 含 Parenthesis 子节点 = 子查询别名（(SELECT ...) AS sub），
+            # 不作为表名；仍递归提取内部真实表引用。
+            is_subquery_alias = any(isinstance(c, _sql.Parenthesis) for c in tok.tokens)
+            if pending and not is_subquery_alias:
                 name = (tok.get_real_name() or "").lower()
                 if name and name not in _NON_TABLE_WORDS:
                     tables.add(name)

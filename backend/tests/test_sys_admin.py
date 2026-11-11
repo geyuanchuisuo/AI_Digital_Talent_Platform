@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import uuid
 
+from sqlalchemy import select
+
 import app.models  # noqa: F401 - 先触发完整注册，避免部分初始化环（见 A→C registry 分析）
 
 from app.models import User

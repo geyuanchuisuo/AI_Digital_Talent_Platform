@@ -5,14 +5,19 @@ import type { PageData } from '@/lib/types';
 
 import type {
   GrowthEvent,
+  GrowthTrajectory,
   LearningEvidence,
   TrainingAttendance,
   TrainingCourse,
+  CourseCompletionRules,
   TrainingEnrollment,
   TrainingFeedbackState,
   TrainingFeedbackSummary,
   TrainingLearningRecord,
   TrainingPlan,
+  PrejobPlan,
+  CapabilityRating,
+  CapabilityRatingChange,
   TrainingSession,
 } from './types';
 
@@ -26,13 +31,29 @@ export function createCourse(payload: {
   material_url: string;
   dimension_names?: string[];
   status?: string;
+  capacity?: number | null;
+  approval_mode?: 'none' | 'manager' | 'admin';
+  has_cost?: boolean;
+  occupies_work_time?: boolean;
+  completion_rules?: CourseCompletionRules | null;
 }) {
   return post<TrainingCourse>('/training/courses', payload);
 }
 
 export function updateCourse(
   id: number,
-  payload: Partial<{ title: string; description: string | null; material_url: string; dimension_names: string[]; status: string }>,
+  payload: Partial<{
+    title: string;
+    description: string | null;
+    material_url: string;
+    dimension_names: string[];
+    status: string;
+    capacity: number | null;
+    approval_mode: 'none' | 'manager' | 'admin';
+    has_cost: boolean;
+    occupies_work_time: boolean;
+    completion_rules: CourseCompletionRules | null;
+  }>,
 ) {
   return patch<TrainingCourse>(`/training/courses/${id}`, payload);
 }
@@ -120,6 +141,11 @@ export function fetchGrowth(params: { employee_user_id?: number; page: number; p
   return get<PageData<GrowthEvent>>('/training/growth', { params });
 }
 
+/** 跨域成长轨迹聚合（C13）：测评/面试/培训/正式评级四域时间线 + 维度状态（formal/assessed/未评估） */
+export function fetchGrowthTrajectory(params: { employee_user_id?: number; talent_profile_id?: number }) {
+  return get<GrowthTrajectory>('/training/growth/trajectory', { params });
+}
+
 /** 期次与出勤（管理员） */
 export function createSession(courseId: number, payload: { instructor_name?: string | null; starts_at: string; ends_at: string }) {
   return post<TrainingSession>(`/training/courses/${courseId}/sessions`, payload);
@@ -193,6 +219,35 @@ export function decideEnrollment(
   return post<{ id: number; status: string }>(`/training/enrollments/${enrollmentId}/decide`, payload);
 }
 
+/** C06 直属经理审批（manager 模式，仅负责部门）；涉费/工时通过后转管理员复核 */
+export function managerDecideEnrollment(
+  enrollmentId: number,
+  payload: { status: 'approved' | 'rejected'; note?: string | null },
+) {
+  return post<{ id: number; status: string }>(
+    `/training/enrollments/${enrollmentId}/manager-decide`,
+    payload,
+  );
+}
+
+/** C06 培训管理员复核（经理已通过、涉及费用/工时的报名） */
+export function adminReviewEnrollment(
+  enrollmentId: number,
+  payload: { status: 'approved' | 'rejected'; note?: string | null },
+) {
+  return post<{ id: number; status: string }>(
+    `/training/enrollments/${enrollmentId}/admin-review`,
+    payload,
+  );
+}
+
+/** 员工确认候补名额（24h 内），确认后进入正常审批 */
+export function confirmEnrollment(enrollmentId: number) {
+  return post<{ id: number; status: string; expires_at: string | null }>(
+    `/training/enrollments/${enrollmentId}/confirm`,
+  );
+}
+
 export function fetchEnrollments(params?: { course_id?: number }) {
   return get<TrainingEnrollment[]>('/training/enrollments', { params });
 }
@@ -200,6 +255,75 @@ export function fetchEnrollments(params?: { course_id?: number }) {
 /** 释放超时未决定的报名占位并递补候补（管理员） */
 export function releaseExpiredEnrollments() {
   return post<{ scanned: number; released: number; promoted: number }>('/training/enrollments/release-expired');
+}
+
+/** 岗前培养计划（F05，待上岗人员分阶段：目标、阶段、课程、导师，版本化） */
+export interface PrejobPhaseIn {
+  name: string;
+  goal?: string | null;
+  mentor_user_id?: number | null;
+  courses: { course_id: number; note?: string | null }[];
+}
+
+export interface PrejobPlanPayload {
+  employee_user_id: number;
+  talent_profile_id?: number | null;
+  target_job_title?: string | null;
+  goal?: string | null;
+  phases: PrejobPhaseIn[];
+}
+
+export function fetchPrejobPlans() {
+  return get<PrejobPlan[]>('/training/prejob-plans');
+}
+
+export function createPrejobPlan(payload: PrejobPlanPayload) {
+  return post<PrejobPlan>('/training/prejob-plans', payload);
+}
+
+export function assignPrejobPlan(id: number) {
+  return post<PrejobPlan>(`/training/prejob-plans/${id}/assign`);
+}
+
+export function revisePrejobPlan(id: number) {
+  return post<PrejobPlan>(`/training/prejob-plans/${id}/revise`);
+}
+
+/** 正式能力评级变更链（C14）：经理提交实践成果证据+经理评价 → HR 审核生成新评级版本 */
+export interface CapabilityEvidenceIn {
+  source_type: string;
+  description: string;
+  ref?: string | null;
+}
+
+export interface CapabilityRatingChangePayload {
+  employee_user_id: number;
+  talent_profile_id?: number | null;
+  dimension_name: string;
+  evidence: CapabilityEvidenceIn[];
+  manager_level: number;
+  manager_comment: string;
+}
+
+export function fetchCapabilityRatingChanges(params?: { status?: string }) {
+  return get<CapabilityRatingChange[]>('/training/capability-rating-changes', { params });
+}
+
+export function createCapabilityRatingChange(payload: CapabilityRatingChangePayload) {
+  return post<CapabilityRatingChange>('/training/capability-rating-changes', payload);
+}
+
+export function reviewCapabilityRatingChange(
+  id: number,
+  payload: { approve: boolean; final_level?: number | null; comment?: string | null },
+) {
+  return post<CapabilityRatingChange>(`/training/capability-rating-changes/${id}/review`, payload);
+}
+
+export function fetchCapabilityRatings(employeeUserId?: number) {
+  return get<CapabilityRating[]>('/training/capability-ratings', {
+    params: employeeUserId ? { employee_user_id: employeeUserId } : undefined,
+  });
 }
 
 /** 有效学习证据与正式完成认定：分数与验证人由服务端按可信来源计算，前端不可传 */
@@ -218,9 +342,22 @@ export function submitLearningEvidence(payload: {
 
 /** 员工领取服务端签名的一次性学习会话凭证（study_session 证据前置） */
 export function startLearningSession(recordId: number) {
-  return post<{ learning_record_id: number; session_token: string; expires_at: string }>(
-    `/training/learning-records/${recordId}/study-sessions`,
-  );
+  return post<{
+    learning_record_id: number;
+    session_token: string;
+    expires_at: string;
+    heartbeat_interval_seconds: number;
+  }>(`/training/learning-records/${recordId}/study-sessions`);
+}
+
+/** C08 学习心跳：学习期间周期性上报，服务端按相邻心跳间隔累计有效学时（防挂机） */
+export function sendStudyHeartbeat(recordId: number, sessionToken: string) {
+  return post<{
+    learning_record_id: number;
+    heartbeat_count: number;
+    active_minutes: number;
+    expires_at: string;
+  }>(`/training/learning-records/${recordId}/study-heartbeat`, { session_token: sessionToken });
 }
 
 export function confirmFormalCompletion(recordId: number) {

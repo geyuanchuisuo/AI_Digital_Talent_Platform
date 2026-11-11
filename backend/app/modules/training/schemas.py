@@ -9,10 +9,19 @@ from pydantic import BaseModel, ConfigDict, Field
 
 CourseStatus = Literal["active", "inactive"]
 LearningStatus = Literal["not_started", "learning", "completed"]
+CourseApprovalMode = Literal["none", "manager", "admin"]
+EvidenceType = Literal["attendance", "assessment", "study_session"]
 
 
 class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class CompletionRulesIn(_StrictModel):
+    """课程正式完成条件（C08）：未配置项回退平台默认；正式完成只按本课程条件判定。"""
+
+    min_evidence_score: float | None = Field(default=None, ge=0, le=100)
+    required_evidence_types: list[EvidenceType] | None = Field(default=None, max_length=3)
 
 
 class CourseCreateRequest(_StrictModel):
@@ -22,6 +31,10 @@ class CourseCreateRequest(_StrictModel):
     dimension_names: list[str] = Field(default_factory=list, max_length=20)
     status: CourseStatus = "active"
     capacity: int | None = Field(default=None, ge=1, le=10000)
+    approval_mode: CourseApprovalMode = "admin"
+    has_cost: bool = False
+    occupies_work_time: bool = False
+    completion_rules: CompletionRulesIn | None = None
 
 
 class CourseUpdateRequest(_StrictModel):
@@ -31,6 +44,10 @@ class CourseUpdateRequest(_StrictModel):
     dimension_names: list[str] | None = Field(default=None, max_length=20)
     status: CourseStatus | None = None
     capacity: int | None = Field(default=None, ge=1, le=10000)
+    approval_mode: CourseApprovalMode | None = None
+    has_cost: bool | None = None
+    occupies_work_time: bool | None = None
+    completion_rules: CompletionRulesIn | None = None
 
 
 class PlanItemIn(_StrictModel):
@@ -63,6 +80,32 @@ class PlanUpdateRequest(_StrictModel):
     target_job_title: str | None = Field(default=None, max_length=100)
     items: list[PlanItemIn] | None = Field(default=None, min_length=1, max_length=50)
     gap_summary: str | None = None
+
+
+class PrejobCourseIn(_StrictModel):
+    course_id: int
+    note: str | None = Field(default=None, max_length=500)
+
+
+class PrejobPhaseIn(_StrictModel):
+    name: str = Field(min_length=1, max_length=100)
+    goal: str | None = Field(default=None, max_length=1000)
+    mentor_user_id: int | None = None
+    courses: list[PrejobCourseIn] = Field(default_factory=list, max_length=50)
+
+
+class PrejobPlanCreateRequest(_StrictModel):
+    employee_user_id: int
+    talent_profile_id: int | None = None
+    target_job_title: str | None = Field(default=None, max_length=100)
+    goal: str | None = Field(default=None, max_length=2000)
+    phases: list[PrejobPhaseIn] = Field(min_length=1, max_length=20)
+
+
+class PrejobPlanUpdateRequest(_StrictModel):
+    target_job_title: str | None = Field(default=None, max_length=100)
+    goal: str | None = Field(default=None, max_length=2000)
+    phases: list[PrejobPhaseIn] | None = Field(default=None, min_length=1, max_length=20)
 
 
 class ProgressUpdateRequest(_StrictModel):
@@ -100,6 +143,20 @@ class EnrollmentDecideRequest(_StrictModel):
     note: str | None = Field(default=None, max_length=500)
 
 
+class EnrollmentManagerDecideRequest(_StrictModel):
+    """C06 直属经理审批（manager 模式）：通过或拒绝；涉及费用/工时再转管理员复核。"""
+
+    status: Literal["approved", "rejected"]
+    note: str | None = Field(default=None, max_length=500)
+
+
+class EnrollmentAdminReviewRequest(_StrictModel):
+    """C06 培训管理员对「经理已通过、涉及费用/工时」的报名做最终复核。"""
+
+    status: Literal["approved", "rejected"]
+    note: str | None = Field(default=None, max_length=500)
+
+
 class EvidenceSubmitRequest(_StrictModel):
     """员工提交学习证据；分数与验证人由服务端可信来源计算，客户端不可指定。
 
@@ -112,6 +169,12 @@ class EvidenceSubmitRequest(_StrictModel):
     learning_record_id: int
     evidence_type: Literal["attendance", "assessment", "study_session"]
     payload: dict = Field(default_factory=dict)
+
+
+class StudyHeartbeatRequest(_StrictModel):
+    """C08 学习心跳：员工学习期间周期性上报，服务端据此累计有效学时（防挂机）。"""
+
+    session_token: str = Field(min_length=1, max_length=300)
 
 
 class ExtensionDecideRequest(_StrictModel):
@@ -127,3 +190,34 @@ class ReminderScanRequest(_StrictModel):
 
     today: date | None = None
     days_ahead: int = Field(default=3, ge=0, le=30)
+
+
+class CapabilityEvidenceIn(_StrictModel):
+    """实践成果证据项：来源类型 + 说明 + 可选引用（url/记录 id）。"""
+
+    source_type: str = Field(min_length=1, max_length=30)
+    description: str = Field(min_length=1, max_length=1000)
+    ref: str | None = Field(default=None, max_length=300)
+
+
+class CapabilityRatingChangeCreateRequest(_StrictModel):
+    """能力评级变更申请（C14）：经理提交实践成果证据 + 经理评价 → HR 审核。
+
+    不允许员工为自己提交正式评级变更；evidence 至少一项，manager_level 1-5。
+    """
+
+    employee_user_id: int
+    talent_profile_id: int | None = None
+    dimension_name: str = Field(min_length=1, max_length=100)
+    evidence: list[CapabilityEvidenceIn] = Field(min_length=1, max_length=30)
+    manager_level: int = Field(ge=1, le=5)
+    manager_comment: str = Field(min_length=1, max_length=1000)
+
+
+class CapabilityRatingReviewRequest(_StrictModel):
+    """HR 审核能力评级变更：通过则 approve=true 并给出正式 level；拒绝则 false。"""
+
+    approve: bool
+    final_level: int | None = Field(default=None, ge=1, le=5)
+    comment: str | None = Field(default=None, max_length=1000)
+

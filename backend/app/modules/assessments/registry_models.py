@@ -30,10 +30,16 @@ from app.modules.inventory.models import (
     InventoryDevelopmentPlan,
     InventoryDispute,
     InventoryEvent,
+    InventoryGridConfig,
     InventoryReview,
     InventoryTalentPool,
 )
 from app.modules.training.models import (
+    CapabilityRating,
+    CapabilityRatingChange,
+    PrejobPhase,
+    PrejobPlan,
+    PrejobPlanVersion,
     TrainingAttendance,
     TrainingCourse,
     TrainingEnrollment,
@@ -46,6 +52,7 @@ from app.modules.training.models import (
     TrainingPlanItem,
     TrainingPlanVersion,
     TrainingSession,
+    TrainingStudySession,
 )
 
 ALL_MODELS: tuple[type, ...] = (
@@ -76,9 +83,16 @@ ALL_MODELS: tuple[type, ...] = (
     TrainingGrowthEvent,
     TrainingEnrollment,
     TrainingLearningEvidence,
+    TrainingStudySession,
+    PrejobPlan,
+    PrejobPhase,
+    PrejobPlanVersion,
+    CapabilityRating,
+    CapabilityRatingChange,
     InventoryReview,
     InventoryTalentPool,
     InventoryDispute,
     InventoryDevelopmentPlan,
     InventoryEvent,
+    InventoryGridConfig,
 )

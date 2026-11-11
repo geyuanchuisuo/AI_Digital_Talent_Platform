@@ -29,5 +29,6 @@ def default_judge_answer(question_text: str, answer_text: str) -> dict[str, Any]
         f"候选人作答：<A>{(answer_text or '').strip()}</A>\n"
         "请给出 0–100 的分数与评价。"
     )
-    result = chat_json(prompt, AiJudgeResult, system_prompt=SYSTEM_PROMPT, max_tokens=512)
+    result = chat_json(prompt, AiJudgeResult, system_prompt=SYSTEM_PROMPT, max_tokens=512,
+                       purpose="ai_interview_judge")
     return {"score": float(result.score), "feedback": result.feedback}

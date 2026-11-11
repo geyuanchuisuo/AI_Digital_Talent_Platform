@@ -7,23 +7,33 @@ from __future__ import annotations
 
 import unittest
 
+from app.core.errors import BizError
 from app.modules.inventory.scoring import grid_cell, public_safe_review, visible_summary
+
+# 经批准的标准阈值（测试夹具，非生产示意数值）：>=4 hi，>=3 mid，其余 lo
+TEST_BANDS = {
+    "performance": {"hi_min": 4, "mid_min": 3},
+    "potential": {"hi_min": 4, "mid_min": 3},
+}
 
 
 class TestInventoryScoring(unittest.TestCase):
     def test_grid_full_mapping(self):
-        self.assertEqual(grid_cell(5, 5), "hi-hi")
-        self.assertEqual(grid_cell(1, 1), "lo-lo")
-        self.assertEqual(grid_cell(3, 5), "mid-hi")
-        self.assertEqual(grid_cell(5, 1), "hi-lo")
+        self.assertEqual(grid_cell(5, 5, TEST_BANDS), "hi-hi")
+        self.assertEqual(grid_cell(1, 1, TEST_BANDS), "lo-lo")
+        self.assertEqual(grid_cell(3, 5, TEST_BANDS), "mid-hi")
+        self.assertEqual(grid_cell(5, 1, TEST_BANDS), "hi-lo")
+
+    def test_grid_requires_approved_bands(self):
+        # 无经批准配置 → 不套示意数值，正式评级被拒
+        with self.assertRaises(BizError):
+            grid_cell(5, 5)
 
     def test_grid_rejects_out_of_range(self):
-        from app.core.errors import BizError
-
         with self.assertRaises(BizError):
-            grid_cell(0, 3)
+            grid_cell(0, 3, TEST_BANDS)
         with self.assertRaises(BizError):
-            grid_cell(6, 3)
+            grid_cell(6, 3, TEST_BANDS)
 
     def test_summary_hidden_below_threshold(self):
         rows = [{"grid_cell": "hi-hi"} for _ in range(4)]

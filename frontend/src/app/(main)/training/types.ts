@@ -1,5 +1,10 @@
 /** C 培训成长页数据类型。 */
 
+export interface CourseCompletionRules {
+  min_evidence_score?: number | null;
+  required_evidence_types?: ('attendance' | 'assessment' | 'study_session')[] | null;
+}
+
 export interface TrainingCourse {
   id: number;
   title: string;
@@ -9,6 +14,10 @@ export interface TrainingCourse {
   capacity: number | null;
   status: 'active' | 'inactive';
   version: number;
+  approval_mode: 'none' | 'manager' | 'admin';
+  has_cost: boolean;
+  occupies_work_time: boolean;
+  completion_rules: CourseCompletionRules | null;
   feedback_note: string | null;
   feedback_note_at: string | null;
   created_at?: string;
@@ -133,14 +142,131 @@ export interface GrowthEvent {
   created_at: string;
 }
 
+export interface GrowthTrajectoryNode {
+  id: number;
+  source_type: string;
+  event_type: string;
+  self_reported: boolean;
+  formal: boolean;
+  ref_type: string | null;
+  ref_id: number | null;
+  version: number | null;
+  summary: string | null;
+  created_at: string;
+}
+
+export interface GrowthTrajectoryDomain {
+  source_type: string;
+  label: string;
+  event_count: number;
+  formal_count: number;
+  self_reported_count: number;
+  first_at: string | null;
+  last_at: string | null;
+}
+
+export interface GrowthTrajectoryDimension {
+  dimension_name: string;
+  status: 'formal' | 'assessed' | 'not_assessed';
+  formal_level: number | null;
+  formal_version: number | null;
+  latest_assessment_score: number | null;
+  source: Record<string, unknown> | null;
+}
+
+export interface GrowthTrajectory {
+  employee_user_id: number;
+  talent_profile_id: number | null;
+  domains: GrowthTrajectoryDomain[];
+  dimensions: GrowthTrajectoryDimension[];
+  timeline: GrowthTrajectoryNode[];
+  note: string;
+}
+
 export interface TrainingEnrollment {
   id: number;
   course_id: number;
   employee_user_id: number;
   priority: 'required' | 'elective';
-  status: 'pending' | 'approved' | 'rejected' | 'waitlisted' | 'cancelled' | 'expired';
+  status:
+    | 'pending'
+    | 'pending_admin_review'
+    | 'approved'
+    | 'rejected'
+    | 'waitlisted'
+    | 'awaiting_confirmation'
+    | 'cancelled'
+    | 'expired';
   expires_at: string | null;
   note: string | null;
+  manager_decided_by?: number | null;
+  manager_decided_at?: string | null;
+  decided_by?: number | null;
+  decided_at?: string | null;
+}
+
+export interface PrejobPhaseCourse {
+  course_id: number;
+  course: { course_id: number; title: string; version: number } | null;
+  note: string | null;
+}
+
+export interface PrejobPhase {
+  seq: number;
+  name: string;
+  goal: string | null;
+  mentor_user_id: number | null;
+  status: string;
+  courses: PrejobPhaseCourse[];
+}
+
+export interface PrejobPlan {
+  id: number;
+  employee_user_id: number;
+  talent_profile_id: number | null;
+  target_job_title: string | null;
+  goal: string | null;
+  status: 'draft' | 'assigned';
+  version: number;
+  phases: PrejobPhase[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CapabilityEvidence {
+  source_type: string;
+  description: string;
+  ref?: string | null;
+}
+
+export interface CapabilityRatingChange {
+  id: number;
+  employee_user_id: number;
+  talent_profile_id: number | null;
+  dimension_name: string;
+  evidence: CapabilityEvidence[];
+  manager_user_id: number | null;
+  manager_level: number | null;
+  manager_comment: string | null;
+  hr_user_id: number | null;
+  hr_level: number | null;
+  hr_comment: string | null;
+  status: 'pending_hr' | 'approved' | 'rejected';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CapabilityRating {
+  id: number;
+  employee_user_id: number;
+  talent_profile_id: number | null;
+  dimension_name: string;
+  level: number;
+  version: number;
+  effective: number;
+  source_change_id: number | null;
+  basis: Record<string, unknown>;
+  created_at: string;
 }
 
 export interface LearningEvidence {

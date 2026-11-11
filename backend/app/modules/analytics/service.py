@@ -34,7 +34,7 @@ from app.modules.analytics.models import (
     MetricRegistry,
 )
 from app.modules.analytics.charts import build_chart
-from app.modules.analytics.insight import build_interpretation
+from app.modules.analytics.insight import build_interpretation_with_llm
 
 METRIC_ACTIVE_JOBS = "jobs.active"
 METRIC_DEMAND_GAP = "job.demand_progress_gap"
@@ -401,7 +401,7 @@ async def query_metric(
         result["chart"] = build_chart(metric_id, defn["name"], result.get("value"),
                                       result.get("table"), result.get("note"),
                                       group_by=group_by)
-        result["interpretation"] = build_interpretation(
+        result["interpretation"] = build_interpretation_with_llm(
             metric_id, defn["name"], result.get("value"), result.get("table"),
             result.get("note"), group_by=group_by, data_time=datetime.now(),
         )

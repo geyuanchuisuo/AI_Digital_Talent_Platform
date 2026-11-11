@@ -29,6 +29,8 @@ from app.database import Base, get_db
 from app.models import (
     AssessmentAssignment,
     AssessmentResult,
+    SysRole,
+    SysUserRole,
     User,
 )
 from app.modules.dashboard import me
@@ -40,6 +42,10 @@ U_PERSONAL = SimpleNamespace(id=3, role="personal", person_id=1)
 
 TABLES = (
     User.__table__,
+    # sys_roles/sys_user_roles 建空表：get_role_codes 的 sys_user_roles 查询须成功
+    # 返回空才回退 users.role（P3 修复，见 UPD-MASTER-20261110-203044）。
+    SysRole.__table__,
+    SysUserRole.__table__,
     AssessmentAssignment.__table__,
     AssessmentResult.__table__,
     TrainingPlan.__table__,
@@ -53,6 +59,8 @@ def env(tmp_path, monkeypatch):
     )
     Base.metadata.create_all(engine, tables=TABLES)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
+    # 门禁 require_management_guard 内部开 app.database.SessionLocal（真实库）——
+    # 重定向到本测试库，角色判定走替身用户（P3 修复）。
     from app.models import SysRole, SysUserRole, UserScopeGrant
     Base.metadata.create_all(engine, tables=[SysRole.__table__, SysUserRole.__table__, UserScopeGrant.__table__])
     monkeypatch.setattr('app.database.SessionLocal', factory)

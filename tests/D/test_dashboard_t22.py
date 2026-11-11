@@ -34,6 +34,8 @@ from app.models import (
     ProjectDemand,
     ScreenBatch,
     ScreenResult,
+    SysRole,
+    SysUserRole,
     TalentProfile,
     TrainingPlan,
     User,
@@ -48,6 +50,10 @@ U_PERSONAL = SimpleNamespace(id=3, role="personal", person_id=1)
 
 TABLES = (
     User.__table__,
+    # sys_roles/sys_user_roles 建空表：get_role_codes 的 sys_user_roles 查询须成功
+    # 返回空才回退 users.role（P3 修复，见 UPD-MASTER-20261110-203044）。
+    SysRole.__table__,
+    SysUserRole.__table__,
     JobProfile.__table__,
     TalentProfile.__table__,
     ScreenBatch.__table__,
@@ -69,6 +75,8 @@ def env(tmp_path, monkeypatch):
     )
     Base.metadata.create_all(engine, tables=TABLES)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
+    # 门禁 require_management_guard 内部开 app.database.SessionLocal（真实库）——
+    # 重定向到本测试库，角色判定走替身用户（P3 修复）。
     from app.models import SysRole, SysUserRole, UserScopeGrant
     Base.metadata.create_all(engine, tables=[SysRole.__table__, SysUserRole.__table__, UserScopeGrant.__table__])
     monkeypatch.setattr('app.database.SessionLocal', factory)
@@ -209,7 +217,10 @@ def test_personal_forbidden(env):
             overview.admin_overview(
                 db, user=U_PERSONAL, engine=env.engine, engine_source="primary"
             )
+    # A06-3 统一拒绝文案（DENY_MESSAGE，REQ-02：不泄露对象是否存在）。
+    # 状态码与统一文案两个判据同时保留，避免只断言其一漏掉另一侧回归。
     assert ei.value.code == 403
+    assert "无权访问该资源" in str(ei.value)
 
 
 def test_personal_403_via_http(env):

@@ -26,6 +26,8 @@ from app.models import (
     AiCallLog,
     AiPromptVersion,
     AiProvider,
+    SysRole,
+    SysUserRole,
     User,
     WorkflowDefinition,
     WorkflowDefinitionVersion,
@@ -39,6 +41,10 @@ U_PERSONAL = SimpleNamespace(id=3, role="personal", person_id=None)
 
 TABLES = (
     User.__table__,
+    # sys_roles/sys_user_roles 建空表：get_role_codes 的 sys_user_roles 查询须成功
+    # 返回空才回退 users.role（P3 修复，见 UPD-MASTER-20261110-203044）。
+    SysRole.__table__,
+    SysUserRole.__table__,
     AiProvider.__table__,
     AiPromptVersion.__table__,
     AiCallLog.__table__,
@@ -56,6 +62,8 @@ def env(tmp_path, monkeypatch):
     Base.metadata.create_all(db_engine, tables=TABLES)
     factory = sessionmaker(bind=db_engine, expire_on_commit=False)
     # Public A06 guard must query this fixture's account/role database.
+    # 门禁 require_management_guard 内部开 app.database.SessionLocal（真实库）——
+    # 重定向到本测试库，角色判定走替身用户（P3 修复）。
     from app.models import SysRole, SysUserRole, UserScopeGrant
     Base.metadata.create_all(db_engine, tables=[SysRole.__table__, SysUserRole.__table__, UserScopeGrant.__table__])
     monkeypatch.setattr('app.database.SessionLocal', factory)
@@ -68,7 +76,6 @@ def env(tmp_path, monkeypatch):
                     scope_db.add(ScopeUser(id=value.id, username='scope_fixture_'+str(value.id),
                         password_hash='test-only', role=value.role, person_id=getattr(value, 'person_id', None)))
         scope_db.commit()
-
 
     with factory() as db:
         db.add(User(id=1, username="hr1", password_hash="x", role="hr"))

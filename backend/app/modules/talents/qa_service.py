@@ -58,7 +58,8 @@ def ask(db, person_id, question, *, user_id, scope, version=None, follow_up_to=N
         if previous_turn is not None:
             payload['previous_turn'] = previous_turn
         output = chat_json(json.dumps(payload, ensure_ascii=False),
-            schema=qa.Answer, system_prompt=system_prompt, on_result=calls.append)
+            schema=qa.Answer, system_prompt=system_prompt, on_result=calls.append,
+            purpose="talent_qa")
         return output.model_dump()
     try:
         candidates = retrieve(snapshot, query)

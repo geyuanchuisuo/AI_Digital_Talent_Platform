@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Protocol
 
 from app.config import settings
@@ -81,7 +82,12 @@ class OpenAICompatGenerator:
             if text.lower().startswith("sql"):
                 text = text[3:]
             text = text.strip()
-        return text or None
+        if not text:
+            return None
+        # 拒答一致性：非 SQL 文本（如「我不知道」）不当 SQL 猜测，统一返回 None
+        if not re.match(r"^\s*(SELECT|WITH)\s", text, flags=re.IGNORECASE):
+            return None
+        return text
 
 
 class RefusingGenerator:

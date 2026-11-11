@@ -548,6 +548,8 @@ def _publish_adaptive(db: Session, plan: AssessmentPlan, *, user_id: int) -> Ass
         "question_ids": sorted(int(q.id) for q in bank),
         "question_count": len(bank),
         "frozen_at": datetime.now().isoformat(timespec="seconds"),
+        # 发布即冻结题目全文/答案/评分版本：后续改题重审不影响已发布方案的出题与评分
+        "questions": {str(int(q.id)): _paper_question_snapshot(q) for q in bank},
     }
     plan.status = "published"
     plan.published_at = datetime.now()
@@ -915,7 +917,10 @@ def next_question(db: Session, assignment_id: int, user: User) -> dict[str, Any]
         }
 
     plan = get_plan(db, assignment.plan_id)
-    bank_ids = [int(item) for item in (plan.bank_snapshot_json or {}).get("question_ids") or []]
+    bank_snapshot = dict(plan.bank_snapshot_json or {})
+    bank_ids = [int(item) for item in bank_snapshot.get("question_ids") or []]
+    frozen_questions = {int(key): dict(value) for key, value in (bank_snapshot.get("questions") or {}).items()}
+    # 仍按当前题库状态排除发布后停用的题目；内容/答案/维度取发布冻结快照
     rows = list(
         db.scalars(
             select(AssessmentQuestion).where(
@@ -924,16 +929,18 @@ def next_question(db: Session, assignment_id: int, user: User) -> dict[str, Any]
             )
         )
     ) if bank_ids else _bank_candidates(db, plan)
-    candidates = [
-        {
-            "question_id": row.id,
-            "dimension_name": row.dimension_name,
-            "dimension_type": row.dimension_type,
-            "difficulty": row.difficulty,
-            "job_id": row.job_id,
-        }
-        for row in rows
-    ]
+    candidates = []
+    for row in rows:
+        frozen = frozen_questions.get(row.id) or _paper_question_snapshot(row)
+        candidates.append(
+            {
+                "question_id": row.id,
+                "dimension_name": frozen["dimension_name"],
+                "dimension_type": frozen["dimension_type"],
+                "difficulty": frozen["difficulty"],
+                "job_id": frozen.get("job_id"),
+            }
+        )
     chosen = choose_next_question(
         candidates=candidates,
         asked=asked,
@@ -950,16 +957,27 @@ def next_question(db: Session, assignment_id: int, user: User) -> dict[str, Any]
             "answered_count": len(answers),
             "target_question_count": target,
         }
-    question = db.get(AssessmentQuestion, int(chosen["question_id"]))
-    if question is None:
-        raise BizError(500, "选题结果对应的题目不存在，请联系管理员")
+    question_id = int(chosen["question_id"])
+    frozen = frozen_questions.get(question_id)
+    if frozen is not None:
+        question_snapshot = frozen
+        dimension_name = frozen["dimension_name"]
+        difficulty = frozen["difficulty"]
+    else:
+        # 兼容本次冻结前已发布、仅有题目 id 快照的历史方案
+        question = db.get(AssessmentQuestion, question_id)
+        if question is None:
+            raise BizError(500, "选题结果对应的题目不存在，请联系管理员")
+        question_snapshot = _paper_question_snapshot(question)
+        dimension_name = question.dimension_name
+        difficulty = question.difficulty
     selection = AssessmentSelection(
         assignment_id=assignment.id,
         sequence_no=len(selections) + 1,
-        question_id=question.id,
-        dimension_name=question.dimension_name,
-        difficulty=question.difficulty,
-        question_snapshot_json=_paper_question_snapshot(question),
+        question_id=question_id,
+        dimension_name=dimension_name,
+        difficulty=difficulty,
+        question_snapshot_json=question_snapshot,
         selection_reason_json=dict(chosen["reason"]),
         strategy_snapshot_json=strategy,
     )
@@ -1220,6 +1238,7 @@ def _create_result(
             TrainingGrowthEvent(
                 employee_user_id=assignment.user_id,
                 talent_profile_id=assignment.talent_profile_id,
+                source_type="assessment",
                 event_type="assessment_completed",
                 ref_type="assessment_result",
                 ref_id=result.id,

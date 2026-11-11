@@ -349,7 +349,7 @@ def get_schedule_settings(
     return ok(schedule.schedule_settings(db))
 
 
-@router.put("/schedule-settings", summary="更新定时触发配置（管理侧；启停/间隔/参与定义/执行主体）")
+@router.put("/schedule-settings", summary="更新定时触发配置（管理侧；启停/间隔/参与定义/执行主体/数字员工）")
 def put_schedule_settings(
     body: dict,
     user: CurrentUser,
@@ -368,6 +368,30 @@ def put_schedule_settings(
     actor_id = body.get("actor_user_id")
     if actor_id is not None and not isinstance(actor_id, int):
         raise BizError(422, "actor_user_id 须为整数")
+    digital = body.get("digital")
+    if digital is not None and not isinstance(digital, dict):
+        raise BizError(422, "digital 须为对象")
+    if isinstance(digital, dict):
+        digital_enabled = digital.get("enabled")
+        if digital_enabled is not None and not isinstance(digital_enabled, bool):
+            raise BizError(422, "digital.enabled 须为布尔")
+        digital_interval = digital.get("interval_minutes")
+        if digital_interval is not None and not isinstance(digital_interval, int):
+            raise BizError(422, "digital.interval_minutes 须为整数分钟")
+        digital_types = digital.get("task_types")
+        if digital_types is not None:
+            if not isinstance(digital_types, list) or any(
+                not isinstance(t, str) for t in digital_types
+            ):
+                raise BizError(422, "digital.task_types 须为字符串数组")
+        digital_admins = digital.get("notify_admin_ids")
+        if digital_admins is not None:
+            if not isinstance(digital_admins, list) or any(
+                not isinstance(a, int) or isinstance(a, bool) for a in digital_admins
+            ):
+                raise BizError(422, "digital.notify_admin_ids 须为整数数组")
+    else:
+        digital_enabled = digital_interval = digital_types = digital_admins = None
     settings = schedule.update_schedule_settings(
         db,
         enabled=enabled,
@@ -375,5 +399,63 @@ def put_schedule_settings(
         definition_codes=codes,
         user=user,
         actor_user_id=actor_id,
+        digital_enabled=digital_enabled,
+        digital_interval_minutes=digital_interval,
+        digital_task_types=digital_types,
+        digital_notify_admin_ids=digital_admins,
     )
     return ok(settings)
+
+
+# ---- T-D16 Dify 画布对接（导出/显式导入/对账；契约 docs/modules/D/Dify画布对接契约.md）----
+
+
+@router.get("/versions/{version_id}/dify-dsl", summary="版本图导出为 Dify DSL（管理侧；只读快照）")
+def export_dify_dsl(
+    version_id: int,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    from app.modules.workflows.dify_bridge import service as bridge_service  # noqa: PLC0415 局部避免环
+
+    result = bridge_service.export_dsl(db, version_id, user=user)
+    return ok(
+        {
+            "version_id": version_id,
+            "dsl_version": result["data"]["version"],
+            "app_name": result["data"]["app"]["name"],
+            "node_count": len(result["data"]["workflow"]["graph"]["nodes"]),
+            "edge_count": len(result["data"]["workflow"]["graph"]["edges"]),
+            "yaml": result["yaml"],
+        }
+    )
+
+
+@router.post("/definitions/{definition_id}/dify-import", summary="Dify DSL 显式导入为新草稿版本（管理侧；不触碰已发布版本）")
+def import_dify_dsl(
+    definition_id: int,
+    body: dict,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    from app.modules.workflows.dify_bridge import service as bridge_service  # noqa: PLC0415 局部避免环
+
+    yaml_text = body.get("yaml")
+    if not isinstance(yaml_text, str) or not yaml_text.strip():
+        raise BizError(422, "body.yaml 必填（Dify DSL YAML 文本）")
+    return ok(bridge_service.import_dsl(db, definition_id, yaml_text, user=user))
+
+
+@router.post("/versions/{version_id}/dify-reconcile", summary="Dify DSL 与落库版本对账（管理侧；只读 diff 报告）")
+def reconcile_dify_dsl(
+    version_id: int,
+    body: dict,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    from app.modules.workflows.dify_bridge import service as bridge_service  # noqa: PLC0415 局部避免环
+
+    yaml_text = body.get("yaml")
+    if not isinstance(yaml_text, str) or not yaml_text.strip():
+        raise BizError(422, "body.yaml 必填（Dify DSL YAML 文本）")
+    return ok(bridge_service.reconcile_dsl(db, version_id, yaml_text, user=user))

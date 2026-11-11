@@ -329,6 +329,7 @@
       "backend/app/api/health.py",
       "backend/app/core/embedding_client.py",
       "backend/app/core/llm_client.py",
+      "backend/app/core/rerank_client.py",
       "backend/app/core/milvus_store.py",
       "backend/app/core/prompts/__init__.py",
       "backend/app/core/prompts/loader.py",

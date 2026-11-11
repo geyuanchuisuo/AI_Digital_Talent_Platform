@@ -29,7 +29,9 @@ from app.models import (
     AnalyticsQuerySnapshot,
     JobProfile,
     MetricRegistry,
+    SysRole,
     SysSetting,
+    SysUserRole,
     User,
     WorkflowDefinition,
     WorkflowDefinitionVersion,
@@ -56,6 +58,10 @@ TABLES = (
     WorkflowRunStep.__table__,
     WorkflowEngineRun.__table__,
     User.__table__,
+    # sys_roles/sys_user_roles 建空表：get_role_codes 的 sys_user_roles 查询须成功
+    # 返回空才回退 users.role（P3 修复，见 UPD-MASTER-20261110-203044）。
+    SysRole.__table__,
+    SysUserRole.__table__,
     MetricRegistry.__table__,
     AnalyticsQuerySnapshot.__table__,
     JobProfile.__table__,
@@ -107,6 +113,9 @@ def env(tmp_path, monkeypatch):
 
     monkeypatch.setattr(analytics_service, "_replica_engine", db_engine)
     monkeypatch.setattr(analytics_service, "SessionLocal", factory)
+    # 门禁 require_management_guard 内部开 app.database.SessionLocal（真实库）——
+    # 重定向到本测试库，角色判定走替身用户（P3 修复）。
+    monkeypatch.setattr("app.database.SessionLocal", factory)
     fake = CacheClient("redis://fake", client=fake_redis.FakeRedis())
     reset_cache(fake)
 
@@ -339,6 +348,13 @@ def test_update_settings_roundtrip_and_audit(env):
         "interval_minutes": 30,
         "definition_codes": [code, "other"],
         "actor_user_id": 1,
+        # 数字员工定时默认关闭（独立开关，未配置时零副作用）
+        "digital": {
+            "enabled": False,
+            "interval_minutes": schedule.DIGITAL_DEFAULT_INTERVAL_MINUTES,
+            "task_types": [],
+            "notify_admin_ids": [],
+        },
     }
     # 审计：updated_by 落行
     with env.factory() as db:

@@ -21,19 +21,34 @@ GRID_LABELS = {
 }
 
 
-def _tier(score: int) -> str:
-    if score >= 4:
+def tier_from_bands(score: int, bands: dict[str, int]) -> str:
+    """按经批准的阈值把 1–5 分映射为 hi/mid/lo 档。"""
+    hi = bands.get("hi_min")
+    mid = bands.get("mid_min")
+    if hi is None or mid is None:
+        raise BizError(400, "九宫格标准配置缺少 hi_min/mid_min 阈值")
+    if not (1 <= score <= 5):
+        raise BizError(400, "绩效与潜力评分必须在 1–5 之间")
+    if score >= hi:
         return "hi"
-    if score == 3:
+    if score >= mid:
         return "mid"
     return "lo"
 
 
-def grid_cell(performance: int, potential: int) -> str:
-    """绩效 × 潜力 → 九宫格 cell id；输入需 1–5。"""
+def grid_cell(performance: int, potential: int, bands: dict[str, dict[str, int]] | None = None) -> str:
+    """绩效 × 潜力 → 九宫格 cell id；输入需 1–5。
+
+    `bands` 为经 HR 批准的九宫格标准配置阈值 `{"performance": {...}, "potential": {...}}`；
+    缺配置（None）时不套示意数值，正式评级因缺标准而被拒绝。
+    """
     if not (1 <= performance <= 5 and 1 <= potential <= 5):
         raise BizError(400, "绩效与潜力评分必须在 1–5 之间")
-    return f"{_tier(performance)}-{_tier(potential)}"
+    if bands is None:
+        raise BizError(400, "缺少经 HR 批准的九宫格标准配置，不能产出正式评级")
+    perf = tier_from_bands(performance, bands["performance"])
+    pot = tier_from_bands(potential, bands["potential"])
+    return f"{perf}-{pot}"
 
 
 def grid_label(cell: str) -> str:
@@ -41,17 +56,24 @@ def grid_label(cell: str) -> str:
 
 
 def public_safe_review(review: dict[str, Any], *, viewer_role: str) -> dict[str, Any]:
-    """员工本人只看到公开评估（不返回内部评级/九宫格/人才池）。"""
+    """员工本人只看到公开评估（不返回内部评级/九宫格/人才池）。
+
+    部门经理（dept_manager）按 F10 权限矩阵可读本部门当前评级/九宫格，
+    行级部门范围由服务层裁剪，这里只做字段级裁剪。
+    """
     result = dict(review)
-    if viewer_role not in ("admin", "hr"):
+    if viewer_role not in ("admin", "hr", "dept_manager"):
         for key in ("performance_score", "potential_manager_score", "potential_hr_score", "grid_cell"):
             result.pop(key, None)
     return result
 
 
 def visible_summary(rows: list[dict[str, Any]], *, viewer_role: str) -> dict[str, Any]:
-    """部门匿名汇总：cell 计数 <5 的档位合并为"其他"，永不返回个人身份。"""
-    if viewer_role not in ("admin", "hr"):
+    """部门匿名汇总：cell 计数 <5 的档位合并为"其他"，永不返回个人身份。
+
+    部门经理可看本部门汇总（行集由服务层按负责部门预过滤）。
+    """
+    if viewer_role not in ("admin", "hr", "dept_manager"):
         raise BizError(403, "仅管理员可查看汇总")
     counts: dict[str, int] = {}
     for row in rows:

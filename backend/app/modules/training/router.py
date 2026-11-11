@@ -13,6 +13,10 @@ from app.core.response import ok, paginated
 from app.database import get_db
 from app.modules.training import service
 from app.modules.training.models import (
+    CapabilityRating,
+    CapabilityRatingChange,
+    PrejobPhase,
+    PrejobPlan,
     TrainingAttendance,
     TrainingCourse,
     TrainingGrowthEvent,
@@ -24,10 +28,14 @@ from app.modules.training.models import (
 )
 from app.modules.training.schemas import (
     AttendanceMarkRequest,
+    CapabilityRatingChangeCreateRequest,
+    CapabilityRatingReviewRequest,
     CourseCreateRequest,
     CourseUpdateRequest,
     DraftRequest,
+    EnrollmentAdminReviewRequest,
     EnrollmentDecideRequest,
+    EnrollmentManagerDecideRequest,
     EnrollmentRequest,
     EvidenceSubmitRequest,
     ExtensionDecideRequest,
@@ -35,9 +43,12 @@ from app.modules.training.schemas import (
     FeedbackSubmitRequest,
     PlanCreateRequest,
     PlanUpdateRequest,
+    PrejobPlanCreateRequest,
+    PrejobPlanUpdateRequest,
     ProgressUpdateRequest,
     ReminderScanRequest,
     SessionCreateRequest,
+    StudyHeartbeatRequest,
 )
 
 router = APIRouter(prefix="/api/training", tags=["training"])
@@ -53,6 +64,10 @@ def _course_out(row: TrainingCourse) -> dict[str, Any]:
         "capacity": row.capacity,
         "status": row.status,
         "version": row.version,
+        "approval_mode": row.approval_mode,
+        "has_cost": bool(row.has_cost),
+        "occupies_work_time": bool(row.occupies_work_time),
+        "completion_rules": dict(row.completion_rules_json) if row.completion_rules_json else None,
         "feedback_note": row.feedback_note,
         "feedback_note_at": row.feedback_note_at,
         "created_at": row.created_at,
@@ -328,7 +343,17 @@ def post_enrollment(
     return ok({"id": row.id, "status": row.status, "expires_at": row.expires_at.isoformat() if row.expires_at else None})
 
 
-@router.post("/enrollments/{enrollment_id}/decide", summary="审批报名")
+@router.post("/enrollments/{enrollment_id}/confirm", summary="员工确认候补名额（24h 内）")
+def post_enrollment_confirm(
+    enrollment_id: int,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    row = service.confirm_waitlist_offer(db, enrollment_id, user=user)
+    return ok({"id": row.id, "status": row.status, "expires_at": row.expires_at.isoformat() if row.expires_at else None})
+
+
+@router.post("/enrollments/{enrollment_id}/decide", summary="培训管理员审批报名（admin 模式 / 免审批涉费课程）")
 def post_enrollment_decide(
     enrollment_id: int,
     payload: EnrollmentDecideRequest,
@@ -336,6 +361,28 @@ def post_enrollment_decide(
     db: Annotated[Session, Depends(get_db)],
 ):
     row = service.decide_enrollment(db, enrollment_id, payload, admin=user)
+    return ok({"id": row.id, "status": row.status})
+
+
+@router.post("/enrollments/{enrollment_id}/manager-decide", summary="直属经理审批报名（manager 模式，本部门）")
+def post_enrollment_manager_decide(
+    enrollment_id: int,
+    payload: EnrollmentManagerDecideRequest,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    row = service.manager_decide_enrollment(db, enrollment_id, payload, user=user)
+    return ok({"id": row.id, "status": row.status})
+
+
+@router.post("/enrollments/{enrollment_id}/admin-review", summary="培训管理员复核（经理已通过、涉及费用/工时）")
+def post_enrollment_admin_review(
+    enrollment_id: int,
+    payload: EnrollmentAdminReviewRequest,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    row = service.admin_review_enrollment(db, enrollment_id, payload, admin=user)
     return ok({"id": row.id, "status": row.status})
 
 
@@ -349,7 +396,11 @@ def get_enrollments(
     return ok([
         {"id": r.id, "course_id": r.course_id, "employee_user_id": r.employee_user_id,
          "priority": r.priority, "status": r.status,
-         "expires_at": r.expires_at.isoformat() if r.expires_at else None, "note": r.note}
+         "expires_at": r.expires_at.isoformat() if r.expires_at else None, "note": r.note,
+         "manager_decided_by": r.manager_decided_by,
+         "manager_decided_at": r.manager_decided_at.isoformat() if r.manager_decided_at else None,
+         "decided_by": r.decided_by,
+         "decided_at": r.decided_at.isoformat() if r.decided_at else None}
         for r in rows
     ])
 
@@ -372,6 +423,16 @@ def post_study_session(
     db: Annotated[Session, Depends(get_db)],
 ):
     return ok(service.issue_study_session(db, record_id, user=user))
+
+
+@router.post("/learning-records/{record_id}/study-heartbeat", summary="学习心跳（员工本人，防挂机累计有效学时）")
+def post_study_heartbeat(
+    record_id: int,
+    payload: StudyHeartbeatRequest,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    return ok(service.record_study_heartbeat(db, record_id, payload, user=user))
 
 
 @router.post("/learning-evidence", summary="提交学习证据（分数/验证人由服务端计算）")
@@ -589,6 +650,174 @@ def revise_plan(
     return ok(_plan_out(plan, service.plan_items(db, plan)))
 
 
+# ---------------------------------------------------------------- 岗前培养计划（F05，待上岗人员）
+
+
+def _prejob_out(plan: PrejobPlan, phases: list[PrejobPhase]) -> dict[str, Any]:
+    return {
+        "id": plan.id,
+        "employee_user_id": plan.employee_user_id,
+        "talent_profile_id": plan.talent_profile_id,
+        "target_job_title": plan.target_job_title,
+        "goal": plan.goal,
+        "status": plan.status,
+        "version": plan.version,
+        "phases": [
+            {
+                "seq": ph.seq,
+                "name": ph.name,
+                "goal": ph.goal,
+                "mentor_user_id": ph.mentor_user_id,
+                "status": ph.status,
+                "courses": list(ph.courses_json or []),
+            }
+            for ph in phases
+        ],
+        "created_at": plan.created_at,
+        "updated_at": plan.updated_at,
+    }
+
+
+@router.post("/prejob-plans", summary="创建岗前培养计划草稿（管理员）")
+def create_prejob_plan(
+    payload: PrejobPlanCreateRequest,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    plan = service.create_prejob_plan(db, payload, admin=user)
+    return ok(_prejob_out(plan, service.get_prejob_plan(db, plan.id, user=user)[1]))
+
+
+@router.get("/prejob-plans", summary="岗前培养计划列表（管理员全量 / 员工本人）")
+def list_prejob_plans(
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    rows = service.list_prejob_plans(db, user=user)
+    return ok([_prejob_out(plan, service._prejob_phase_rows(db, plan)) for plan in rows])
+
+
+@router.get("/prejob-plans/{plan_id}", summary="岗前培养计划详情")
+def get_prejob_plan(
+    plan_id: int,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    plan, phases = service.get_prejob_plan(db, plan_id, user=user)
+    return ok(_prejob_out(plan, phases))
+
+
+@router.patch("/prejob-plans/{plan_id}", summary="修改岗前计划草稿（管理员）")
+def update_prejob_plan(
+    plan_id: int,
+    payload: PrejobPlanUpdateRequest,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    plan = service.update_prejob_plan(db, plan_id, payload, admin=user)
+    return ok(_prejob_out(plan, service.get_prejob_plan(db, plan_id, user=user)[1]))
+
+
+@router.post("/prejob-plans/{plan_id}/assign", summary="确认分配岗前计划（管理员）")
+def assign_prejob_plan(
+    plan_id: int,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    plan = service.assign_prejob_plan(db, plan_id, admin=user)
+    return ok(_prejob_out(plan, service.get_prejob_plan(db, plan_id, user=user)[1]))
+
+
+@router.post("/prejob-plans/{plan_id}/revise", summary="已分配岗前计划生成新版本草稿")
+def revise_prejob_plan(
+    plan_id: int,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    plan = service.revise_prejob_plan(db, plan_id, admin=user)
+    return ok(_prejob_out(plan, service.get_prejob_plan(db, plan_id, user=user)[1]))
+
+
+# ---------------------------------------------------------------- 正式能力评级变更链（C14）
+
+def _capability_change_out(row: CapabilityRatingChange) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "employee_user_id": row.employee_user_id,
+        "talent_profile_id": row.talent_profile_id,
+        "dimension_name": row.dimension_name,
+        "evidence": list(row.evidence_json or []),
+        "manager_user_id": row.manager_user_id,
+        "manager_level": row.manager_level,
+        "manager_comment": row.manager_comment,
+        "hr_user_id": row.hr_user_id,
+        "hr_level": row.hr_level,
+        "hr_comment": row.hr_comment,
+        "status": row.status,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+    }
+
+
+def _capability_rating_out(row: CapabilityRating) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "employee_user_id": row.employee_user_id,
+        "talent_profile_id": row.talent_profile_id,
+        "dimension_name": row.dimension_name,
+        "level": row.level,
+        "version": row.version,
+        "effective": row.effective,
+        "source_change_id": row.source_change_id,
+        "basis": dict(row.basis_json or {}),
+        "created_at": row.created_at,
+    }
+
+
+@router.post("/capability-rating-changes", summary="提交能力评级变更（经理，证据+评价）")
+def create_capability_change(
+    payload: CapabilityRatingChangeCreateRequest,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    row = service.create_capability_rating_change(db, payload, user=user)
+    return ok(_capability_change_out(row))
+
+
+@router.get("/capability-rating-changes", summary="能力评级变更队列（管理侧/负责部门经理；员工不可见 F10）")
+def list_capability_changes(
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+    status: Annotated[str | None, Query(max_length=20)] = None,
+):
+    rows = service.list_capability_rating_changes(db, user=user, status=status)
+    return ok([_capability_change_out(row) for row in rows])
+
+
+@router.post(
+    "/capability-rating-changes/{change_id}/review",
+    summary="HR 审核能力评级变更（通过则生成新正式评级版本）",
+)
+def review_capability_change(
+    change_id: int,
+    payload: CapabilityRatingReviewRequest,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    row = service.review_capability_rating_change(db, change_id, payload, user=user)
+    return ok(_capability_change_out(row))
+
+
+@router.get("/capability-ratings", summary="正式能力评级历史（管理侧/负责部门经理；员工不可见 F10）")
+def list_capability_ratings(
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+    employee_user_id: Annotated[int | None, Query(ge=1)] = None,
+):
+    rows = service.list_capability_ratings(db, user=user, employee_user_id=employee_user_id)
+    return ok([_capability_rating_out(row) for row in rows])
+
+
 # ---------------------------------------------------------------- 学习与成长
 
 @router.put("/plan-items/{item_id}/progress", summary="员工自报学习状态")
@@ -627,3 +856,17 @@ def growth(
         limit=page.limit,
     )
     return paginated([_growth_out(row) for row in rows], total, page.page, page.page_size)
+
+
+@router.get("/growth/trajectory", summary="跨域成长轨迹聚合（测评/面试/培训/正式评级，区分自报与正式）")
+def growth_trajectory(
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+    employee_user_id: int | None = Query(None),
+    talent_profile_id: int | None = Query(None),
+):
+    return ok(
+        service.growth_trajectory(
+            db, user=user, employee_user_id=employee_user_id, talent_profile_id=talent_profile_id
+        )
+    )

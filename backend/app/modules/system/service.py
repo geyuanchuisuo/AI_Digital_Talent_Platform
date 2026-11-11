@@ -57,3 +57,15 @@ def user_has_permission(db: Session, user_id: int, *, action: str, menu_id: int 
 
 def validate_grant_scope(data_scope: str) -> bool:
     return data_scope in DATA_SCOPES
+
+
+def list_user_role_codes(db: Session, user_id: int) -> tuple[str, ...]:
+    """账号的全部启用角色 code（多职责；供 AccountScope.role_codes 与前端展示）。"""
+    rows = db.execute(
+        select(SysRole.code)
+        .join(SysUserRole, SysUserRole.role_id == SysRole.id)
+        .where(SysUserRole.user_id == user_id)
+        .where(SysRole.status == "active")
+        .order_by(SysRole.id.asc())
+    ).scalars().all()
+    return tuple(rows)
