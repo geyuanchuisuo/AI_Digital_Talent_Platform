@@ -186,8 +186,12 @@ class LLMClient:
             )
         return self._client
 
-    def _chat_raw(self, messages: list[dict[str, str]], max_tokens: int, want_json: bool) -> str:
-        """单次原始调用；内部处理 429/5xx 退避与 response_format 降级。"""
+    def _chat_raw(self, messages: list[dict[str, str]], max_tokens: int, want_json: bool,
+                  purpose: str | None = None) -> str:
+        """单次原始调用；内部处理 429/5xx 退避与 response_format 降级。
+
+        `purpose` 单次覆盖实例默认（None=实例值），经 _record_call 落 ai_call_logs。
+        """
         http_try = 0
         while True:
             kwargs: dict[str, Any] = {
@@ -218,6 +222,7 @@ class LLMClient:
                     result="ok", latency_ms=int((time.monotonic() - started) * 1000),
                     prompt_tokens=getattr(usage, "prompt_tokens", None),
                     completion_tokens=getattr(usage, "completion_tokens", None),
+                    purpose_override=purpose,
                 )
                 return content
             except APIStatusError as exc:
@@ -234,6 +239,7 @@ class LLMClient:
                 self._record_call(
                     result="error", latency_ms=int((time.monotonic() - started) * 1000),
                     error=f"LLM HTTP {exc.status_code}：{str(exc)[:RAW_SUMMARY_LEN]}",
+                    purpose_override=purpose,
                 )
                 raise LLMError(f"LLM HTTP {exc.status_code}：{str(exc)[:RAW_SUMMARY_LEN]}") from exc
             except (APITimeoutError, APIConnectionError) as exc:
@@ -245,14 +251,19 @@ class LLMClient:
                 self._record_call(
                     result="error", latency_ms=int((time.monotonic() - started) * 1000),
                     error=f"LLM 网络异常：{type(exc).__name__}: {exc}",
+                    purpose_override=purpose,
                 )
                 raise LLMError(f"LLM 网络异常：{type(exc).__name__}: {exc}") from exc
 
     def _record_call(self, *, result: str, latency_ms: int,
                      prompt_tokens: int | None = None,
                      completion_tokens: int | None = None,
-                     error: str | None = None) -> None:
-        """中台调用日志埋点（T-D20）：审计旁路，落库失败不阻塞业务。"""
+                     error: str | None = None,
+                     purpose_override: str | None = None) -> None:
+        """中台调用日志埋点（T-D20）：审计旁路，落库失败不阻塞业务。
+
+        `purpose_override` 单次调用覆盖实例默认（None=实例值）。
+        """
         try:
             from app.database import SessionLocal  # noqa: PLC0415
             from app.modules.dashboard import service as ai_platform  # noqa: PLC0415
@@ -260,7 +271,7 @@ class LLMClient:
             with SessionLocal() as db:
                 ai_platform.record_call(
                     db, provider_name=self.provider_name, model=self.model,
-                    purpose=self.purpose, result=result, latency_ms=latency_ms,
+                    purpose=purpose_override or self.purpose, result=result, latency_ms=latency_ms,
                     prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
                     error=error,
                 )
@@ -273,10 +284,15 @@ class LLMClient:
         *,
         system_prompt: str | None = None,
         max_tokens: int | None = None,
+        purpose: str | None = None,
     ) -> str:
-        """纯文本调用（不带 response_format），返回 content 原文。"""
+        """纯文本调用（不带 response_format），返回 content 原文。
+
+        `purpose` 单次覆盖实例默认用途（T-D20 调用日志维度）；None 用实例值。
+        """
         messages = build_messages(prompt, system_prompt)
-        return self._chat_raw(messages, max_tokens or DEFAULT_TEXT_MAX_TOKENS, want_json=False)
+        return self._chat_raw(messages, max_tokens or DEFAULT_TEXT_MAX_TOKENS,
+                              want_json=False, purpose=purpose)
 
     def chat_json(
         self,
@@ -288,11 +304,13 @@ class LLMClient:
         retry: int = 1,
         max_tokens: int | None = None,
         on_result: Callable[[dict[str, Any]], None] | None = None,
+        purpose: str | None = None,
     ) -> T | dict:
         """结构化调用：JSON 修复 → Pydantic 校验 → 失败自动重试 `retry` 次。
 
         `schema` 为 Pydantic 模型时返回校验后的模型实例；传 None 时只返回 dict。
         重试耗尽抛 `LLMError`，message 含原始输出摘要供 worker 落失败原因与阶段。
+        `purpose` 单次覆盖实例默认用途（T-D20 调用日志维度）；None 用实例值。
         """
         if schema is not None and not (isinstance(schema, type) and issubclass(schema, BaseModel)):
             raise TypeError("schema 必须是 pydantic.BaseModel 子类或 None（JSON schema 请用 prompt_name 传入）")
@@ -306,7 +324,7 @@ class LLMClient:
             # D-7 缓办：评分缓存钩子接入点（get/set），一期不查询、不写入、不建表
             raw = ""
             try:
-                raw = self._chat_raw(messages, tokens, want_json=True)
+                raw = self._chat_raw(messages, tokens, want_json=True, purpose=purpose)
                 data = repair_json(raw)
                 result = data if schema is None else schema.model_validate(data)
                 if on_result is not None:
@@ -371,10 +389,12 @@ def reset_llm_client() -> None:
 
 
 def chat_json(prompt: str, schema: type[T] | None = None, **kwargs: Any) -> T | dict:
+    """模块级结构化调用；`purpose` 关键字经 kwargs 透传到实例（T-D20 调用日志维度）。"""
     return get_llm_client().chat_json(prompt, schema, **kwargs)
 
 
 def chat_text(prompt: str, **kwargs: Any) -> str:
+    """模块级纯文本调用；`purpose` 关键字经 kwargs 透传到实例。"""
     return get_llm_client().chat_text(prompt, **kwargs)
 
 

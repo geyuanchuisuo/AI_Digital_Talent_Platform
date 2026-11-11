@@ -27,7 +27,8 @@ def ask(db, person_id, question, *, user_id, scope, version=None):
         from app.core.llm_client import chat_json
         import json
         output = chat_json(json.dumps({'question':q, 'evidence':context}, ensure_ascii=False),
-            schema=qa.Answer, system_prompt=qa.SYSTEM_PROMPT, on_result=calls.append)
+            schema=qa.Answer, system_prompt=qa.SYSTEM_PROMPT, on_result=calls.append,
+            purpose="talent_qa")
         return output.model_dump()
     try:
         candidates = retrieve(snapshot, question)

@@ -35,7 +35,8 @@ def _rank(question, texts):
 def _generate(question, context):
     from app.core.llm_client import chat_json
     return chat_json(json.dumps({'question':question, 'evidence':context}, ensure_ascii=False),
-                     schema=Answer, system_prompt=SYSTEM_PROMPT).model_dump()
+                     schema=Answer, system_prompt=SYSTEM_PROMPT,
+                     purpose="talent_qa").model_dump()
 
 
 def answer_from_evidence(question, evidence, *, ranker=None, generator=None):

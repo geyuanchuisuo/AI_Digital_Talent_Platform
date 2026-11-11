@@ -399,7 +399,8 @@ def call_profile_llm(data: Mapping[str, Any]) -> ProfileLLMOutput:
     """调用 Prompt B；标签不足 10 个时**额外重试 1 次**，仍不足则接受并记 warning（算法 §6.1）。"""
     prompt = build_prompt_input(data)
     try:
-        output = llm_client.chat_json(prompt, ProfileLLMOutput, prompt_name="profile")
+        output = llm_client.chat_json(prompt, ProfileLLMOutput, prompt_name="profile",
+                          purpose="profile_tagging")
     except llm_client.LLMError as exc:
         raise ProfileError(f"Prompt B 调用失败：{exc}") from exc
     assert isinstance(output, ProfileLLMOutput)  # schema 已传，chat_json 保证类型
@@ -410,7 +411,8 @@ def call_profile_llm(data: Mapping[str, Any]) -> ProfileLLMOutput:
     logger.warning("Prompt B 返回标签 %d 个（< %d），重试 1 次", len(output.tags), TAG_MIN)
     for _ in range(TAG_RETRY):
         try:
-            retry = llm_client.chat_json(prompt, ProfileLLMOutput, prompt_name="profile")
+            retry = llm_client.chat_json(prompt, ProfileLLMOutput, prompt_name="profile",
+                          purpose="profile_tagging")
         except llm_client.LLMError as exc:  # 重试失败沿用首次结果，不升级成任务失败
             logger.warning("Prompt B 标签重试失败，沿用首次结果：%s", exc)
             break
