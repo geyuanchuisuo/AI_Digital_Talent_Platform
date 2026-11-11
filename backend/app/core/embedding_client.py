@@ -107,7 +107,15 @@ def _record_alive(alive: bool) -> None:
 
 
 class EmbeddingClient:
-    """可注入 base_url / client 的 embedding 客户端（便于假 server 与单测）。"""
+    """可注入 base_url / client 的 embedding 客户端（便于假 server 与单测）。
+
+    双模式（PRD D22/G05 本地推理交付项，2026-11-11 用户确认双模式架构）：
+    - API 模式（默认）：`EMBEDDING_MODE=api`（或缺省）——OpenAI 兼容 /embeddings
+      HTTP 调用（百炼 text-embedding-v3 等）；
+    - 本地模式：`EMBEDDING_MODE=local`——进程内 sentence_transformers 加载客户本地
+      模型目录（如 BAAI/bge-large-zh-v1.5，1024 维与 Milvus collection 冻结维度
+      一致，无需重建）；同样走查询缓存与维度校验，/health 探活同口径。
+    """
 
     def __init__(
         self,
@@ -119,12 +127,76 @@ class EmbeddingClient:
         dim: int | None = None,
         client: Any | None = None,
     ) -> None:
+        self.mode = (settings.embedding_mode or "api").strip().lower()
         self.base_url = base_url or settings.effective_embedding_base_url
         self.api_key = api_key or settings.effective_embedding_api_key
         self.model = model or settings.embedding_model
         self.timeout = timeout if timeout is not None else settings.embedding_timeout
         self.dim = dim if dim is not None else settings.embedding_dim
         self._client = client
+        self._local_model: Any | None = None
+        self._local_lock = threading.Lock()
+
+    # ---- 本地模式（sentence_transformers，可选依赖） ----
+
+    def _ensure_local_model(self) -> Any:
+        if self._local_model is not None:
+            return self._local_model
+        with self._local_lock:
+            if self._local_model is not None:
+                return self._local_model
+            path = settings.embedding_local_model_path
+            if not path:
+                raise EmbeddingError(
+                    "EMBEDDING_MODE=local 但未配置 EMBEDDING_LOCAL_MODEL_PATH（本地模型目录）"
+                )
+            try:
+                from sentence_transformers import SentenceTransformer  # noqa: PLC0415 可选依赖
+            except ImportError as exc:
+                raise EmbeddingError(
+                    "本地 embedding 模式需要 sentence-transformers："
+                    "backend/.venv/Scripts/pip install sentence-transformers"
+                ) from exc
+            try:
+                self._local_model = SentenceTransformer(
+                    path, device=settings.embedding_local_device or "cpu"
+                )
+            except Exception as exc:  # noqa: BLE001 模型加载失败如实报错
+                raise EmbeddingError(
+                    f"本地 embedding 模型加载失败（{path}）：{type(exc).__name__}: {str(exc)[:200]}"
+                ) from exc
+            logger.info("本地 embedding 模型已加载：%s", path)
+        return self._local_model
+
+    def _local_request(self, batch: list[str]) -> list[list[float]]:
+        """本地模式单批推理（无网络调用；探活同样刷新——真实推理即真实依赖可用）。"""
+        try:
+            model = self._ensure_local_model()
+            with self._local_lock:  # SentenceTransformer.encode 非线程安全，进程内串行
+                vectors = model.encode(
+                    batch, batch_size=len(batch), normalize_embeddings=True,
+                    show_progress_bar=False,
+                )
+            vectors = [list(map(float, v)) for v in vectors]
+        except EmbeddingError:
+            _record_alive(False)
+            raise
+        except Exception as exc:  # noqa: BLE001 推理异常统一转 EmbeddingError
+            _record_alive(False)
+            raise EmbeddingError(f"本地 embedding 推理失败：{type(exc).__name__}: {str(exc)[:200]}") from exc
+        if len(vectors) != len(batch):
+            _record_alive(False)
+            raise EmbeddingError(f"Embedding 返回条数不匹配：请求 {len(batch)}，返回 {len(vectors)}")
+        for vector in vectors:
+            if len(vector) != self.dim:
+                _record_alive(False)
+                raise EmbeddingDimensionError(
+                    f"Embedding 维度不符：本地模型 {settings.embedding_local_model_path} "
+                    f"返回 {len(vector)}，EMBEDDING_DIM={self.dim}；"
+                    "请校正配置或重建 Milvus collection"
+                )
+        _record_alive(True)
+        return vectors
 
     @property
     def client(self) -> Any:
@@ -139,6 +211,8 @@ class EmbeddingClient:
 
     def _request(self, batch: list[str]) -> list[list[float]]:
         """单批真实调用（≤ EMBEDDING_BATCH_SIZE）；成功/失败都刷新被动探活。"""
+        if self.mode == "local":
+            return self._local_request(batch)
         try:
             resp = self.client.embeddings.create(model=self.model, input=batch)
             vectors = [list(item.embedding) for item in resp.data]

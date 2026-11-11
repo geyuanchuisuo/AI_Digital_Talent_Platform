@@ -34,9 +34,27 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-v3"
     embedding_query_cache_ttl: int = 300
     embedding_timeout: float = 10.0
+    # Embedding 双模式（PRD D22/G05 本地推理交付项）：api=OpenAI 兼容 HTTP（默认）；
+    # local=进程内 sentence_transformers 加载客户本地模型目录（bge-large-zh-v1.5 为
+    # 1024 维，与 Milvus collection 冻结维度一致）。local 模式需安装 sentence-transformers。
+    embedding_mode: str = "api"
+    embedding_local_model_path: str = ""    # local 模式：模型目录（客户本地，不进 Git）
+    embedding_local_device: str = ""        # local 模式：cpu/cuda（空=cpu）
     vector_sync_timeout: float = 5.0  # H-14（运行配置 v1.4）：原 1.5s，冷连接 embedding 实测 ~1.7s 会误判超时
     prompt_version: str = "v1.0"
     embedding_dim: int = 1024
+
+    # ---- 重排（PRD D22，D 维度 core/rerank_client；双模式见 .env.example）----
+    # off（默认）= 不重排，召回序原样返回（行为与未引入前一致）；api = 百炼 gte-rerank
+    # 等 HTTP 端点；local = 进程内 sentence_transformers CrossEncoder（客户本地模型目录）。
+    # 缺配置/初始化失败明确报错，不静默假装重排过。
+    rerank_mode: str = "off"
+    rerank_base_url: str | None = None      # api 模式；空回退 Embedding 配置（同供应商体系）
+    rerank_api_key: str | None = None       # api 模式；空回退 Embedding 配置
+    rerank_model: str = "gte-rerank"        # api 模式模型名
+    rerank_timeout: float = 10.0            # api 模式单次超时（同步检索链，不重试）
+    rerank_local_model_path: str = ""       # local 模式：bge-reranker 模型目录（客户本地）
+    rerank_local_device: str = ""           # local 模式：cpu/cuda/auto（空=auto）
 
     # ---- MySQL ----
     mysql_host: str = "localhost"
