@@ -30,6 +30,7 @@ from app.modules.inventory.models import (
     InventoryDevelopmentPlan,
     InventoryDispute,
     InventoryEvent,
+    InventoryGridConfig,
     InventoryReview,
     InventoryTalentPool,
 )
@@ -81,4 +82,5 @@ ALL_MODELS: tuple[type, ...] = (
     InventoryDispute,
     InventoryDevelopmentPlan,
     InventoryEvent,
+    InventoryGridConfig,
 )

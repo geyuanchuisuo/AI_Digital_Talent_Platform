@@ -21,19 +21,34 @@ GRID_LABELS = {
 }
 
 
-def _tier(score: int) -> str:
-    if score >= 4:
+def tier_from_bands(score: int, bands: dict[str, int]) -> str:
+    """按经批准的阈值把 1–5 分映射为 hi/mid/lo 档。"""
+    hi = bands.get("hi_min")
+    mid = bands.get("mid_min")
+    if hi is None or mid is None:
+        raise BizError(400, "九宫格标准配置缺少 hi_min/mid_min 阈值")
+    if not (1 <= score <= 5):
+        raise BizError(400, "绩效与潜力评分必须在 1–5 之间")
+    if score >= hi:
         return "hi"
-    if score == 3:
+    if score >= mid:
         return "mid"
     return "lo"
 
 
-def grid_cell(performance: int, potential: int) -> str:
-    """绩效 × 潜力 → 九宫格 cell id；输入需 1–5。"""
+def grid_cell(performance: int, potential: int, bands: dict[str, dict[str, int]] | None = None) -> str:
+    """绩效 × 潜力 → 九宫格 cell id；输入需 1–5。
+
+    `bands` 为经 HR 批准的九宫格标准配置阈值 `{"performance": {...}, "potential": {...}}`；
+    缺配置（None）时不套示意数值，正式评级因缺标准而被拒绝。
+    """
     if not (1 <= performance <= 5 and 1 <= potential <= 5):
         raise BizError(400, "绩效与潜力评分必须在 1–5 之间")
-    return f"{_tier(performance)}-{_tier(potential)}"
+    if bands is None:
+        raise BizError(400, "缺少经 HR 批准的九宫格标准配置，不能产出正式评级")
+    perf = tier_from_bands(performance, bands["performance"])
+    pot = tier_from_bands(potential, bands["potential"])
+    return f"{perf}-{pot}"
 
 
 def grid_label(cell: str) -> str:

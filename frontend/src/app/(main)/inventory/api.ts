@@ -82,3 +82,35 @@ export function upsertIdp(
     data: payload,
   });
 }
+
+/** 九宫格标准配置版本（F05a）：阈值须经 HR 批准后方可产出正式评级 */
+export interface GridConfig {
+  id: number;
+  version: number;
+  status: string;
+  job_family: string | null;
+  performance_bands: { hi_min: number; mid_min: number };
+  potential_bands: { hi_min: number; mid_min: number };
+  labels: Record<string, unknown>;
+  note: string | null;
+  approved_by: number | null;
+  approved_at: string | null;
+}
+
+export function fetchGridConfigs() {
+  return get<GridConfig[]>('/inventory/grid-configs');
+}
+
+export function createGridConfig(payload: {
+  job_family?: string | null;
+  performance_bands: { hi_min: number; mid_min: number };
+  potential_bands: { hi_min: number; mid_min: number };
+  labels?: Record<string, unknown> | null;
+  note?: string | null;
+}) {
+  return post<{ id: number; version: number; status: string }>('/inventory/grid-configs', payload);
+}
+
+export function approveGridConfig(id: number) {
+  return post<{ id: number; version: number; status: string }>(`/inventory/grid-configs/${id}/approve`);
+}

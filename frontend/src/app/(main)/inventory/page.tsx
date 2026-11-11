@@ -1,6 +1,7 @@
 /**
  * F10 人才盘点页：员工查看本人复核与九宫格结论、提交异议；
  * 管理员创建/提交/确认复核、维护人才池、查看部门匿名汇总并发起发展计划。
+ * 九宫格阈值来自经 HR 批准的“标准配置”版本，未批准不产出正式评级；
  * 九宫格与内部评分仅管理员可见，员工视角由后端裁剪。
  */
 
@@ -30,10 +31,13 @@ import { getUser, isManagement } from '@/lib/auth';
 import { getErrorMessage } from '@/lib/http';
 
 import {
+  approveGridConfig,
   confirmReview,
   createDispute,
+  createGridConfig,
   createReview,
   downloadSummary,
+  fetchGridConfigs,
   fetchPools,
   fetchReviews,
   fetchSummary,
@@ -43,6 +47,7 @@ import {
   updateReview,
   upsertIdp,
 } from './api';
+import type { GridConfig } from './api';
 import type { InventoryReview, InventorySummary, TalentPoolItem } from './types';
 
 const STATUS_LABEL: Record<string, string> = {
@@ -210,7 +215,7 @@ function ReviewAdmin() {
       title: '九宫格',
       dataIndex: 'grid_cell',
       width: 110,
-      render: (v) => (v ? <Tag color="blue">{v}</Tag> : '—'),
+      render: (v) => (v ? <Tag color="blue">{v}</Tag> : <Tag>待评估</Tag>),
     },
     { title: '状态', dataIndex: 'status', width: 100, render: statusTag },
     {
@@ -289,7 +294,8 @@ function ReviewAdmin() {
       }
     >
       <Typography.Paragraph type="secondary">
-        九宫格按绩效与 HR 潜力计算（≥4 高、=3 中、&lt;3 低）；缺绩效值不入格。提交后由 HR 确认才生效。
+        九宫格按经 HR 批准的「九宫格标准配置」版本计算阈值（见“标准配置”页），未批准前不产出正式评级；
+        缺绩效值不入格（待评估）。提交后由 HR 确认才生效并落到当时的配置版本，历史不重算。
       </Typography.Paragraph>
       <Table rowKey="id" loading={loading} columns={columns} dataSource={rows} pagination={false} />
       <Modal title="新建盘点复核" open={createOpen} width={620} onOk={() => void submitCreate()} onCancel={() => setCreateOpen(false)}>
@@ -539,6 +545,138 @@ function SummaryPanel() {
   );
 }
 
+function GridConfigPanel() {
+  const [rows, setRows] = useState<GridConfig[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [form] = Form.useForm();
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setRows(await fetchGridConfigs());
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const submit = async () => {
+    const values = await form.validateFields();
+    try {
+      await createGridConfig({
+        job_family: values.job_family || null,
+        performance_bands: { hi_min: values.perf_hi, mid_min: values.perf_mid },
+        potential_bands: { hi_min: values.pot_hi, mid_min: values.pot_mid },
+        note: values.note || null,
+      });
+      message.success('配置草稿已创建，批准后才生效');
+      setOpen(false);
+      form.resetFields();
+      void load();
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    }
+  };
+
+  const columns: ColumnsType<GridConfig> = [
+    { title: '版本', dataIndex: 'version', width: 70 },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      width: 90,
+      render: (v) => (v === 'approved' ? <Tag color="success">已批准</Tag> : <Tag>草稿</Tag>),
+    },
+    { title: '序列', dataIndex: 'job_family', render: (v) => v || '通用' },
+    {
+      title: '绩效阈值',
+      dataIndex: 'performance_bands',
+      render: (v) => `高≥${v.hi_min}　中≥${v.mid_min}`,
+    },
+    {
+      title: '潜力阈值',
+      dataIndex: 'potential_bands',
+      render: (v) => `高≥${v.hi_min}　中≥${v.mid_min}`,
+    },
+    { title: '批准时间', dataIndex: 'approved_at', render: (v) => v ?? '—' },
+    { title: '备注', dataIndex: 'note', render: (v) => v || '—' },
+    {
+      title: '操作',
+      key: 'action',
+      width: 90,
+      render: (_, row) =>
+        row.status === 'draft' ? (
+          <a
+            onClick={async () => {
+              try {
+                await approveGridConfig(row.id);
+                message.success('已批准，成为当前生效标准');
+                void load();
+              } catch (error) {
+                message.error(getErrorMessage(error));
+              }
+            }}
+          >
+            批准
+          </a>
+        ) : (
+          '—'
+        ),
+    },
+  ];
+
+  return (
+    <Card
+      title="九宫格标准配置"
+      extra={
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>
+          新建草稿
+        </Button>
+      }
+    >
+      <Typography.Paragraph type="secondary">
+        阈值不硬编码：需 HR 新建并批准版本后方可产出正式评级；批准后即成为当前生效标准，
+        历史复核保留其确认时依据的版本，不随新标准重算。
+      </Typography.Paragraph>
+      <Table rowKey="id" loading={loading} columns={columns} dataSource={rows} pagination={false} />
+      <Modal title="新建九宫格标准配置" open={open} width={620} onOk={() => void submit()} onCancel={() => setOpen(false)}>
+        <Form form={form} layout="vertical">
+          <Form.Item name="job_family" label="岗位序列（留空为通用）">
+            <Input placeholder="如：管理 / 专业" />
+          </Form.Item>
+          <Space size={8} style={{ display: 'flex' }}>
+            <Form.Item name="perf_hi" label="绩效高阈值（hi_min）" style={{ flex: 1 }} rules={[{ required: true }]}>
+              <InputNumber min={2} max={5} style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item name="perf_mid" label="绩效中阈值（mid_min）" style={{ flex: 1 }} rules={[{ required: true }]}>
+              <InputNumber min={1} max={4} style={{ width: '100%' }} />
+            </Form.Item>
+          </Space>
+          <Space size={8} style={{ display: 'flex' }}>
+            <Form.Item name="pot_hi" label="潜力高阈值（hi_min）" style={{ flex: 1 }} rules={[{ required: true }]}>
+              <InputNumber min={2} max={5} style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item name="pot_mid" label="潜力中阈值（mid_min）" style={{ flex: 1 }} rules={[{ required: true }]}>
+              <InputNumber min={1} max={4} style={{ width: '100%' }} />
+            </Form.Item>
+          </Space>
+          <Typography.Paragraph type="secondary">
+            需满足 1 ≤ 中阈值 &lt; 高阈值 ≤ 5；评分 ≥ 高为“高”，≥ 中为“中”，否则为“低”。
+          </Typography.Paragraph>
+          <Form.Item name="note" label="备注">
+            <Input.TextArea rows={2} />
+          </Form.Item>
+        </Form>
+      </Modal>
+    </Card>
+  );
+}
+
 export default function InventoryPage() {
   const [isAdmin, setIsAdmin] = useState(false);
 
@@ -555,6 +693,7 @@ export default function InventoryPage() {
             ? [
                 { key: 'reviews', label: '盘点复核', children: <ReviewAdmin /> },
                 { key: 'pool', label: '人才池', children: <PoolAdmin /> },
+                { key: 'config', label: '标准配置', children: <GridConfigPanel /> },
                 { key: 'summary', label: '部门汇总', children: <SummaryPanel /> },
               ]
             : []),

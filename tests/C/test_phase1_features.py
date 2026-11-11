@@ -22,6 +22,7 @@ class InventoryApiTest(unittest.TestCase):
         self.h = Harness()
         self.admin = self.h.create_user("a", role="admin")
         self.emp = self.h.create_user("e", role="employee")
+        self._seed_approved_config()
 
     def tearDown(self) -> None:
         self.h.close()
@@ -29,7 +30,29 @@ class InventoryApiTest(unittest.TestCase):
     def _post(self, path, payload, user):
         return self.h.client.post(path, json=payload, headers=Harness.headers(user))
 
+    def _seed_approved_config(self, *, hi_min=4, mid_min=3):
+        """新建并批准九宫格标准配置；返回配置 id（未批准则正式评级被拒）。"""
+        created = self._post(
+            "/api/inventory/grid-configs",
+            {
+                "performance_bands": {"hi_min": hi_min, "mid_min": mid_min},
+                "potential_bands": {"hi_min": hi_min, "mid_min": mid_min},
+            },
+            self.admin,
+        )
+        self.assertEqual(created.status_code, 200)
+        cid = created.json()["data"]["id"]
+        approved = self.h.client.post(
+            f"/api/inventory/grid-configs/{cid}/approve", headers=Harness.headers(self.admin))
+        self.assertEqual(approved.status_code, 200)
+        return cid
+
+    def _get_review(self, rid):
+        return self.h.client.get(
+            f"/api/inventory/reviews/{rid}", headers=Harness.headers(self.admin)).json()["data"]
+
     def test_review_lifecycle_and_visibility(self):
+
         r = self._post(
             "/api/inventory/reviews",
             {"employee_user_id": self.emp.id, "cycle_name": "2026H1",
@@ -95,6 +118,54 @@ class InventoryApiTest(unittest.TestCase):
             f"/api/inventory/reviews/{rid}", json={"performance_score": 1},
             headers=Harness.headers(self.admin))
         self.assertEqual(patch.status_code, 400)
+
+    def test_confirm_records_grid_config_version(self):
+        rid = self._create_review(performance_score=5, potential_manager_score=4, potential_hr_score=3)
+        self.h.client.post(f"/api/inventory/reviews/{rid}/submit", headers=Harness.headers(self.admin))
+        c = self.h.client.post(f"/api/inventory/reviews/{rid}/confirm", headers=Harness.headers(self.admin))
+        self.assertEqual(c.status_code, 200)
+        data = self._get_review(rid)
+        self.assertEqual(data["grid_cell"], "hi-mid")
+        self.assertEqual(data["grid_config_version"], 1)  # 依据当前批准的 v1 标准
+
+    def test_confirm_blocked_without_approved_config(self):
+        # 把已批准配置退回草稿 → 无生效标准 → 正式确认被拒
+        db = self.h.session()
+        try:
+            from app.modules.inventory.models import InventoryGridConfig
+            from sqlalchemy import select as _select
+            cfg = db.scalars(_select(InventoryGridConfig)).one()
+            cfg.status = "draft"
+            db.commit()
+        finally:
+            db.close()
+        rid = self._create_review(performance_score=5, potential_manager_score=4, potential_hr_score=4)
+        self.h.client.post(f"/api/inventory/reviews/{rid}/submit", headers=Harness.headers(self.admin))
+        c = self.h.client.post(f"/api/inventory/reviews/{rid}/confirm", headers=Harness.headers(self.admin))
+        self.assertEqual(c.status_code, 400)
+        self.assertIn("配置", c.json()["message"])
+        # 草稿阶段暂不入格（无生效标准）
+        self.assertIsNone(self._get_review(rid)["grid_cell"])
+        # 重新批准后确认可产出正式评级
+        cfg_id = self._seed_approved_config()
+        c2 = self.h.client.post(f"/api/inventory/reviews/{rid}/confirm", headers=Harness.headers(self.admin))
+        self.assertEqual(c2.status_code, 200)
+        self.assertEqual(self._get_review(rid)["grid_cell"], "hi-hi")
+
+    def test_missing_performance_stays_pending(self):
+        # 缺绩效：草稿/提交都不入格，确认被拒（缺绩效不得入格）
+        rid = self._create_review(potential_manager_score=4, potential_hr_score=4)
+        self.assertIsNone(self._get_review(rid)["grid_cell"])
+        s = self.h.client.post(f"/api/inventory/reviews/{rid}/submit", headers=Harness.headers(self.admin))
+        self.assertEqual(s.status_code, 400)
+
+    def test_grid_config_requires_valid_bands(self):
+        bad = self._post(
+            "/api/inventory/grid-configs",
+            {"performance_bands": {"hi_min": 3, "mid_min": 4}, "potential_bands": {"hi_min": 4, "mid_min": 3}},
+            self.admin,
+        )
+        self.assertEqual(bad.status_code, 400)
 
     def test_dispute_idp_and_summary(self):
         rid = self._post(

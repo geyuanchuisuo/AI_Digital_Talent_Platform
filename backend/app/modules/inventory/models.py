@@ -37,11 +37,40 @@ class InventoryReview(PKMixin, CrossDbUpdatedAtMixin, Base):
     potential_manager_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     potential_hr_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     grid_cell: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # 正式评级所依据的九宫格标准配置版本；无经批准配置时保持 NULL（待评估）
+    grid_config_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reviewer_manager_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reviewer_hr_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     payload_json: Mapped[dict] = mapped_column(JSONDict, nullable=False, default=dict)
+
+
+class InventoryGridConfig(PKMixin, CrossDbUpdatedAtMixin, Base):
+    """九宫格标准配置版本（F05a）。
+
+    五档阈值、象限与标签须经 HR 批准（status=approved）后方可产出正式盘点评级；
+    未批准时不得套示意数值，正式确认因缺配置而被拒绝。每次批准生成新版本，
+    复核记录确认时引用当时的 `version`，历史评级不随后续配置改动而重算。
+    """
+
+    __tablename__ = "inventory_grid_configs"
+    __table_args__ = MYSQL_TABLE_OPTIONS
+
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default=text("1"))
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="draft", server_default=str_default("draft")
+    )
+    job_family: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # {"hi_min": int, "mid_min": int}，1–5 档；由 HR 批准的阈值，不在代码里硬编码
+    performance_bands_json: Mapped[dict] = mapped_column(JSONDict, nullable=False, default=dict)
+    potential_bands_json: Mapped[dict] = mapped_column(JSONDict, nullable=False, default=dict)
+    labels_json: Mapped[dict] = mapped_column(JSONDict, nullable=False, default=dict)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    approved_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class InventoryTalentPool(PKMixin, CrossDbUpdatedAtMixin, Base):

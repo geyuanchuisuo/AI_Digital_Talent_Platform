@@ -59,3 +59,14 @@ class DisputeRespond(BaseModel):
 class IdpUpsert(BaseModel):
     content_json: dict[str, Any]
     status: Literal["draft", "confirmed"] = "draft"
+
+
+class GridConfigCreate(BaseModel):
+    """九宫格标准配置草稿：阈值须显式给出（1–5），不在代码里套示意数值。"""
+
+    job_family: str | None = Field(default=None, max_length=100)
+    performance_bands: dict[str, int]
+    potential_bands: dict[str, int]
+    labels: dict[str, Any] | None = None
+    note: str | None = None
+

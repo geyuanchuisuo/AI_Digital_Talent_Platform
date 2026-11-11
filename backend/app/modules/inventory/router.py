@@ -56,6 +56,25 @@ def department_summary(user: CurrentUser, db: Session = Depends(get_db)):
     return ok(service.department_summary(db, user))
 
 
+@router.post("/grid-configs", summary="新建九宫格标准配置草稿（HR/管理）")
+def create_grid_config(payload: schemas.GridConfigCreate, user: CurrentUser, db: Session = Depends(get_db)):
+    cfg = service.create_grid_config(db, payload, user)
+    db.commit()
+    return ok({"id": cfg.id, "version": cfg.version, "status": cfg.status})
+
+
+@router.post("/grid-configs/{config_id}/approve", summary="批准九宫格标准配置版本（HR）")
+def approve_grid_config(config_id: int, user: CurrentUser, db: Session = Depends(get_db)):
+    cfg = service.approve_grid_config(db, config_id, user)
+    db.commit()
+    return ok({"id": cfg.id, "version": cfg.version, "status": cfg.status})
+
+
+@router.get("/grid-configs", summary="九宫格标准配置版本列表（HR/管理）")
+def list_grid_configs(user: CurrentUser, db: Session = Depends(get_db)):
+    return ok(service.list_grid_configs(db, user))
+
+
 @router.get("/summary/export", summary="导出匿名汇总 CSV（管理员，写审计）")
 def export_summary(
     user: CurrentUser,
