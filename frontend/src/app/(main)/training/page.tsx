@@ -38,8 +38,10 @@ import { getErrorMessage } from '@/lib/http';
 
 import {
   assignPlan,
+  assignPrejobPlan,
   createCourse,
   createPlan,
+  createPrejobPlan,
   createSession,
   draftPlan,
   extendPlanItem,
@@ -49,11 +51,13 @@ import {
   fetchGrowth,
   fetchMyPlans,
   fetchPlans,
+  fetchPrejobPlans,
   fetchSessions,
   getPlan,
   markAttendance,
   refreshFeedbackThemes,
   revisePlan,
+  revisePrejobPlan,
   scanTrainingReminders,
   submitFeedback,
   updateCourse,
@@ -64,6 +68,7 @@ import {
 } from './api';
 import type {
   GrowthEvent,
+  PrejobPlan,
   TrainingAttendance,
   TrainingCourse,
   TrainingFeedbackSummary,
@@ -1221,6 +1226,193 @@ function PlanAdmin() {
   );
 }
 
+function PrejobPlans({ isAdmin }: { isAdmin: boolean }) {
+  const [rows, setRows] = useState<PrejobPlan[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [courseOptions, setCourseOptions] = useState<{ value: number; label: string }[]>([]);
+  const [form] = Form.useForm();
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setRows(await fetchPrejobPlans());
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    fetchCourses({ status: 'active', page: 1, page_size: 200 })
+      .then((data) => setCourseOptions(data.items.map((c) => ({ value: c.id, label: `#${c.id} ${c.title}` }))))
+      .catch((error) => message.error(getErrorMessage(error)));
+  }, [isAdmin]);
+
+  const submit = async () => {
+    const values = await form.validateFields();
+    const payload = {
+      employee_user_id: values.employee_user_id,
+      target_job_title: values.target_job_title || null,
+      goal: values.goal || null,
+      phases: (values.phases ?? []).map((phase: { name: string; goal?: string; mentor_user_id?: number; course_ids?: number[] }) => ({
+        name: phase.name,
+        goal: phase.goal || null,
+        mentor_user_id: phase.mentor_user_id || null,
+        courses: (phase.course_ids ?? []).map((id: number) => ({ course_id: id })),
+      })),
+    };
+    try {
+      await createPrejobPlan(payload);
+      message.success('岗前计划草稿已创建');
+      setOpen(false);
+      form.resetFields();
+      void load();
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    }
+  };
+
+  const columns: ColumnsType<PrejobPlan> = [
+    { title: 'ID', dataIndex: 'id', width: 60 },
+    ...(isAdmin ? [{ title: '员工', dataIndex: 'employee_user_id', width: 70, render: (v: number) => `#${v}` }] : []),
+    { title: '目标岗位', dataIndex: 'target_job_title', render: (v: string | null) => v || '—' },
+    {
+      title: '阶段',
+      dataIndex: 'phases',
+      render: (phases: PrejobPlan['phases']) =>
+        phases.map((p) => (
+          <div key={p.seq}>
+            <Typography.Text strong>{`${p.seq + 1}. ${p.name}`}</Typography.Text>
+            {p.mentor_user_id ? <Tag style={{ marginLeft: 6 }}>导师 #{p.mentor_user_id}</Tag> : null}
+            <Typography.Text type="secondary">
+              {` 课程：${p.courses.map((c) => c.course?.title ?? `#${c.course_id}`).join('、') || '无'}`}
+            </Typography.Text>
+          </div>
+        )),
+    },
+    { title: '版本', dataIndex: 'version', width: 60, render: (v: number) => `v${v}` },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      width: 90,
+      render: (v: string) => (v === 'assigned' ? <Tag color="success">已分配</Tag> : <Tag>草稿</Tag>),
+    },
+    ...(isAdmin
+      ? [
+          {
+            title: '操作',
+            key: 'action',
+            width: 130,
+            render: (_: unknown, row: PrejobPlan) => (
+              <Space size={8}>
+                {row.status === 'draft' ? (
+                  <a
+                    onClick={async () => {
+                      try {
+                        await assignPrejobPlan(row.id);
+                        message.success('已分配');
+                        void load();
+                      } catch (error) {
+                        message.error(getErrorMessage(error));
+                      }
+                    }}
+                  >
+                    分配
+                  </a>
+                ) : (
+                  <a
+                    onClick={async () => {
+                      try {
+                        await revisePrejobPlan(row.id);
+                        message.success('已生成新版本草稿');
+                        void load();
+                      } catch (error) {
+                        message.error(getErrorMessage(error));
+                      }
+                    }}
+                  >
+                    修订
+                  </a>
+                )}
+              </Space>
+            ),
+          },
+        ]
+      : []),
+  ];
+
+  return (
+    <Card
+      title="岗前培养计划"
+      extra={
+        isAdmin ? (
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>
+            新建岗前计划
+          </Button>
+        ) : null
+      }
+    >
+      <Typography.Paragraph type="secondary">
+        面向新入职/待上岗人员的分阶段培养计划（目标、阶段、课程、导师），与在职培训分配分离，不自动报名；修订生成新版本，历史保留。
+      </Typography.Paragraph>
+      <Table rowKey="id" size="small" loading={loading} columns={columns} dataSource={rows} pagination={false} />
+      <Modal title="新建岗前培养计划" open={open} width={720} onOk={() => void submit()} onCancel={() => setOpen(false)}>
+        <Form
+          form={form}
+          layout="vertical"
+          initialValues={{ phases: [{ name: '融入', course_ids: [] }] }}
+        >
+          <Space size={8} style={{ display: 'flex' }}>
+            <Form.Item name="employee_user_id" label="待上岗人员 user_id" style={{ flex: 1 }} rules={[{ required: true }]}>
+              <InputNumber min={1} style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item name="target_job_title" label="目标岗位" style={{ flex: 1 }}>
+              <Input placeholder="如：工程师" />
+            </Form.Item>
+          </Space>
+          <Form.Item name="goal" label="培养目标">
+            <Input.TextArea rows={2} />
+          </Form.Item>
+          <Form.List name="phases">
+            {(fields, { add, remove }) => (
+              <>
+                {fields.map((field) => (
+                  <Card key={field.key} size="small" style={{ marginBottom: 8 }} extra={<a onClick={() => remove(field.name)}>删除</a>}>
+                    <Space size={8} style={{ display: 'flex' }}>
+                      <Form.Item name={[field.name, 'name']} label="阶段名称" style={{ flex: 1 }} rules={[{ required: true }]}>
+                        <Input placeholder="如：融入 / 上岗" />
+                      </Form.Item>
+                      <Form.Item name={[field.name, 'mentor_user_id']} label="导师 user_id" style={{ flex: 1 }}>
+                        <InputNumber min={1} style={{ width: '100%' }} />
+                      </Form.Item>
+                    </Space>
+                    <Form.Item name={[field.name, 'goal']} label="阶段目标">
+                      <Input />
+                    </Form.Item>
+                    <Form.Item name={[field.name, 'course_ids']} label="课程">
+                      <Select mode="multiple" allowClear options={courseOptions} placeholder="选择课程" />
+                    </Form.Item>
+                  </Card>
+                ))}
+                <Button block icon={<PlusOutlined />} onClick={() => add({ name: '', course_ids: [] })}>
+                  新增阶段
+                </Button>
+              </>
+            )}
+          </Form.List>
+        </Form>
+      </Modal>
+    </Card>
+  );
+}
+
 export default function TrainingPage() {
   const [isAdmin, setIsAdmin] = useState(false);
 
@@ -1236,8 +1428,12 @@ export default function TrainingPage() {
             ? [
                 { key: 'courses', label: '课程目录', children: <CourseAdmin /> },
                 { key: 'plans', label: '培训计划', children: <PlanAdmin /> },
+                { key: 'prejob', label: '岗前计划', children: <PrejobPlans isAdmin /> },
               ]
-            : [{ key: 'mine', label: '我的培训', children: <MyTraining /> }]
+            : [
+                { key: 'mine', label: '我的培训', children: <MyTraining /> },
+                { key: 'prejob', label: '我的岗前计划', children: <PrejobPlans isAdmin={false} /> },
+              ]
         }
       />
     </Card>

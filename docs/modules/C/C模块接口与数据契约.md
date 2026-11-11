@@ -22,7 +22,8 @@
 面试：`interview_rounds`、`interview_feedback`、`interview_round_events`。
 AI 面试间：`ai_interview_sessions`、`ai_interview_questions`、`ai_interview_events`。
 培训：`training_courses`、`training_sessions`、`training_attendances`、`training_feedbacks`、`training_feedback_themes`、`training_plans`、`training_plan_items`、`training_plan_versions`、`training_learning_records`、`training_growth_events`、`training_enrollments`、`training_learning_evidence`。
-盘点：`inventory_reviews`、`inventory_talent_pools`、`inventory_disputes`、`inventory_development_plans`、`inventory_events`。
+岗前培养：`prejob_plans`、`prejob_phases`、`prejob_plan_versions`（F05/C12，面向新入职/待上岗人员的分阶段计划，与在职培训计划分离，迁移 C_0009）。
+盘点：`inventory_reviews`、`inventory_talent_pools`、`inventory_disputes`、`inventory_development_plans`、`inventory_events`、`inventory_grid_configs`（F05a/C09，九宫格标准阈值经 HR 批准的版本表）。
 
 关键字段与语义：
 
@@ -103,6 +104,7 @@ AI 面试间：`ai_interview_sessions`、`ai_interview_questions`、`ai_intervie
 - `GET /courses/{id}/feedback/summary`、`POST /courses/{id}/feedback-themes/refresh`、`PUT /courses/{id}/feedback-note`（管理员：匿名汇总、主题归纳、统一改进说明）
 - `POST /enrollments`、`GET /enrollments`、`POST /enrollments/{id}/decide`、`POST /enrollments/{id}/confirm`（员工报名必修/选修；管理员审批/候补；有 `capacity` 时按 pending 占位、approved 占用计数，满额进入 waitlisted。名额释放后 `_promote_waitlist` 把最早候补转为 `awaiting_confirmation`（预留，非正式占位）并投递 `course.waitlist_promoted`，员工 24h 内经 `confirm` 确认→`pending` 走正常审批；未确认或审批超时由 `release-expired` 置 `expired` 并递补下一位。`awaiting_confirmation` 阶段不允许管理员直接 decide。预留口径：pending+approved+awaiting_confirmation ≤ capacity，防超发；候补通知≠正式占位，确认≠自动报名。）
 - `POST /enrollments/release-expired`（管理员/外部调度：把超时未决定的 pending 与超期未确认的 awaiting_confirmation 置为 `expired` 释放占位/预留，并按课程递补候补；有期次时投递 `course.waitlist_promoted`）
+- `POST /prejob-plans`、`GET /prejob-plans`、`GET /prejob-plans/{id}`、`PATCH /prejob-plans/{id}`、`POST /prejob-plans/{id}/assign`、`POST /prejob-plans/{id}/revise`（C12/F05 岗前培养计划：管理员为待上岗人员创建分阶段（目标、阶段、课程、导师）草稿，`assign` 生效并追加 `prejob_assigned` 成长事件，`revise` 生成新版本草稿保留历史。阶段课程须为目录内有效课程，失效/不存在即拒绝，不生成假课程；员工仅读本人计划；岗前计划不自动报名、不投递课程指派通知，与在职培训分配分离。）
 - `POST /learning-records/{id}/study-sessions`（员工本人领取服务端签名的学习会话凭证，含有效期）
 - `POST /learning-evidence`、`GET /learning-records/{id}/evidence`（员工提交学习证据：出勤/已通过测评/学习会话时长；分数与验证人由服务端计算，客户端字段 `score`/`verified_by` 被严格拒绝；列表本人或管理员可见）
 - `POST /learning-records/{id}/confirm-completion`（管理员依据服务端校验证据认定正式完成：无证据或证据未达完成阈值返回 400）

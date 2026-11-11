@@ -13,6 +13,8 @@ from app.core.response import ok, paginated
 from app.database import get_db
 from app.modules.training import service
 from app.modules.training.models import (
+    PrejobPhase,
+    PrejobPlan,
     TrainingAttendance,
     TrainingCourse,
     TrainingGrowthEvent,
@@ -35,6 +37,8 @@ from app.modules.training.schemas import (
     FeedbackSubmitRequest,
     PlanCreateRequest,
     PlanUpdateRequest,
+    PrejobPlanCreateRequest,
+    PrejobPlanUpdateRequest,
     ProgressUpdateRequest,
     ReminderScanRequest,
     SessionCreateRequest,
@@ -597,6 +601,94 @@ def revise_plan(
 ):
     plan = service.revise_plan(db, plan_id, admin=user)
     return ok(_plan_out(plan, service.plan_items(db, plan)))
+
+
+# ---------------------------------------------------------------- 岗前培养计划（F05，待上岗人员）
+
+
+def _prejob_out(plan: PrejobPlan, phases: list[PrejobPhase]) -> dict[str, Any]:
+    return {
+        "id": plan.id,
+        "employee_user_id": plan.employee_user_id,
+        "talent_profile_id": plan.talent_profile_id,
+        "target_job_title": plan.target_job_title,
+        "goal": plan.goal,
+        "status": plan.status,
+        "version": plan.version,
+        "phases": [
+            {
+                "seq": ph.seq,
+                "name": ph.name,
+                "goal": ph.goal,
+                "mentor_user_id": ph.mentor_user_id,
+                "status": ph.status,
+                "courses": list(ph.courses_json or []),
+            }
+            for ph in phases
+        ],
+        "created_at": plan.created_at,
+        "updated_at": plan.updated_at,
+    }
+
+
+@router.post("/prejob-plans", summary="创建岗前培养计划草稿（管理员）")
+def create_prejob_plan(
+    payload: PrejobPlanCreateRequest,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    plan = service.create_prejob_plan(db, payload, admin=user)
+    return ok(_prejob_out(plan, service.get_prejob_plan(db, plan.id, user=user)[1]))
+
+
+@router.get("/prejob-plans", summary="岗前培养计划列表（管理员全量 / 员工本人）")
+def list_prejob_plans(
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    rows = service.list_prejob_plans(db, user=user)
+    return ok([_prejob_out(plan, service._prejob_phase_rows(db, plan)) for plan in rows])
+
+
+@router.get("/prejob-plans/{plan_id}", summary="岗前培养计划详情")
+def get_prejob_plan(
+    plan_id: int,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    plan, phases = service.get_prejob_plan(db, plan_id, user=user)
+    return ok(_prejob_out(plan, phases))
+
+
+@router.patch("/prejob-plans/{plan_id}", summary="修改岗前计划草稿（管理员）")
+def update_prejob_plan(
+    plan_id: int,
+    payload: PrejobPlanUpdateRequest,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    plan = service.update_prejob_plan(db, plan_id, payload, admin=user)
+    return ok(_prejob_out(plan, service.get_prejob_plan(db, plan_id, user=user)[1]))
+
+
+@router.post("/prejob-plans/{plan_id}/assign", summary="确认分配岗前计划（管理员）")
+def assign_prejob_plan(
+    plan_id: int,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    plan = service.assign_prejob_plan(db, plan_id, admin=user)
+    return ok(_prejob_out(plan, service.get_prejob_plan(db, plan_id, user=user)[1]))
+
+
+@router.post("/prejob-plans/{plan_id}/revise", summary="已分配岗前计划生成新版本草稿")
+def revise_prejob_plan(
+    plan_id: int,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    plan = service.revise_prejob_plan(db, plan_id, admin=user)
+    return ok(_prejob_out(plan, service.get_prejob_plan(db, plan_id, user=user)[1]))
 
 
 # ---------------------------------------------------------------- 学习与成长

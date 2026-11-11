@@ -382,6 +382,91 @@ class TrainingEnrollmentTest(unittest.TestCase):
         self.assertEqual({row["id"]: row["status"] for row in rows}[eid], "expired")
 
 
+class PrejobPlanApiTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.h = Harness()
+        self.admin = self.h.create_user("pa", role="admin")
+        self.emp = self.h.create_user("pe", role="employee")
+        self.mentor = self.h.create_user("pm", role="manager")
+        self.other = self.h.create_user("po", role="employee")
+        self.course = self.h.client.post(
+            "/api/training/courses",
+            json={"title": "岗前安全", "description": "x", "material_url": "http://x"},
+            headers=Harness.headers(self.admin)).json()["data"]["id"]
+
+    def tearDown(self) -> None:
+        self.h.close()
+
+    def _payload(self):
+        return {
+            "employee_user_id": self.emp.id,
+            "target_job_title": "工程师",
+            "goal": "90 天胜任",
+            "phases": [
+                {"name": "融入", "goal": "文化与制度", "mentor_user_id": self.mentor.id,
+                 "courses": [{"course_id": self.course}]},
+                {"name": "上岗", "goal": "岗位技能", "mentor_user_id": self.mentor.id,
+                 "courses": [{"course_id": self.course, "note": "复训"}]},
+            ],
+        }
+
+    def _create(self):
+        r = self.h.client.post(
+            "/api/training/prejob-plans", json=self._payload(), headers=Harness.headers(self.admin))
+        self.assertEqual(r.status_code, 200, r.text)
+        return r.json()["data"]
+
+    def test_create_and_view(self):
+        plan = self._create()
+        self.assertEqual(plan["status"], "draft")
+        self.assertEqual(plan["version"], 1)
+        self.assertEqual(len(plan["phases"]), 2)
+        self.assertEqual(plan["phases"][0]["mentor_user_id"], self.mentor.id)
+        self.assertEqual(plan["phases"][0]["courses"][0]["course"]["course_id"], self.course)
+
+    def test_assign_then_revise_versions(self):
+        plan = self._create()
+        a = self.h.client.post(
+            f"/api/training/prejob-plans/{plan['id']}/assign", headers=Harness.headers(self.admin))
+        self.assertEqual(a.json()["data"]["status"], "assigned")
+        rev = self.h.client.post(
+            f"/api/training/prejob-plans/{plan['id']}/revise", headers=Harness.headers(self.admin))
+        self.assertEqual(rev.json()["data"]["version"], 2)
+        self.assertEqual(rev.json()["data"]["status"], "draft")
+        self.assertEqual(len(rev.json()["data"]["phases"]), 2)
+
+    def test_rejects_nonexistent_and_inactive_course(self):
+        bad = dict(self._payload())
+        bad["phases"][0]["courses"] = [{"course_id": 999999}]
+        r = self.h.client.post(
+            "/api/training/prejob-plans", json=bad, headers=Harness.headers(self.admin))
+        self.assertEqual(r.status_code, 400)
+        self.h.client.patch(
+            f"/api/training/courses/{self.course}", json={"status": "inactive"},
+            headers=Harness.headers(self.admin))
+        r2 = self.h.client.post(
+            "/api/training/prejob-plans", json=self._payload(), headers=Harness.headers(self.admin))
+        self.assertEqual(r2.status_code, 400)
+
+    def test_employee_only_sees_own(self):
+        plan = self._create()
+        denied = self.h.client.get(
+            f"/api/training/prejob-plans/{plan['id']}", headers=Harness.headers(self.other))
+        self.assertEqual(denied.status_code, 403)
+        mine = self.h.client.get(
+            f"/api/training/prejob-plans/{plan['id']}", headers=Harness.headers(self.emp))
+        self.assertEqual(mine.status_code, 200)
+        lst = self.h.client.get(
+            "/api/training/prejob-plans", headers=Harness.headers(self.other)).json()["data"]
+        self.assertEqual(lst, [])
+
+    def test_employee_cannot_assign(self):
+        plan = self._create()
+        r = self.h.client.post(
+            f"/api/training/prejob-plans/{plan['id']}/assign", headers=Harness.headers(self.emp))
+        self.assertEqual(r.status_code, 403)
+
+
 class LearningEvidenceTest(unittest.TestCase):
     def setUp(self) -> None:
         self.h = Harness()

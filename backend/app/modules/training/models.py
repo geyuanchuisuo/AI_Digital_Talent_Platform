@@ -240,3 +240,64 @@ class TrainingLearningEvidence(PKMixin, CrossDbUpdatedAtMixin, Base):
     payload_json: Mapped[dict] = mapped_column(JSONDict, nullable=False, default=dict)
     score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default=text("0"))
     verified_by: Mapped[str | None] = mapped_column(String(30), nullable=True)
+
+
+class PrejobPlan(PKMixin, CrossDbUpdatedAtMixin, Base):
+    """岗前培养计划：面向新入职/待上岗人员的分阶段（目标、阶段、课程、导师）可编辑计划。
+
+    与在职培训课程体系分离；正式培训课程分配仍限在职员工，本计划不自动报名。
+    """
+
+    __tablename__ = "prejob_plans"
+    __table_args__ = MYSQL_TABLE_OPTIONS
+
+    employee_user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    talent_profile_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    target_job_title: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    goal: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="draft", server_default=str_default("draft")
+    )
+    input_snapshot_json: Mapped[dict] = mapped_column(JSONDict, nullable=False, default=dict)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default=text("1"))
+    created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class PrejobPhase(PKMixin, CrossDbUpdatedAtMixin, Base):
+    """岗前计划的阶段快照：绑定当时课程，含导师与阶段目标；改课程不回写历史版本。"""
+
+    __tablename__ = "prejob_phases"
+    __table_args__ = (
+        UniqueConstraint("plan_id", "plan_version", "seq", name="uk_prejob_phase_order"),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    plan_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    plan_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    goal: Mapped[str | None] = mapped_column(Text, nullable=True)
+    mentor_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    courses_json: Mapped[list] = mapped_column(JSONList, nullable=False, default=list)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", server_default=str_default("pending")
+    )
+
+
+class PrejobPlanVersion(PKMixin, CrossDbUpdatedAtMixin, Base):
+    """岗前计划版本快照：修订时保留历史，供追溯。"""
+
+    __tablename__ = "prejob_plan_versions"
+    __table_args__ = (
+        UniqueConstraint("plan_id", "version", name="uk_prejob_plan_version"),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    plan_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    snapshot_json: Mapped[dict] = mapped_column(JSONDict, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+

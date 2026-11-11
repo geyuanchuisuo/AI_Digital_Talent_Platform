@@ -143,6 +143,34 @@ export interface TrainingEnrollment {
   note: string | null;
 }
 
+export interface PrejobPhaseCourse {
+  course_id: number;
+  course: { course_id: number; title: string; version: number } | null;
+  note: string | null;
+}
+
+export interface PrejobPhase {
+  seq: number;
+  name: string;
+  goal: string | null;
+  mentor_user_id: number | null;
+  status: string;
+  courses: PrejobPhaseCourse[];
+}
+
+export interface PrejobPlan {
+  id: number;
+  employee_user_id: number;
+  talent_profile_id: number | null;
+  target_job_title: string | null;
+  goal: string | null;
+  status: 'draft' | 'assigned';
+  version: number;
+  phases: PrejobPhase[];
+  created_at: string;
+  updated_at: string;
+}
+
 export interface LearningEvidence {
   id: number;
   evidence_type: string;

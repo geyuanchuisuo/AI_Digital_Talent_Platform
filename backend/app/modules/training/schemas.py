@@ -65,6 +65,32 @@ class PlanUpdateRequest(_StrictModel):
     gap_summary: str | None = None
 
 
+class PrejobCourseIn(_StrictModel):
+    course_id: int
+    note: str | None = Field(default=None, max_length=500)
+
+
+class PrejobPhaseIn(_StrictModel):
+    name: str = Field(min_length=1, max_length=100)
+    goal: str | None = Field(default=None, max_length=1000)
+    mentor_user_id: int | None = None
+    courses: list[PrejobCourseIn] = Field(default_factory=list, max_length=50)
+
+
+class PrejobPlanCreateRequest(_StrictModel):
+    employee_user_id: int
+    talent_profile_id: int | None = None
+    target_job_title: str | None = Field(default=None, max_length=100)
+    goal: str | None = Field(default=None, max_length=2000)
+    phases: list[PrejobPhaseIn] = Field(min_length=1, max_length=20)
+
+
+class PrejobPlanUpdateRequest(_StrictModel):
+    target_job_title: str | None = Field(default=None, max_length=100)
+    goal: str | None = Field(default=None, max_length=2000)
+    phases: list[PrejobPhaseIn] | None = Field(default=None, min_length=1, max_length=20)
+
+
 class ProgressUpdateRequest(_StrictModel):
     status: LearningStatus
     note: str | None = Field(default=None, max_length=500)

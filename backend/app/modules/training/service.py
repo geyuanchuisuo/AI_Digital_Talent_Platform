@@ -27,6 +27,9 @@ from app.modules.assessments.service import is_admin, require_admin
 from app.modules.notifications import producers as notify
 from app.modules.training import drafting, feedback_themes
 from app.modules.training.models import (
+    PrejobPhase,
+    PrejobPlan,
+    PrejobPlanVersion,
     TrainingAttendance,
     TrainingCourse,
     TrainingEnrollment,
@@ -54,6 +57,8 @@ from app.modules.training.schemas import (
     PlanCreateRequest,
     PlanItemIn,
     PlanUpdateRequest,
+    PrejobPlanCreateRequest,
+    PrejobPlanUpdateRequest,
     SessionCreateRequest,
 )
 
@@ -548,11 +553,223 @@ def plan_items(db: Session, plan: TrainingPlan) -> list[TrainingPlanItem]:
     )
 
 
+def _prejob_phase_rows(db: Session, plan: PrejobPlan) -> list[PrejobPhase]:
+    return list(
+        db.scalars(
+            select(PrejobPhase)
+            .where(PrejobPhase.plan_id == plan.id, PrejobPhase.plan_version == plan.version)
+            .order_by(PrejobPhase.seq.asc())
+        )
+    )
+
+
+def _build_prejob_phases(db: Session, plan_id: int, plan_version: int, phases: list) -> list[PrejobPhase]:
+    rows: list[PrejobPhase] = []
+    for order, phase in enumerate(phases):
+        courses: list[dict[str, Any]] = []
+        for entry in phase.courses:
+            course = db.get(TrainingCourse, entry.course_id)
+            if course is None:
+                raise BizError(400, f"课程 {entry.course_id} 不存在，不能写入岗前计划")
+            if course.status != "active":
+                raise BizError(400, f"课程「{course.title}」已失效，不能写入岗前计划")
+            courses.append(
+                {
+                    "course_id": course.id,
+                    "course": _course_snapshot(course),
+                    "note": entry.note,
+                }
+            )
+        rows.append(
+            PrejobPhase(
+                plan_id=plan_id,
+                plan_version=plan_version,
+                seq=order,
+                name=phase.name,
+                goal=phase.goal,
+                mentor_user_id=phase.mentor_user_id,
+                courses_json=courses,
+                status="pending",
+            )
+        )
+    return rows
+
+
+def _snapshot_prejob(db: Session, plan: PrejobPlan, status: str, *, user_id: int, note: str | None = None) -> None:
+    phases = _prejob_phase_rows(db, plan)
+    snapshot = {
+        "version": plan.version,
+        "status": status,
+        "target_job_title": plan.target_job_title,
+        "goal": plan.goal,
+        "phases": [
+            {
+                "seq": ph.seq,
+                "name": ph.name,
+                "goal": ph.goal,
+                "mentor_user_id": ph.mentor_user_id,
+                "status": ph.status,
+                "courses": [c["course_id"] for c in (ph.courses_json or [])],
+            }
+            for ph in phases
+        ],
+    }
+    existing = db.scalar(
+        select(PrejobPlanVersion).where(
+            PrejobPlanVersion.plan_id == plan.id, PrejobPlanVersion.version == plan.version
+        )
+    )
+    if existing is None:
+        db.add(
+            PrejobPlanVersion(
+                plan_id=plan.id, version=plan.version, status=status, snapshot_json=snapshot,
+                note=note, created_by=user_id,
+            )
+        )
+    else:
+        existing.status = status
+        existing.snapshot_json = snapshot
+        if note:
+            existing.note = note
+
+
+def create_prejob_plan(db: Session, payload: PrejobPlanCreateRequest, *, admin: User) -> PrejobPlan:
+    """管理员/HR 为待上岗人员创建分阶段岗前培养计划（目标、阶段、课程、导师），草稿态。"""
+    require_admin(admin)
+    employee = _require_employee(db, payload.employee_user_id)
+    plan = PrejobPlan(
+        employee_user_id=employee.id,
+        talent_profile_id=payload.talent_profile_id,
+        target_job_title=(payload.target_job_title or "").strip() or None,
+        goal=payload.goal,
+        status="draft",
+        input_snapshot_json={
+            "phases": [p.model_dump() for p in payload.phases],
+            "created_via": "manual",
+        },
+        version=1,
+        created_by=admin.id,
+        updated_by=admin.id,
+    )
+    db.add(plan)
+    db.flush()
+    db.add_all(_build_prejob_phases(db, plan.id, plan.version, payload.phases))
+    db.flush()
+    _snapshot_prejob(db, plan, "draft", user_id=admin.id)
+    db.commit()
+    db.refresh(plan)
+    return plan
+
+
+def update_prejob_plan(db: Session, plan_id: int, payload: PrejobPlanUpdateRequest, *, admin: User) -> PrejobPlan:
+    """草稿态岗前计划可整体修订阶段；已分配需先 revise 生成新版本。"""
+    require_admin(admin)
+    plan = _require_prejob_plan(db, plan_id)
+    if plan.status != "draft":
+        raise BizError(400, "已分配岗前计划不能直接修改，请先修订生成新版本")
+    fields = payload.model_dump(exclude_unset=True)
+    if "target_job_title" in fields:
+        plan.target_job_title = (fields["target_job_title"] or "").strip() or None
+    if "goal" in fields:
+        plan.goal = fields["goal"]
+    if payload.phases is not None:
+        for old in _prejob_phase_rows(db, plan):
+            db.delete(old)
+        db.flush()
+        db.add_all(_build_prejob_phases(db, plan.id, plan.version, payload.phases))
+    plan.updated_by = admin.id
+    db.flush()
+    _snapshot_prejob(db, plan, "draft", user_id=admin.id)
+    db.commit()
+    db.refresh(plan)
+    return plan
+
+
+def assign_prejob_plan(db: Session, plan_id: int, *, admin: User) -> PrejobPlan:
+    require_admin(admin)
+    plan = _require_prejob_plan(db, plan_id)
+    if plan.status != "draft":
+        raise BizError(400, "只有草稿岗前计划可以分配")
+    if not _prejob_phase_rows(db, plan):
+        raise BizError(400, "岗前计划没有阶段，不能分配")
+    plan.status = "assigned"
+    plan.updated_by = admin.id
+    db.flush()
+    _snapshot_prejob(db, plan, "assigned", user_id=admin.id, note="管理员确认分配")
+    db.add(
+        TrainingGrowthEvent(
+            employee_user_id=plan.employee_user_id,
+            talent_profile_id=plan.talent_profile_id,
+            source_type="training",
+            event_type="prejob_assigned",
+            ref_type="prejob_plan",
+            ref_id=plan.id,
+            summary=f"分配岗前培养计划 v{plan.version}",
+            payload_json={"plan_id": plan.id, "version": plan.version},
+        )
+    )
+    db.commit()
+    db.refresh(plan)
+    # 岗前计划一期不自动报名，也不投递课程指派通知（与在职培训分配区分）
+    return plan
+
+
+def revise_prejob_plan(db: Session, plan_id: int, *, admin: User) -> PrejobPlan:
+    """已分配岗前计划 → 新版本草稿；复制当前阶段，历史版本快照保留。"""
+    require_admin(admin)
+    plan = _require_prejob_plan(db, plan_id)
+    if plan.status != "assigned":
+        raise BizError(400, "只有已分配岗前计划可以修订")
+    current = _prejob_phase_rows(db, plan)
+    plan.version += 1
+    plan.status = "draft"
+    plan.updated_by = admin.id
+    for ph in current:
+        db.add(
+            PrejobPhase(
+                plan_id=plan.id,
+                plan_version=plan.version,
+                seq=ph.seq,
+                name=ph.name,
+                goal=ph.goal,
+                mentor_user_id=ph.mentor_user_id,
+                courses_json=list(ph.courses_json or []),
+                status="pending",
+            )
+        )
+    db.flush()
+    _snapshot_prejob(db, plan, "draft", user_id=admin.id, note="由已分配岗前计划修订")
+    db.commit()
+    db.refresh(plan)
+    return plan
+
+
+def _require_prejob_plan(db: Session, plan_id: int) -> PrejobPlan:
+    plan = db.get(PrejobPlan, plan_id)
+    if plan is None:
+        raise BizError(404, "岗前培养计划不存在")
+    return plan
+
+
+def get_prejob_plan(db: Session, plan_id: int, *, user: User) -> tuple[PrejobPlan, list[PrejobPhase]]:
+    """管理员看全量；员工仅看本人岗前计划。"""
+    plan = _require_prejob_plan(db, plan_id)
+    if not is_admin(user) and plan.employee_user_id != user.id:
+        raise BizError(403, "无权查看该岗前计划")
+    return plan, _prejob_phase_rows(db, plan)
+
+
+def list_prejob_plans(db: Session, *, user: User) -> list[PrejobPlan]:
+    stmt = select(PrejobPlan).order_by(PrejobPlan.id.desc())
+    if not is_admin(user):
+        stmt = stmt.where(PrejobPlan.employee_user_id == user.id)
+    return list(db.scalars(stmt))
+
+
 def plan_versions(db: Session, plan: TrainingPlan) -> list[TrainingPlanVersion]:
     return list(
         db.scalars(
-            select(TrainingPlanVersion)
-            .where(TrainingPlanVersion.plan_id == plan.id)
+            select(TrainingPlanVersion)            .where(TrainingPlanVersion.plan_id == plan.id)
             .order_by(TrainingPlanVersion.version.desc())
         )
     )

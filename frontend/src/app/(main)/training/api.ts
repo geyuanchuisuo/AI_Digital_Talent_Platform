@@ -13,6 +13,7 @@ import type {
   TrainingFeedbackSummary,
   TrainingLearningRecord,
   TrainingPlan,
+  PrejobPlan,
   TrainingSession,
 } from './types';
 
@@ -207,6 +208,38 @@ export function fetchEnrollments(params?: { course_id?: number }) {
 /** 释放超时未决定的报名占位并递补候补（管理员） */
 export function releaseExpiredEnrollments() {
   return post<{ scanned: number; released: number; promoted: number }>('/training/enrollments/release-expired');
+}
+
+/** 岗前培养计划（F05，待上岗人员分阶段：目标、阶段、课程、导师，版本化） */
+export interface PrejobPhaseIn {
+  name: string;
+  goal?: string | null;
+  mentor_user_id?: number | null;
+  courses: { course_id: number; note?: string | null }[];
+}
+
+export interface PrejobPlanPayload {
+  employee_user_id: number;
+  talent_profile_id?: number | null;
+  target_job_title?: string | null;
+  goal?: string | null;
+  phases: PrejobPhaseIn[];
+}
+
+export function fetchPrejobPlans() {
+  return get<PrejobPlan[]>('/training/prejob-plans');
+}
+
+export function createPrejobPlan(payload: PrejobPlanPayload) {
+  return post<PrejobPlan>('/training/prejob-plans', payload);
+}
+
+export function assignPrejobPlan(id: number) {
+  return post<PrejobPlan>(`/training/prejob-plans/${id}/assign`);
+}
+
+export function revisePrejobPlan(id: number) {
+  return post<PrejobPlan>(`/training/prejob-plans/${id}/revise`);
 }
 
 /** 有效学习证据与正式完成认定：分数与验证人由服务端按可信来源计算，前端不可传 */
