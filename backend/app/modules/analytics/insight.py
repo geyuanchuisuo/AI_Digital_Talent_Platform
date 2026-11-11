@@ -16,8 +16,13 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any
+
+from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 #: 因果措辞守卫词表（推断/事实段均不得出现——「不把相关说成因果」的运行期断言）
 _CAUSAL_WORDS = ("导致", "因为", "由于", "造成", "使得", "归因于", "引发", "引起", "源于")
@@ -180,3 +185,107 @@ def has_causal_language(segments: list[dict]) -> bool:
         if any(w in text for w in _CAUSAL_WORDS):
             return True
     return False
+
+
+# --------------------------------------------------------------------------- #
+# LLM 增强（PRD D25）：规则解读打底 + LLM 增补推断段（因果守卫硬过滤）
+# --------------------------------------------------------------------------- #
+
+_LLM_ENHANCE_MAX_FACTS_IN_PROMPT = 5
+_LLM_ENHANCE_MAX_INFERENCES = 2
+_LLM_ENHANCE_TEXT_MAX = 200
+
+
+def _llm_enhance_prompt(metric_id: str, name: str, rule_segments: list[dict]) -> str | None:
+    """从规则分段提取事实部分拼 Prompt；无可用事实返回 None（不空转 LLM）。"""
+    facts = [s for s in rule_segments if s.get("kind") == "fact"][:_LLM_ENHANCE_MAX_FACTS_IN_PROMPT]
+    if not facts:
+        return None
+    lines = [f"指标：{name}（{metric_id}）"]
+    for s in facts:
+        lines.append(f"- 事实：{s['text']}")
+    lines.append("")
+    lines.append("请基于以上事实给出至多 2 条补充解读建议。要求：")
+    lines.append("1. 只输出 JSON 对象 {\"items\": [{\"text\": \"...\", \"basis\": [依据的事实编号]}]}；")
+    lines.append("2. 每条 ≤100 字，使用建议/描述措辞；")
+    lines.append("3. 严禁出现以下因果措辞：导致、因为、由于、造成、使得、归因于、引发、引起、源于；")
+    lines.append("4. 不得虚构任何数字，只能引用上述事实中出现的数值。")
+    return "\n".join(lines)
+
+
+class _EnhanceItem(BaseModel):
+    text: str
+    basis: list[str] = []
+
+
+class _EnhanceList(BaseModel):
+    items: list[_EnhanceItem]
+
+
+def build_interpretation_with_llm(
+    metric_id: str,
+    name: str,
+    value: Any,
+    table: dict | None,
+    note: str | None,
+    *,
+    group_by: str | None = None,
+    data_time: datetime,
+    enabled: bool | None = None,
+) -> dict:
+    """规则解读打底 + LLM 增补推断段（PRD D25）。
+
+    - 规则段**永远在场**（可复现底线不依赖 LLM）；LLM 只增补 `inference` 段；
+    - 增补段过同一因果守卫（`has_causal_language`）——违规整段丢弃，不留 Partial；
+    - LLM 不可用/失败/超时 → 如实回退 `generator="rule"`（不假数据、不半残）；
+    - `enabled=None` 读 `settings.analytics_llm_insight_enabled`（默认 False，部署方显式开启）。
+    """
+    from app.config import settings  # noqa: PLC0415 局部避免环
+
+    result = build_interpretation(metric_id, name, value, table, note,
+                                  group_by=group_by, data_time=data_time)
+    if enabled is None:
+        enabled = bool(getattr(settings, "analytics_llm_insight_enabled", False))
+    if not enabled:
+        return result
+
+    from app.core import llm_client  # noqa: PLC0415
+
+    prompt = _llm_enhance_prompt(metric_id, name, result["segments"])
+    if prompt is None:
+        return result
+    try:
+        raw = llm_client.chat_json(
+            prompt, _EnhanceList, system_prompt="你是数据分析解读助手，只输出合法 JSON。",
+            purpose="insight_llm_enhance", max_tokens=512, retry=0,
+        )
+    except Exception:  # noqa: BLE001 LLM 不可用/失败/超时如实回退（不假数据）
+        logger.info("D25 LLM 增强解读不可用，回退规则式（metric=%s）", metric_id, exc_info=True)
+        return result
+
+    if not isinstance(raw, _EnhanceList):
+        logger.warning("D25 LLM 返回结构非法，回退规则式（metric=%s）", metric_id)
+        return result
+
+    existing_keys = {s["key"] for s in result["segments"]}
+    enhanced: list[dict] = []
+    for item in raw.items[:_LLM_ENHANCE_MAX_INFERENCES]:
+        text = (item.text or "").strip()[:_LLM_ENHANCE_TEXT_MAX]
+        if not text:
+            continue
+        cand = {"kind": "inference", "key": f"llm_{len(enhanced)+1}",
+                "text": text, "basis": list(item.basis or [])}
+        # basis 只引用真实存在的事实段 key（LLM 给的编号不可信，过滤后无依据则丢弃）
+        basis = [k for k in cand["basis"] if k in existing_keys]
+        if not basis:
+            logger.warning("D25 LLM 增补段无有效事实依据，整段丢弃：%s", text[:80])
+            continue
+        cand["basis"] = basis
+        if has_causal_language([cand]):
+            logger.warning("D25 LLM 增补段含因果措辞，整段丢弃：%s", text[:80])
+            continue
+        enhanced.append(cand)
+
+    if not enhanced:
+        return result
+    return {"segments": result["segments"] + enhanced, "generator": "rule+llm"}

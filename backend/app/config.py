@@ -114,6 +114,10 @@ class Settings(BaseSettings):
     # 空 ANALYTICS_DB_URL = 副本未启用：自由问数/报表降级主库 MySQL 直查（V2.6 确认的回退口径）。
     analytics_db_url: str = ""
 
+    # ---- D25 智能解读（规则解读打底，LLM 仅增补推断段）----
+    # 默认关闭：LLM 不可用/失败/超时时回退 generator="rule"，不阻塞指标查询。
+    analytics_llm_insight_enabled: bool = False
+
     # ---- NL2SQL 受控执行（T-D09，D 维度 analytics/nl2sql；契约 docs/modules/D/问数切片契约.md §8）----
     # 超时由 PG statement_timeout 强制；行数由 fetchmany(max+1) 截断——均为 T-D09 ③ 默认口径。
     nl2sql_timeout_seconds: int = 30

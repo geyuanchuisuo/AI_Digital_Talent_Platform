@@ -227,9 +227,15 @@ class LLMClient:
                 return content
             except APIStatusError as exc:
                 # 供应商不支持 response_format → 去掉该参数立即重试，不消耗重试预算
-                if exc.status_code == 400 and want_json and self._json_format_supported:
+                if exc.status_code == 400 and want_json and self._json_format_supported \
+                        and "response_format" in str(exc):
                     self._json_format_supported = False
                     logger.warning("供应商不支持 response_format=json_object，已降级为普通 JSON 提示")
+                    continue
+                # 部分网关模型不支持 temperature（如 gh/gpt-5.4-nano）→ 去参立即重试
+                if exc.status_code == 400 and "temperature" in str(exc) and "temperature" in kwargs:
+                    logger.warning("模型 %s 不支持 temperature，已去参重试", self.model)
+                    kwargs.pop("temperature", None)
                     continue
                 if exc.status_code in RETRYABLE_STATUS and http_try < HTTP_MAX_ATTEMPTS - 1:
                     logger.warning("LLM HTTP %s，第 %d 次退避后重试", exc.status_code, http_try + 1)
