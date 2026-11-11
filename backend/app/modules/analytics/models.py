@@ -181,6 +181,8 @@ class Nl2SqlAudit(PKMixin, CreatedAtMixin, Base):
 
     stage: generated → validated → executed；任一步失败/拒绝：
     refused_unmappable（生成器拒答）/ refused_unsafe（校验器拦截）/ timeout / error。
+    generated_sql 保留模型原始输出；executed_sql 记录校验后实际执行的 SQL
+    （含 LIMIT 包装），truncated 标记是否因行上限被截断。
     """
 
     __tablename__ = "nl2sql_audit"
@@ -192,9 +194,13 @@ class Nl2SqlAudit(PKMixin, CreatedAtMixin, Base):
 
     question: Mapped[str] = mapped_column(String(500), nullable=False)
     generated_sql: Mapped[str | None] = mapped_column(Text, nullable=True)
+    executed_sql: Mapped[str | None] = mapped_column(Text, nullable=True)
     stage: Mapped[str] = mapped_column(String(32), nullable=False)
     refused_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
     row_count: Mapped[int | None] = mapped_column(nullable=True)
+    truncated: Mapped[bool] = mapped_column(
+        BOOL_TYPE, nullable=False, default=False, server_default="0"
+    )
     duration_ms: Mapped[int | None] = mapped_column(nullable=True)
     created_by: Mapped[int | None] = mapped_column(PK_TYPE, nullable=True)
 

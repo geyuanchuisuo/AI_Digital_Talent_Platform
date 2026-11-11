@@ -81,7 +81,7 @@ async def nl2sql_query(user, question: str) -> dict:
         raise BizError(422, f"生成 SQL 未通过安全校验：{vr.reason}")
     sql = vr.sql
     stage = "validated"
-    _audit_update(audit_id, stage=stage, generated_sql=sql)
+    _audit_update(audit_id, stage=stage, executed_sql=sql)
 
     # 受控执行（只读事务 + 超时 + 行上限）
     started = datetime.now()
@@ -107,7 +107,8 @@ async def nl2sql_query(user, question: str) -> dict:
 
     stage = "executed"
     duration = _ms_since(started)
-    _audit_update(audit_id, stage=stage, row_count=result["row_count"], duration_ms=duration)
+    _audit_update(audit_id, stage=stage, row_count=result["row_count"],
+                  duration_ms=duration, truncated=result["truncated"])
     return {
         "question": question,
         "sql": sql,
