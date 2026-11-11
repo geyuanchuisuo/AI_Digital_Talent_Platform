@@ -56,6 +56,15 @@ class Settings(BaseSettings):
     rerank_local_model_path: str = ""       # local 模式：bge-reranker 模型目录（客户本地）
     rerank_local_device: str = ""           # local 模式：cpu/cuda/auto（空=auto）
 
+    # ---- C08 防挂机学习心跳（training/service.py 消费；默认值为已确认的课程规则基线）----
+    # 空闲窗口：相邻心跳间隔超过此值视为离开，该静默段不计学时；前端心跳节奏随
+    # heartbeat_interval_seconds 下发。单次上限：单个心跳区间最多累计的秒数。
+    study_heartbeat_idle_seconds: int = 90
+    study_heartbeat_credit_cap_seconds: int = 90
+    study_heartbeat_min_count: int = 3      # 结算所需最少心跳次数，避免“签发即结算”
+    study_session_min_minutes: float = 5.0  # 单次结算最短有效时长，避免“打开即完成”
+    study_session_ttl_minutes: int = 120    # 学习会话凭证有效期
+
     # ---- MySQL ----
     mysql_host: str = "localhost"
     mysql_port: int = 3306
