@@ -20,7 +20,11 @@ import pytest
 from app.config import settings
 from app.core import llm_client as llm_client_module
 from app.modules.analytics import insight
-from app.modules.analytics.insight import _EnhanceItem, _EnhanceList
+from app.modules.analytics.insight import (
+    _EnhanceItem,
+    _EnhanceList,
+    build_interpretation_with_llm,
+)
 
 
 def _rule_result() -> dict:
@@ -317,3 +321,43 @@ def test_llm_partial_valid_basis_filtered_not_dropped(monkeypatch):
 def test_prompt_none_without_fact_segments():
     """无事实段时 Prompt 为 None（不空转 LLM）。"""
     assert insight._llm_enhance_prompt("m", "n", []) is None
+
+
+# ---- 开关与配置（T-D-SELF-10：ANALYTICS_LLM_INSIGHT_ENABLED 环境变量显式行为）----
+
+def test_env_var_explicit_true_enables_llm(monkeypatch):
+    """环境变量显式 true：enabled=None（读配置）时走 LLM 增补。"""
+    monkeypatch.setenv("ANALYTICS_LLM_INSIGHT_ENABLED", "true")
+    monkeypatch.setattr("app.config.settings.analytics_llm_insight_enabled", True)
+    monkeypatch.setattr(
+        "app.core.llm_client.chat_json",
+        lambda *a, **k: _EnhanceList(items=[_EnhanceItem(text="LLM 增补", basis=["headline"])]),
+    )
+    result = build_interpretation_with_llm(
+        "job.demand_progress_gap", "缺口", 5,
+        {"columns": ["position_name", "headcount", "gap"],
+         "rows": [{"position_name": "后端工程师", "headcount": 5, "gap": 5}]}, None,
+        data_time=datetime(2026, 11, 11),
+    )
+    assert result["generator"] == "rule+llm", "配置显式开启（enabled=None 读配置）时应增补"
+
+
+def test_env_var_explicit_false_keeps_rule(monkeypatch):
+    """环境变量显式 false：即使有 LLM 也不调用（enabled=None 读配置=False）。"""
+    monkeypatch.setenv("ANALYTICS_LLM_INSIGHT_ENABLED", "false")
+    monkeypatch.setattr("app.config.settings.analytics_llm_insight_enabled", False)
+    called = {"n": 0}
+
+    def _spy(*a, **k):
+        called["n"] += 1
+        return _EnhanceList(items=[])
+
+    monkeypatch.setattr("app.core.llm_client.chat_json", _spy)
+    result = build_interpretation_with_llm(
+        "job.demand_progress_gap", "缺口", 5,
+        {"columns": ["position_name", "headcount", "gap"],
+         "rows": [{"position_name": "后端工程师", "headcount": 5, "gap": 5}]}, None,
+        data_time=datetime(2026, 11, 11),
+    )
+    assert result["generator"] == "rule", "配置显式关闭时不得调用 LLM"
+    assert called["n"] == 0, "关闭状态零模型调用"
