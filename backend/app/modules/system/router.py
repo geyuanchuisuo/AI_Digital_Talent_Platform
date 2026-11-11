@@ -230,7 +230,8 @@ def list_role_users(role_id: int, db: Annotated[Session, Depends(get_db)]):
 @router.post("/roles/{role_id}/users")
 def bind_user(role_id: int, payload: UserRoleBind, db: Annotated[Session, Depends(get_db)], user: CurrentUser):
     _get_or_404(db, SysRole, role_id)
-    if db.get(User, payload.user_id) is None:
+    target_user = db.get(User, payload.user_id)
+    if target_user is None:
         raise BizError(404, "账号不存在")
     if db.scalar(
         select(func.count())
@@ -239,6 +240,7 @@ def bind_user(role_id: int, payload: UserRoleBind, db: Annotated[Session, Depend
     ):
         raise BizError(409, "该账号已绑定此角色")
     link = SysUserRole(user_id=payload.user_id, role_id=role_id)
+    target_user.data_scope_mode = "scoped"
     db.add(link)
     db.commit()
     _audit(db, user, "system.role_user", "create", f"/api/system/roles/{role_id}/users", "POST", str(payload.user_id))
@@ -253,6 +255,9 @@ def unbind_user(role_id: int, user_id: int, db: Annotated[Session, Depends(get_d
     )
     if link is None:
         raise BizError(404, "绑定关系不存在")
+    target_user = db.get(User, user_id)
+    if target_user is not None:
+        target_user.data_scope_mode = "scoped"
     db.delete(link)
     db.commit()
     _audit(db, user, "system.role_user", "delete", f"/api/system/roles/{role_id}/users/{user_id}", "DELETE", str(user_id))

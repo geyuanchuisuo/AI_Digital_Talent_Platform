@@ -209,12 +209,12 @@ def _management_range(user_id, person_id):
         return True, (), None, ()  # Legacy lightweight callers; not a lookup-error fallback.
     with SessionLocal() as db:
         user = db.get(User, user_id)
-        if user is None or not user.is_active:
+        if user is None or not user.is_active or user.data_scope_mode not in ('legacy', 'scoped'):
             return False, (), (), ()
         assignments = list(db.scalars(select(SysUserRole).where(SysUserRole.user_id == user_id)))
         active_roles = list(db.scalars(select(SysRole).where(
             SysRole.id.in_([a.role_id for a in assignments]), SysRole.status == 'active')))
-        if assignments and not active_roles:
+        if not active_roles and (assignments or user.data_scope_mode != 'legacy'):
             return False, (), (), ()
         mode = resolve_data_scope(db, user)
         now = datetime.now()
@@ -243,8 +243,9 @@ def resolve_data_scope(db, user) -> Literal["all", "dept", "self"]:
     - 任一角色为 ``all`` → ``all``；
     - 否则任一为 ``dept`` → ``dept``；
     - 否则 ``self``。
-    无 sys_user_roles 记录时回退 ``users.role`` 简值：hr→all，其余（含 personal/
-    employee 等未知）→self。这是 A06-2 部门行级过滤与下游（B/C/D）数据范围的权威来源。
+    仅 active、data_scope_mode=legacy 且从无当前绑定的账号可回退 users.role。
+    scoped 账号无生效角色返回 self；未知模式/停用账号同样关闭权限。
+    这是 A06-2 部门行级过滤与下游（B/C/D）数据范围的权威来源。
     """
     uid = getattr(user, "id", None)
     if uid is None:
@@ -254,6 +255,9 @@ def resolve_data_scope(db, user) -> Literal["all", "dept", "self"]:
 
         from app.models import SysRole, SysUserRole, User
 
+        u = db.get(User, uid)
+        if u is None or not u.is_active or u.data_scope_mode not in ('legacy', 'scoped'):
+            return "self"
         scopes = db.execute(
             select(SysRole.data_scope)
             .join(SysUserRole, SysUserRole.role_id == SysRole.id)
@@ -266,7 +270,8 @@ def resolve_data_scope(db, user) -> Literal["all", "dept", "self"]:
                 return "dept"
             return "self"
         # 回退：legacy users.role 简值（无 sys_user_roles 绑定）
-        u = db.get(User, uid)
+        if u.data_scope_mode != 'legacy' or db.scalar(select(SysUserRole.id).where(SysUserRole.user_id == uid).limit(1)) is not None:
+            return "self"
         r = (getattr(u, "role", "") or "").strip().lower() if u else ""
         return "all" if r == "hr" else "self"
     except Exception:
@@ -312,7 +317,8 @@ def get_role_codes(db, user_id: int | None) -> tuple[str, ...]:
     """聚合账号生效角色代码（sys_user_roles 优先；无记录则回退 users.role 简值）。
 
     - 有 sys_user_roles 记录：取全部启用角色 code（集合去重、排序稳定）。
-    - 无记录：users.role == "hr" → ("hr",)；“personal” → ("personal",)；
+    - 无记录且 data_scope_mode=legacy：users.role == "hr" → ("hr",)；
+      scoped 无生效角色、停用/未知模式账号均返回 ("personal",)。
       其余（含未知/空）按 deny-by-default 映射为 ("personal",)。
     纯查询，不写库；调用方负责事务边界。
     """
@@ -323,6 +329,9 @@ def get_role_codes(db, user_id: int | None) -> tuple[str, ...]:
 
         from app.models import SysRole, SysUserRole, User
 
+        user = db.get(User, user_id)
+        if user is None or not user.is_active or user.data_scope_mode not in ('legacy', 'scoped'):
+            return ("personal",)
         rows = db.execute(
             select(SysRole.code)
             .join(SysUserRole, SysUserRole.role_id == SysRole.id)
@@ -330,7 +339,8 @@ def get_role_codes(db, user_id: int | None) -> tuple[str, ...]:
         ).scalars().all()
         if rows:
             return tuple(sorted(set(rows)))
-        user = db.get(User, user_id)
+        if user.data_scope_mode != 'legacy' or db.scalar(select(SysUserRole.id).where(SysUserRole.user_id == user_id).limit(1)) is not None:
+            return ("personal",)
         if user is not None:
             r = (getattr(user, "role", "") or "").strip().lower()
             if r in ("hr", "personal"):

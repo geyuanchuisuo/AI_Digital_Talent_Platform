@@ -64,6 +64,12 @@ async def lifespan(app: FastAPI):
     from app.tasks.runner import runner
     from app.tasks.match_worker import handle_match_batch
     from app.tasks.screen_worker import handle_screen_batch
+    from app.modules.talents.question_worker import handle_question_job
+    from app.modules.knowledge.ingest import handle_ingest
+    from app.modules.knowledge.qa_worker import handle_question as handle_knowledge_question
+    from app.modules.talents.graph_worker import handle_graph_sync
+    from app.modules.talents.graph_runtime import close_client
+    from app.modules.talents.graph_reconcile import reconciler as graph_reconciler
     from app.modules.workflows import schedule as wf_schedule
 
     settings.load_runtime_overrides()
@@ -71,6 +77,14 @@ async def lifespan(app: FastAPI):
     runner.register("parse", handle_parse)
     runner.register("screen", handle_screen_batch)
     runner.register("match", handle_match_batch)
+    runner.register("profile_qa", handle_question_job)
+    runner.register("knowledge_ingest", handle_ingest)
+    runner.register("knowledge_qa", handle_knowledge_question)
+    if settings.neo4j_enabled:
+        runner.register('graph_sync', handle_graph_sync)
+    else:
+        # Repeated lifespan use (tests/reloads) must not retain an enabled handler.
+        runner.unregister('graph_sync')
     runner.start()
     wf_schedule.get_loop().start()
     logger.info(
@@ -81,10 +95,14 @@ async def lifespan(app: FastAPI):
         "running" if wf_schedule.get_loop().is_running else "stopped",
     )
     try:
+        if settings.neo4j_enabled:
+            graph_reconciler.start()
         yield
     finally:
         wf_schedule.get_loop().stop()
+        graph_reconciler.stop()
         runner.stop()
+        close_client()
         logger.info("shutdown: worker=stopped")
 
 
@@ -232,3 +250,6 @@ app.include_router(digital_router)
 from app.core.tasks.events import router as task_events_router  # noqa: E402
 
 app.include_router(task_events_router)
+
+from app.modules.knowledge.router import router as knowledge_router  # noqa: E402
+app.include_router(knowledge_router)

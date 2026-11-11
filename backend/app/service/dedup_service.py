@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -50,6 +50,7 @@ from app.models import (
     TalentTag,
 )
 from app.service import profile_service
+from app.modules.talents import dedup_policy
 from app.utils.mask import mask_email, mask_phone
 
 logger = logging.getLogger(__name__)
@@ -85,6 +86,12 @@ class DuplicateMatch:
     reason: str
     matched_value: str
     profile_name: str
+    confidence: str = 'medium'
+    score: int = 50
+    matched_fields: tuple[str, ...] = ()
+    conflict_fields: tuple[str, ...] = ()
+    block_reasons: tuple[str, ...] = ()
+    candidate_count: int = 1
 
 
 @dataclass
@@ -102,9 +109,10 @@ class ResolveResult:
 # 判重（T-13 在写 parsed_resumes 之后调用）
 # --------------------------------------------------------------------------- #
 def detect(
-    db: Session, parsed: ParsedResume, *, structured: Mapping[str, Any] | None = None
+    db: Session, parsed: ParsedResume, *, structured: Mapping[str, Any] | None = None,
+    lock: bool = False,
 ) -> DuplicateMatch | None:
-    """三路判重，返回**第一个命中**（phone 优先于 email）；无命中返回 `None`。
+    """联合手机/邮箱候选并分层；保留旧目标偏好，姓名不独立判重。
 
     - `phone` 命中：取**最早创建**的候选画像；其中若存在同名者，优先取同名的那张并
       归因为 `name_phone_match`（证据更强，HR 一眼能确认）。
@@ -119,20 +127,27 @@ def detect(
     email = normalize_email(basic.get("email"))
     exclude_id = parsed.talent_profile_id
 
-    if phone:
-        candidates = _find_by(db, TalentProfile.phone, phone, exclude_id)
-        if candidates:
-            target, same_name = _classify(candidates, name)
-            reason = REASON_NAME_PHONE if same_name else REASON_PHONE
-            return DuplicateMatch(target.id, reason, mask_phone(phone), target.name)
-
-    if email:
-        candidates = _find_by(db, TalentProfile.email, email, exclude_id)
-        if candidates:
-            target = candidates[0]
-            return DuplicateMatch(target.id, REASON_EMAIL, _mask_email(email), target.name)
-
-    return None
+    terms = []
+    if phone: terms.append(TalentProfile.phone == phone)
+    if email: terms.append(TalentProfile.email == email)
+    if not terms:
+        return None
+    stmt = select(TalentProfile).where(or_(*terms), TalentProfile.deleted_at.is_(None))
+    if exclude_id is not None:
+        stmt = stmt.where(TalentProfile.id != exclude_id)
+    stmt = stmt.order_by(TalentProfile.created_at, TalentProfile.id).execution_options(populate_existing=True)
+    if lock:
+        stmt = stmt.with_for_update()
+    candidates = list(db.scalars(stmt))
+    if not candidates:
+        return None
+    # Preserve the original target preference, but classify against the complete union.
+    phone_candidates = [p for p in candidates if phone and normalize_phone(p.phone) == phone]
+    target, same_name = _classify(phone_candidates or candidates, name)
+    reason = (REASON_NAME_PHONE if same_name else REASON_PHONE) if phone_candidates else REASON_EMAIL
+    value = mask_phone(phone) if phone_candidates else _mask_email(email)
+    assessment = dedup_policy.assess(basic, target, raw_text=parsed.raw_text, candidate_count=len(candidates))
+    return DuplicateMatch(target.id, reason, value, target.name, **assessment)
 
 
 def _classify(
@@ -178,6 +193,7 @@ def flag(db: Session, parsed: ParsedResume, match: DuplicateMatch) -> TalentDupl
         reason=match.reason,
         matched_value=match.matched_value,
     )
+    _record_decision(db, row, match, automatic=False)
     task = task_dao.get_by_resume_file(db, parsed.resume_file_id)
     if task is not None:
         task.status = "duplicate_pending"
@@ -197,6 +213,42 @@ def flag(db: Session, parsed: ParsedResume, match: DuplicateMatch) -> TalentDupl
         "新建记录" if created else "重置原记录",
     )
     return row
+
+
+def _record_decision(db, duplicate, match, *, automatic):
+    from app.models.talent import TalentProfileEdit
+    from app.modules.talents.history import current_version
+    parsed = db.get(ParsedResume, duplicate.parsed_resume_id)
+    file = db.get(ResumeFile, parsed.resume_file_id) if parsed else None
+    version = current_version(db, duplicate.profile_a_id)
+    payload = dict(dedup_policy.snapshot(match, automatic=automatic), duplicate_id=duplicate.id)
+    db.add(TalentProfileEdit(talent_profile_id=duplicate.profile_a_id,
+        profile_version=version.version if version else 0,
+        field_name=dedup_policy.DECISION_FIELD, old_value=None,
+        new_value=json.dumps(payload, ensure_ascii=False), edited_by=file.uploaded_by if file else 0))
+    db.flush()
+
+
+def _automatic_actor(db, user_id):
+    from app.models.user import User
+    from app.core.auth.scope import get_account_scope, account_is_management
+    user = db.get(User, user_id)
+    if user is None or not user.is_active:
+        return None
+    if not account_is_management(db, user) or not get_account_scope(user).can_view_all_persons:
+        return None
+    return user.id
+
+
+def try_auto_merge(db, duplicate_id):
+    """Use the same journaled merge. Its locked entry rechecks all automatic gates."""
+    duplicate = dup_dao.get(db, duplicate_id)
+    if duplicate is None or duplicate.status != STATUS_PENDING:
+        return None
+    parsed = db.get(ParsedResume, duplicate.parsed_resume_id)
+    if parsed is None:
+        return None
+    return _merge(db, duplicate, parsed, None, dedup_policy.AUTO_NOTE, 0, datetime.now(), automatic=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -254,6 +306,7 @@ def _merge(
     note: str | None,
     user_id: int,
     now: datetime,
+    *, automatic: bool = False,
 ) -> ResolveResult:
     """合并到 master（**只能是 `profile_a_id`**），不重跑任何 LLM。"""
     if master_profile_id is not None and master_profile_id != duplicate.profile_a_id:
@@ -266,11 +319,40 @@ def _merge(
     duplicate = db.scalar(select(TalentDuplicate).where(TalentDuplicate.id == duplicate.id)
         .with_for_update().execution_options(populate_existing=True))
     if duplicate is None or duplicate.status != STATUS_PENDING:
+        if automatic:
+            return None
         raise BizError(409, "查重记录状态已变化，请刷新后重试")
     parsed = db.scalar(select(ParsedResume).where(ParsedResume.id == parsed.id)
         .with_for_update().execution_options(populate_existing=True))
     if parsed is None:
         raise BizError(409, "解析结果已变化，请刷新后重试")
+
+    if automatic:
+        from app.models.resume import ResumePage
+        from app.models.talent import TalentProfileEdit
+        file = db.get(ResumeFile, parsed.resume_file_id)
+        task = db.scalar(select(ParseTask).where(ParseTask.resume_file_id == parsed.resume_file_id)
+            .with_for_update().execution_options(populate_existing=True))
+        # The worker is never allowed to join two already-established identities.
+        if not file or parsed.talent_profile_id is not None or task is None or task.truncated:
+            return None
+        if task.status != 'duplicate_pending':
+            return None
+        if db.scalar(select(ResumePage.id).where(ResumePage.resume_file_id == file.id,
+                ResumePage.quality_status.not_in(('ready', 'blank'))).limit(1)):
+            return None
+        if db.scalar(select(TalentProfileEdit.id).where(
+            TalentProfileEdit.field_name == '_merge_undo_v1',
+            func.json_extract(TalentProfileEdit.new_value, '$.duplicate_id') == duplicate.id).limit(1)):
+            return None
+        match = detect(db, parsed, lock=True)
+        if match is None or match.profile_id != master.id or match.confidence != 'high':
+            return None
+        actor = _automatic_actor(db, file.uploaded_by)
+        if actor is None:
+            return None
+        user_id = actor
+        _record_decision(db, duplicate, match, automatic=True)
 
     from app.modules.talents.history import save_version
     save_version(db, master, "baseline")
@@ -479,7 +561,18 @@ def list_duplicates(
     )
 
     items: list[dict[str, Any]] = []
+    from app.models.talent import TalentProfileEdit
+    decisions = {}
+    for entry in db.scalars(select(TalentProfileEdit).where(
+            TalentProfileEdit.talent_profile_id.in_(profile_ids),
+            TalentProfileEdit.field_name == dedup_policy.DECISION_FIELD).order_by(TalentProfileEdit.id)):
+        payload = _as_mapping(entry.new_value)
+        decisions[payload.get('duplicate_id')] = payload
     for row in rows:
+        detection = decisions.get(row.id)
+        if detection is not None:
+            detection = dict(detection, automatic=bool(detection.get('automatic')
+                and row.status == STATUS_MERGED and row.resolution_note == dedup_policy.AUTO_NOTE))
         parsed = parsed_rows.get(row.parsed_resume_id)
         file_row = files.get(parsed.resume_file_id) if parsed is not None else None
         items.append(
@@ -494,6 +587,7 @@ def list_duplicates(
                 else None,
                 "parsed_resume": _parsed_summary(parsed, file_row),
                 "created_at": row.created_at,
+                "detection": detection,
             }
         )
     return items, total

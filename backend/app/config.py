@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import quote_plus
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, SecretStr
 
 # BASE_DIR 相对定位（架构 §5.6）：不写死绝对路径，任意 cwd 启动都能读到 backend/.env
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -51,6 +52,15 @@ class Settings(BaseSettings):
     # ---- Milvus ----
     milvus_uri: str = "http://localhost:19530"
     milvus_collection: str = "talent_vectors"
+
+    # B09 opt-in graph store. Explicit deployment namespace; never guess credentials.
+    neo4j_enabled: bool = False
+    neo4j_uri: str = ''
+    neo4j_username: str = ''
+    neo4j_password: SecretStr = Field(default=SecretStr(''), repr=False)
+    neo4j_database: str = 'neo4j'
+    neo4j_namespace: str = ''
+    neo4j_timeout: float = Field(default=10.0, ge=1, le=60)
 
     # ---- JWT ----
     jwt_secret: str

@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Query
@@ -61,6 +61,45 @@ class BatchQuestionRequest(BaseModel):
     question: str = Field(min_length=1,max_length=1000)
 
 
+class QuestionJobRequest(BatchQuestionRequest):
+    idempotency_key: str = Field(min_length=1, max_length=64)
+    version: int | None = Field(default=None, ge=1)
+    follow_up_to: int | None = Field(default=None, ge=1)
+    mode: Literal['individual', 'compare', 'statistics'] = 'individual'
+    criteria: list[dict] = Field(default_factory=list, max_length=5)
+
+
+@router.post('/question-jobs')
+def create_question_job(payload: QuestionJobRequest, user: CurrentUser, scope: AccountScopeDep,
+                        db: Annotated[Session, Depends(get_db)]):
+    from app.modules.talents.question_jobs import create
+    if len(set(payload.person_ids)) > 1 and scope.role not in ('hr', 'admin'):
+        raise BizError(403, '无权访问该资源')
+    return ok(create(db, payload.person_ids, payload.question, user_id=user.id, scope=scope,
+        key=payload.idempotency_key, version=payload.version, follow_up_to=payload.follow_up_to,
+        mode=payload.mode, criteria=payload.criteria))
+
+
+@router.get('/question-jobs')
+def recent_question_job(user: CurrentUser, db: Annotated[Session, Depends(get_db)],
+                        person_ids: list[int] = Query(min_length=1, max_length=20),
+                        mode: Literal['individual', 'compare', 'statistics'] = 'individual'):
+    from app.modules.talents.question_jobs import recent
+    return ok(recent(db, user_id=user.id, person_ids=person_ids, mode=mode))
+
+
+@router.get('/question-jobs/{job_id}')
+def get_question_job(job_id: int, user: CurrentUser, db: Annotated[Session, Depends(get_db)]):
+    from app.modules.talents.question_jobs import read
+    return ok(read(db, job_id, user_id=user.id))
+
+
+@router.post('/question-jobs/{job_id}/cancel')
+def cancel_question_job(job_id: int, user: CurrentUser, db: Annotated[Session, Depends(get_db)]):
+    from app.modules.talents.question_jobs import cancel
+    return ok(cancel(db, job_id, user_id=user.id))
+
+
 class DepartmentAssignment(BaseModel):
     department_id: int | None = Field(default=None,ge=1)
     reason: str = Field(min_length=1,max_length=500)
@@ -84,7 +123,48 @@ def get_tag_suggestions(talent_id: int, scope: AccountScopeDep,
     snapshot = talent_service.get_person_snapshot(db, talent_id, scope=scope)
     if snapshot['status'] != 'ready':
         raise BizError(409, '档案当前不可用，无法提取标签依据')
-    return ok(suggest(snapshot))
+    response = ok(suggest(snapshot))
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
+@router.get('/{talent_id}/tag-quality', dependencies=[Depends(require_profile_reader)])
+def get_tag_quality(talent_id: int, scope: AccountScopeDep, db: Annotated[Session, Depends(get_db)]):
+    from app.modules.talents.tag_review import quality
+    response = ok(quality(db, talent_id, scope=scope))
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
+class GraphConfirmationRequest(BaseModel):
+    version: int = Field(ge=1)
+    resync: bool = False
+
+
+@router.post('/{talent_id}/graph-confirm', dependencies=[Depends(require_manager)])
+def confirm_graph(talent_id: int, payload: GraphConfirmationRequest, user: CurrentUser,
+                  db: Annotated[Session, Depends(get_db)]):
+    from app.modules.talents.graph_service import confirm_profile
+    response = ok(confirm_profile(db, talent_id, payload.version, user_id=user.id, resync=payload.resync))
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
+@router.get('/{talent_id}/graph', dependencies=[Depends(require_profile_reader)])
+def read_graph(talent_id: int, user: CurrentUser, db: Annotated[Session, Depends(get_db)]):
+    from app.modules.talents.graph_read import read
+    response = ok(read(db, 'profile', talent_id, user_id=user.id))
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
+@router.get('/{talent_id}/graph-preview', dependencies=[Depends(require_profile_reader)])
+def get_profile_graph_preview(talent_id: int, user: CurrentUser, db: Annotated[Session, Depends(get_db)],
+                              version: int | None = Query(default=None, ge=1)):
+    from app.modules.talents.graph_preview import preview
+    response = ok(preview(db, talent_id, user_id=user.id, version=version))
+    response.headers['Cache-Control'] = 'no-store'
+    return response
 
 
 @router.get('/{talent_id}/questions', dependencies=[Depends(require_profile_reader)])
@@ -329,7 +409,7 @@ def patch_talent(
     if readonly:
         raise BizError(400, f"{'、'.join(readonly)} 为一期只读字段（经历由解析结果聚合展示），不可修改")
 
-    data = talent_service.patch_profile(db, talent_id, payload, user_id=user.id)
+    data = talent_service.patch_profile(db, talent_id, payload, user_id=user.id, scope=get_account_scope(user))
     body = PatchTalentData.model_validate(data).model_dump()
     failed = body["vector_status"] == "failed"
     return ok(body, message=HALF_WRITE_VECTOR_MESSAGE if failed else "success")

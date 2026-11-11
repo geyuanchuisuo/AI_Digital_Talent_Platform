@@ -96,6 +96,8 @@ def save_version(db, profile, change_type, *, changed_by=None, change_reason=Non
                     field_name=field, old_value=json.dumps(old.get(field), ensure_ascii=False),
                     new_value=json.dumps(new.get(field), ensure_ascii=False), edited_by=changed_by))
     db.flush()
+    from app.modules.talents.graph_outbox import invalidate_existing
+    invalidate_existing(db, 'profile', profile.id, version, requested_by=changed_by)
     if snapshot['status'] == 'ready':
         from app.modules.talents.evidence import collect_evidence
         collect_evidence(db, profile, version)

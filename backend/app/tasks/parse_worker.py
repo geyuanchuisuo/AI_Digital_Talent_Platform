@@ -196,7 +196,12 @@ def _run_dedup(db: Session, task: ParseTask, parsed: ParsedResume) -> bool:
     match = dedup_service.detect(db, parsed, structured=parsed.structured_json)
     if match is None:
         return False
-    dedup_service.flag(db, parsed, match)  # 内部 commit：写/重置记录 + 任务转 duplicate_pending
+    duplicate = dedup_service.flag(db, parsed, match)  # commit: decision + duplicate_pending
+    if match.confidence == 'high':
+        result = dedup_service.try_auto_merge(db, duplicate.id)
+        if result is not None:
+            logger.info('解析任务 %s 高置信合并到 %s，向量状态 %s', task.id, result.profile.id, result.vector_status)
+            return True
     logger.info(
         "解析任务 %s 命中重复画像 %s（%s），任务挂起待处理（不建画像）",
         task.id,

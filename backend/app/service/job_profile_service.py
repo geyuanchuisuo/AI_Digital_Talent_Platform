@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from sqlalchemy.orm import Session
+from sqlalchemy import select
 
 from app.core.errors import BizError
 from app.core.normalize import DEGREE_VALUES, normalize_skills
@@ -72,6 +73,8 @@ def create_job(db: Session, payload: JobProfileWriteRequest, *, user_id: int) ->
     row = job_dao.create(
         db, version=1, is_active=1, created_by=user_id, updated_by=user_id, **columns
     )
+    from app.modules.talents.graph_outbox import enqueue
+    enqueue(db, 'job', row.id, row.version, operation='upsert', requested_by=user_id)
     db.commit()
     db.refresh(row)
     return row
@@ -79,7 +82,7 @@ def create_job(db: Session, payload: JobProfileWriteRequest, *, user_id: int) ->
 
 def put_job(db: Session, job_id: int, payload: JobProfileWriteRequest, *, user_id: int) -> JobProfile:
     """全量更新：校验同 POST；成功 version+1 并写 updated_by（快照隔离，历史批次不变）。"""
-    row = job_dao.get(db, job_id)
+    row = db.scalar(select(JobProfile).where(JobProfile.id == job_id).with_for_update())
     if row is None:
         raise BizError(404, JOB_NOT_FOUND)
     _validate(payload)
@@ -87,6 +90,8 @@ def put_job(db: Session, job_id: int, payload: JobProfileWriteRequest, *, user_i
     columns["version"] = row.version + 1
     columns["updated_by"] = user_id
     job_dao.apply_fields(db, row, columns)
+    from app.modules.talents.graph_outbox import enqueue
+    enqueue(db, 'job', row.id, row.version, operation='upsert' if row.is_active else 'invalidate', requested_by=user_id)
     db.commit()
     db.refresh(row)
     return row
@@ -94,10 +99,12 @@ def put_job(db: Session, job_id: int, payload: JobProfileWriteRequest, *, user_i
 
 def delete_job(db: Session, job_id: int) -> dict[str, Any]:
     """删除：有批次引用 → 软删（is_active=0）；无引用 → 物理删除；重复删除 404。"""
-    row = job_dao.get(db, job_id)
+    row = db.scalar(select(JobProfile).where(JobProfile.id == job_id).with_for_update())
     if row is None or row.is_active == 0:
         # is_active=0 即已软删（可能仍被 GET 全量列表看到，但不可再删）
         raise BizError(404, JOB_NOT_FOUND)
+    from app.modules.talents.graph_outbox import enqueue
+    enqueue(db, 'job', row.id, row.version, operation='invalidate', force=True)
     if job_dao.has_batches(db, job_id):
         row.is_active = 0
         db.commit()
@@ -128,3 +135,14 @@ def list_jobs(
 def apply_fields(db: Session, row: JobProfile, columns: dict[str, Any]) -> None:
     """供测试/内部复用的薄封装（T-22 内不直接使用）。"""
     job_dao.apply_fields(db, row, columns)
+
+
+def graph_source(db: Session, job_id: int, version: int, *, user_id: int) -> dict:
+    """Authoritative B09 input; full effective management gate and current version."""
+    from app.modules.knowledge.service import require_admin
+    require_admin(db, user_id)
+    row = job_dao.get(db, job_id)
+    if row is None or not row.is_active or row.version != version:
+        raise BizError(409, '岗位版本或来源当前不可用')
+    return dict(job_id=row.id, version=row.version, title=row.title, jd_text=row.jd_text,
+                must_skills=list(row.must_skills_json or []))

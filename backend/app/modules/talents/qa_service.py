@@ -1,15 +1,22 @@
 """Authorized, version-bound profile QA with durable request outcomes."""
 from app.config import settings
 from app.core.errors import BizError
-from app.service.talent_service import get_person_snapshot
+from app.service.talent_service import get_person_snapshot, SnapshotScopeError
 from app.modules.talents.qa_models import ProfileQuestion
 from app.modules.talents import qa
 from app.modules.talents.qa_index import retrieve
 
 
-def ask(db, person_id, question, *, user_id, scope, version=None, follow_up_to=None):
+def _authorized_snapshot(db, person_id, **kwargs):
+    try:
+        return get_person_snapshot(db, person_id, **kwargs)
+    except SnapshotScopeError as exc:
+        raise BizError(403, '无权访问该资源') from exc
+
+
+def ask(db, person_id, question, *, user_id, scope, version=None, follow_up_to=None, guard=None, job_id=None):
     # Authorization and current deletion are checked before any model or source access.
-    snapshot = get_person_snapshot(db, person_id, version=version, scope=scope)
+    snapshot = _authorized_snapshot(db, person_id, version=version, scope=scope)
     if snapshot['status'] != 'ready':
         raise BizError(409, '档案尚不可用，不能问答')
     if not question.strip() or len(question) > 1000:
@@ -20,7 +27,7 @@ def ask(db, person_id, question, *, user_id, scope, version=None, follow_up_to=N
     if follow_up_to is not None:
         from app.modules.talents import follow_up
         parent, previous_turn = follow_up.parent_turn(db, person_id, user_id, follow_up_to, version)
-        snapshot = get_person_snapshot(db, person_id, version=parent.profile_version, scope=scope)
+        snapshot = _authorized_snapshot(db, person_id, version=parent.profile_version, scope=scope)
         if snapshot['status'] != 'ready':
             raise BizError(409, '上一轮档案版本当前不可访问，请开始新问题')
         source_ids = {s.get('resume_file_id') for s in snapshot.get('sources', [])}
@@ -36,12 +43,14 @@ def ask(db, person_id, question, *, user_id, scope, version=None, follow_up_to=N
                  embedding_model=settings.embedding_model, retrieval_strategy='milvus_cosine',
                  retrieval_threshold=0.35)
     trace.update(prompt_version=prompt_version, system_prompt=system_prompt,
-                 follow_up_to=follow_up_to, previous_turn=previous_turn, retrieval_query=query)
+                 follow_up_to=follow_up_to, previous_turn=previous_turn, retrieval_query=query, job_id=job_id)
     record = ProfileQuestion(person_id=person_id, profile_version=snapshot['profile_version'],
         asked_by=user_id, status='running', snapshot_json=trace)
     db.add(record); db.commit()
     calls = []
     def generate(q, context):
+        if guard is not None:
+            guard()
         trace['context'] = context
         from app.core.llm_client import chat_json
         import json
@@ -68,6 +77,15 @@ def ask(db, person_id, question, *, user_id, scope, version=None, follow_up_to=N
         record.snapshot_json = {**trace, 'model_calls':calls, 'error':'问答处理失败', 'error_type':type(exc).__name__}
         db.commit()
         raise BizError(503, '档案问答暂不可用，请稍后重试')
+    if guard is not None:
+        try:
+            guard(final=True)
+        except Exception:
+            db.rollback()
+            record.status = 'failed'
+            record.snapshot_json = {**trace, 'model_calls': calls, 'error': '任务已失效，未发布回答'}
+            db.commit()
+            raise
     record.status = result['status']
     record.snapshot_json = {**trace, 'result':result, 'model_calls':calls}
     db.commit()
@@ -83,7 +101,7 @@ def ask_batch(db, person_ids, question, *, user_id, scope):
         raise BizError(422,'问题需要1至1000个字符')
     # The whole scope is authorized before the first embedding or audit write.
     for person_id in ids:
-        get_person_snapshot(db,person_id,scope=scope)
+        _authorized_snapshot(db,person_id,scope=scope)
     items=[]
     for person_id in ids:
         try:
@@ -101,7 +119,7 @@ def question_history(db, person_id, *, user_id, scope, offset=0, limit=20):
     from copy import deepcopy
     from sqlalchemy import select, func
     from app.models.resume import ParsedResume
-    snapshot = get_person_snapshot(db, person_id, scope=scope)
+    snapshot = _authorized_snapshot(db, person_id, scope=scope)
     if snapshot['status'] != 'ready':
         raise BizError(409, '档案当前不可用，无法查看历史问答')
     if type(offset) is not int or type(limit) is not int or offset < 0 or not 1 <= limit <= 100:

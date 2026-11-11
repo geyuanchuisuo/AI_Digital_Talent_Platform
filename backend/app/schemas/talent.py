@@ -33,6 +33,17 @@ class ParsedResumeSummary(BaseModel):
     phone: str | None = Field(default=None, description="脱敏手机号，如 138****0000")
 
 
+class DuplicateDetection(BaseModel):
+    policy_version: str
+    confidence: Literal['high', 'medium']
+    score: int = Field(ge=0, le=100, description='规则分，非同人概率')
+    matched_fields: list[str]
+    conflict_fields: list[str]
+    block_reasons: list[str]
+    candidate_count: int
+    automatic: bool
+
+
 class DuplicateItem(BaseModel):
     """`GET /talents/duplicates` 的 items 项。"""
 
@@ -44,6 +55,7 @@ class DuplicateItem(BaseModel):
     profile_b: ProfileSummary | None = Field(default=None, description="仅 keep 后才有值")
     parsed_resume: ParsedResumeSummary | None = None
     created_at: datetime
+    detection: DuplicateDetection | None = None
 
 
 class DuplicateResolveRequest(BaseModel):
@@ -120,6 +132,15 @@ class AbilityDimIn(BaseModel):
     basis: str = Field(default="", max_length=200)
 
 
+class TagProof(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    code: str = Field(min_length=1, max_length=150)
+    candidate_id: str = Field(pattern=r'^[a-f0-9]{64}$')
+    catalog_version: str = Field(min_length=1, max_length=64)
+    profile_version: int = Field(ge=1)
+    reason: str = Field(default='', max_length=500)
+
+
 class TalentPatchRequest(BaseModel):
     """`PATCH /talents/{id}` 请求体（接口 §5：只接受画像自有字段）。
 
@@ -142,6 +163,7 @@ class TalentPatchRequest(BaseModel):
     expected_title: str | None = Field(default=None, max_length=100)
     skills: list[str] | None = Field(default=None, max_length=100)
     tags: list[TagEntry | str] | None = Field(default=None, max_length=100)
+    tag_proofs: list[TagProof] = Field(default_factory=list, max_length=50)
     ability_scores: dict[str, AbilityDimIn] | None = None
 
     # —— 一期只读（D-J）：出现即 400，值不参与任何处理 ——

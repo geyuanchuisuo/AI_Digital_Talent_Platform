@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import CHAR, DECIMAL, Index, SmallInteger, String, UniqueConstraint, Integer, Text
+from sqlalchemy import CHAR, DECIMAL, Index, SmallInteger, String, UniqueConstraint, Integer, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -162,3 +162,58 @@ class ProfileQuestion(PKMixin, CreatedAtMixin, Base):
     asked_by: Mapped[int] = mapped_column(PK_TYPE, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     snapshot_json: Mapped[dict] = mapped_column(JSONDict, nullable=False)
+
+
+class ProfileQuestionJob(PKMixin, UpdatedAtMixin, Base):
+    __tablename__ = 'talent_question_jobs'
+    __table_args__ = (
+        UniqueConstraint('asked_by', 'idempotency_key', name='uk_qa_job_owner_key'),
+        Index('idx_qa_job_queue', 'status', 'id'), MYSQL_TABLE_OPTIONS,
+    )
+    asked_by: Mapped[int] = mapped_column(PK_TYPE, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_json: Mapped[dict] = mapped_column(JSONDict, nullable=False)
+    progress_json: Mapped[dict] = mapped_column(JSONDict, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default='pending', server_default=str_default('pending'))
+    stage: Mapped[str] = mapped_column(String(32), nullable=False, default='queued', server_default=str_default('queued'))
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text('0'))
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3, server_default=text('3'))
+    lease_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class GraphSource(PKMixin, UpdatedAtMixin, Base):
+    __tablename__ = 'graph_sources'
+    __table_args__ = (UniqueConstraint('source_kind','source_id',name='uk_graph_source'),MYSQL_TABLE_OPTIONS)
+    source_kind: Mapped[str] = mapped_column(String(20),nullable=False)
+    source_id: Mapped[int] = mapped_column(PK_TYPE,nullable=False)
+    source_version: Mapped[int] = mapped_column(Integer,nullable=False)
+    generation: Mapped[int] = mapped_column(Integer,nullable=False)
+    operation: Mapped[str] = mapped_column(String(20),nullable=False)
+
+
+class GraphSyncJob(PKMixin, UpdatedAtMixin, Base):
+    __tablename__ = 'graph_sync_jobs'
+    __table_args__ = (UniqueConstraint('source_kind','source_id','generation',name='uk_graph_job'),
+        Index('idx_graph_queue','status','id'),MYSQL_TABLE_OPTIONS)
+    source_kind: Mapped[str] = mapped_column(String(20),nullable=False)
+    source_id: Mapped[int] = mapped_column(PK_TYPE,nullable=False)
+    source_version: Mapped[int] = mapped_column(Integer,nullable=False)
+    generation: Mapped[int] = mapped_column(Integer,nullable=False)
+    operation: Mapped[str] = mapped_column(String(20),nullable=False)
+    requested_by: Mapped[int | None] = mapped_column(PK_TYPE,nullable=True)
+    fingerprint: Mapped[str | None] = mapped_column(String(64),nullable=True)
+
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default='pending', server_default=str_default('pending'))
+    stage: Mapped[str] = mapped_column(String(32), nullable=False, default='queued', server_default=str_default('queued'))
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text('0'))
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3, server_default=text('3'))
+    lease_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)

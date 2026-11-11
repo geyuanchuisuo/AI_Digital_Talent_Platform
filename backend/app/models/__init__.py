@@ -123,9 +123,14 @@ from app.modules.training.models import (
     TrainingSession,
 )
 
-from app.models.talent import ProfileQuestion
+from app.models.talent import ProfileQuestion, ProfileQuestionJob
+from app.modules.knowledge.models import KnowledgeDocument, KnowledgeRevision, KnowledgeChunk, KnowledgeQuestionJob
+from app.models.talent import GraphSource, GraphSyncJob
 
 MODEL_CLASSES: tuple[type[Base], ...] = (
+    GraphSource, GraphSyncJob,
+    KnowledgeDocument, KnowledgeRevision, KnowledgeChunk, KnowledgeQuestionJob,
+    ProfileQuestionJob,
     ProfileQuestion,
     TalentProfileVersion,
     TalentFieldEvidence,

@@ -26,6 +26,11 @@
 
 一期没有 handler 时 `run_once()` 不认领任何任务（只做恢复与上报），
 因此 T-12 落地后应用可以安全启动，不会把 pending 任务卡在 running。
+
+B08 扩展：profile_qa 共用线程池，认领时携带独立lease_token及有限执行次数。
+制度知识入库knowledge_ingest与问答knowledge_qa沿用同一fenced机制。
+该类型的恢复会废弃旧凭证；执行体、异常兜底和停止回置均校验凭证，避免迟到写入。
+parse/screen/match 保持原有单参数handler及恢复语义；单进程部署前提不变。
 """
 
 from __future__ import annotations
@@ -36,19 +41,24 @@ from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Callable
+from uuid import uuid4
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import case, func, or_, select, update
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import settings
 from app.core import worker_state
 from app.database import SessionLocal
 from app.models import MatchBatch, ParseTask, ScreenBatch
+from app.models.talent import ProfileQuestionJob
+from app.modules.knowledge.models import KnowledgeRevision, KnowledgeQuestionJob
+from app.modules.talents.graph_models import GraphSyncJob
 
 logger = logging.getLogger("app.runner")
 
-#: handler 只接收任务主键；session、状态流转、error 文案都由 handler 自己负责
-TaskHandler = Callable[[int], None]
+#: 旧handler接收主键；fenced类型额外接收认领凭证，业务自行开session。
+TaskHandler = Callable[..., None]
+ClaimedTask = int | tuple[int, str]
 
 MIN_CONCURRENCY = 1
 MAX_CONCURRENCY = 5
@@ -59,6 +69,7 @@ class _Kind:
     name: str
     model: type
     label: str
+    fenced: bool = False
 
 
 #: 扫描顺序：解析优先（上传后最需要及时反馈），其余按批次类型
@@ -66,6 +77,10 @@ KINDS: tuple[_Kind, ...] = (
     _Kind("parse", ParseTask, "解析"),
     _Kind("screen", ScreenBatch, "筛选"),
     _Kind("match", MatchBatch, "匹配"),
+    _Kind("profile_qa", ProfileQuestionJob, "档案问答", fenced=True),
+    _Kind("knowledge_ingest", KnowledgeRevision, "知识入库", fenced=True),
+    _Kind("knowledge_qa", KnowledgeQuestionJob, "制度问答", fenced=True),
+    _Kind("graph_sync", GraphSyncJob, "图谱同步", fenced=True),
 )
 
 KIND_NAMES: tuple[str, ...] = tuple(kind.name for kind in KINDS)
@@ -84,6 +99,7 @@ class TaskRunner:
         self._concurrency = 0
         #: key=(kind, task_id)；先占位再提交，避免"任务跑完才登记"导致漏减
         self._inflight: dict[tuple[str, int], Future | None] = {}
+        self._tokens: dict[tuple[str, int], str] = {}
         self._last_heartbeat: str | None = None
 
     # ------------------------------------------------------------ 生命周期
@@ -124,6 +140,12 @@ class TaskRunner:
             self._concurrency,
             sorted(self._handlers) or "-",
         )
+
+    def unregister(self, kind: str) -> None:
+        """Disable opt-in consumption before start; pending rows remain durable."""
+        if self.is_running:
+            raise RuntimeError('Cannot unregister a running task consumer')
+        self._handlers.pop(kind, None)
 
     def stop(self, *, timeout: float | None = None) -> None:
         """优雅停止：等任务至 `TASK_SHUTDOWN_TIMEOUT`，超时的回置 pending 保留断点。"""
@@ -193,48 +215,68 @@ class TaskRunner:
 
     # ------------------------------------------------------------ 认领与派发
 
-    def _claim(self, kind: _Kind, limit: int) -> list[int]:
+    def _claim(self, kind: _Kind, limit: int) -> list[ClaimedTask]:
         """扫描 + 逐行乐观锁；`rowcount == 1` 才算抢到。"""
         model = kind.model
         now = datetime.now()
         with self._session_factory() as db:
+            if kind.fenced:
+                db.execute(update(model).where(model.status == 'pending', model.attempt_count >= model.max_attempts)
+                    .values(status='failed', lease_token=None,
+                            error='已达到问答任务重试上限', finished_at=now))
+            with self._lock:
+                active_ids = [tid for name, tid in self._inflight if name == kind.name] if kind.fenced else []
             ids = list(
                 db.execute(
                     select(model.id)
                     .where(model.status == "pending")
+                    .where(model.id.not_in(active_ids))
                     .order_by(model.id)
                     .limit(limit)
                 ).scalars()
             )
-            claimed: list[int] = []
+            claimed: list[ClaimedTask] = []
             for task_id in ids:
+                token = str(uuid4()) if kind.fenced else None
+                values = dict(status="running", started_at=now, heartbeat_at=now)
+                if kind.fenced:
+                    values.update(lease_token=token, attempt_count=model.attempt_count + 1, error=None)
+                conditions = [model.id == task_id, model.status == "pending"]
+                if kind.fenced:
+                    conditions.append(model.attempt_count < model.max_attempts)
                 result = db.execute(
                     update(model)
-                    .where(model.id == task_id, model.status == "pending")
-                    .values(status="running", started_at=now, heartbeat_at=now)
+                    .where(*conditions)
+                    .values(**values)
                 )
                 if result.rowcount == 1:
-                    claimed.append(task_id)
+                    claimed.append((task_id, token) if kind.fenced else task_id)
             db.commit()
         if claimed:
             logger.info("runner: 认领%s任务 %s", kind.label, claimed)
         return claimed
 
-    def _submit(self, kind: _Kind, task_ids: list[int]) -> None:
+    def _submit(self, kind: _Kind, task_ids: list[ClaimedTask]) -> None:
         with self._lock:
             executor = self._executor
         if executor is None:
             # stop 正在发生：把刚认领的任务放回 pending，避免卡在 running
-            for task_id in task_ids:
+            for claimed in task_ids:
+                task_id, token = claimed if kind.fenced else (claimed, None)
+                if token:
+                    self._tokens[(kind.name, task_id)] = token
                 self._reset_to_pending((kind.name, task_id))
             return
 
-        for task_id in task_ids:
+        for claimed in task_ids:
+            task_id, token = claimed if kind.fenced else (claimed, None)
             key = (kind.name, task_id)
             with self._lock:
                 self._inflight[key] = None  # 先占位：任务极快结束时也不会漏减
+                if token:
+                    self._tokens[key] = token
             try:
-                future = executor.submit(self._execute, kind, task_id)
+                future = executor.submit(self._execute, kind, task_id, token)
             except RuntimeError:
                 # stop() 恰好在此刻关池：把任务放回 pending，等重启后续跑
                 logger.warning("runner: 线程池已关闭，任务回置 pending：%s#%s", kind.name, task_id)
@@ -244,34 +286,52 @@ class TaskRunner:
                 if key in self._inflight:
                     self._inflight[key] = future
 
-    def _execute(self, kind: _Kind, task_id: int) -> None:
+    def _execute(self, kind: _Kind, task_id: int, token: str | None = None) -> None:
         handler = self._handlers.get(kind.name)
         try:
             if handler is None:
                 raise RuntimeError(f"任务类型 {kind.name} 的 handler 已注销")
-            handler(task_id)
+            if kind.fenced:
+                handler(task_id, token)
+            else:
+                handler(task_id)
         except Exception as exc:  # noqa: BLE001 - handler 未兜住的异常统一落 failed
             logger.exception("runner: %s任务 %s 执行异常", kind.label, task_id)
-            self._mark_failed(kind, task_id, exc)
+            self._mark_failed(kind, task_id, exc, token)
         finally:
             with self._lock:
-                self._inflight.pop((kind.name, task_id), None)
+                key = (kind.name, task_id)
+                if not kind.fenced or self._tokens.get(key) == token:
+                    self._inflight.pop(key, None)
+                    self._tokens.pop(key, None)
 
-    def _mark_failed(self, kind: _Kind, task_id: int, exc: Exception) -> None:
+    def _mark_failed(self, kind: _Kind, task_id: int, exc: Exception, token: str | None = None) -> None:
         """handler 没写终态就抛异常时的兜底：置 failed，避免永远 running。"""
         message = f"任务执行异常：{exc}"[:2000]
         try:
             with self._session_factory() as db:
-                db.execute(
-                    update(kind.model)
-                    .where(kind.model.id == task_id, kind.model.status == "running")
-                    .values(status="failed", error=message, finished_at=datetime.now())
-                )
+                stmt = update(kind.model).where(kind.model.id == task_id, kind.model.status == "running")
+                values = dict(status="failed", error=message, finished_at=datetime.now())
+                if kind.fenced:
+                    stmt = stmt.where(kind.model.lease_token == token)
+                    values.update(self._recovery_values(kind))
+                db.execute(stmt.values(**values))
                 db.commit()
         except SQLAlchemyError:
             logger.exception("runner: 任务 %s#%s 置 failed 失败", kind.name, task_id)
 
     # ------------------------------------------------------------ 恢复
+
+    @staticmethod
+    def _recovery_values(kind):
+        if not kind.fenced:
+            return dict(status='pending', started_at=None, heartbeat_at=None)
+        exhausted = kind.model.attempt_count >= kind.model.max_attempts
+        return dict(status=case((exhausted, 'failed'), else_='pending'),
+            stage=kind.model.stage,
+            error=case((exhausted, '已达到问答任务重试上限'), else_=None),
+            finished_at=case((exhausted, datetime.now()), else_=None),
+            lease_token=None, started_at=None, heartbeat_at=None)
 
     def _startup_recovery(self) -> None:
         """启动无条件 running→pending，保留 stage/progress（单进程前提，架构 §5.4）。"""
@@ -280,7 +340,7 @@ class TaskRunner:
                 result = db.execute(
                     update(kind.model)
                     .where(kind.model.status == "running")
-                    .values(status="pending", started_at=None, heartbeat_at=None)
+                    .values(**self._recovery_values(kind))
                 )
                 if result.rowcount:
                     logger.info("runner: 启动恢复 %s 个%s任务 running→pending", result.rowcount, kind.label)
@@ -298,7 +358,7 @@ class TaskRunner:
                         model.status == "running",
                         or_(model.heartbeat_at.is_(None), model.heartbeat_at < cutoff),
                     )
-                    .values(status="pending", started_at=None, heartbeat_at=None)
+                    .values(**self._recovery_values(kind))
                 )
                 if result.rowcount:
                     logger.warning(
@@ -316,17 +376,20 @@ class TaskRunner:
             return
         try:
             with self._session_factory() as db:
-                db.execute(
-                    update(kind.model)
-                    .where(kind.model.id == task_id, kind.model.status == "running")
-                    .values(status="pending", started_at=None, heartbeat_at=None)
-                )
+                stmt = update(kind.model).where(kind.model.id == task_id, kind.model.status == "running")
+                if kind.fenced:
+                    token = self._tokens.get(key)
+                    if token is None:
+                        return
+                    stmt = stmt.where(kind.model.lease_token == token)
+                db.execute(stmt.values(**self._recovery_values(kind)))
                 db.commit()
         except SQLAlchemyError:
             logger.exception("runner: 回置 pending 失败 %s#%s", kind_name, task_id)
         finally:
             with self._lock:
                 self._inflight.pop(key, None)
+                self._tokens.pop(key, None)
 
     # ------------------------------------------------------------ 配置与状态
 

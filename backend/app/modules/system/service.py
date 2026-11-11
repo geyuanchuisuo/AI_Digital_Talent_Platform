@@ -30,20 +30,10 @@ def list_user_roles(db: Session, user_id: int) -> list[SysRole]:
 
 
 def widest_data_scope(db: Session, user_id: int) -> str:
-    """账号的最宽数据范围（all > dept > self）；无角色记录回退 users.role 简值。
+    """复用公共权限解析；仅未进入 scoped 模式的旧账号可兼容简值。"""
+    from app.core.auth.scope import resolve_data_scope
 
-    阶段 1 回退口径：users.role == "hr" → all；其余 → self（deny-by-default，
-    与 core/auth/scope.py 的未知角色口径一致）。
-    """
-    rows = list_user_roles(db, user_id)
-    if not rows:
-        user = db.get(User, user_id)
-        return "all" if user is not None and user.role == "hr" else "self"
-    if any(r.data_scope == "all" for r in rows):
-        return "all"
-    if any(r.data_scope == "dept" for r in rows):
-        return "dept"
-    return "self"
+    return resolve_data_scope(db, db.get(User, user_id))
 
 
 def user_has_permission(db: Session, user_id: int, *, action: str, menu_id: int | None = None) -> bool:

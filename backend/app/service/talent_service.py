@@ -190,7 +190,7 @@ def effective_verdict(verdict: str, manual_verdict: str | None) -> str:
 # PATCH：人工修正（F2-6 字段级保护）
 # --------------------------------------------------------------------------- #
 def patch_profile(
-    db: Session, talent_id: int, payload: TalentPatchRequest, *, user_id: int
+    db: Session, talent_id: int, payload: TalentPatchRequest, *, user_id: int, scope=None
 ) -> dict[str, Any]:
     """人工修正画像；返回 {profile, manual_edited_fields, vector_status, profile_text_changed}。
 
@@ -203,17 +203,35 @@ def patch_profile(
     provided = payload.model_fields_set
     values = _build_patch_values(payload, provided)
 
-    changed = [name for name, value in values.items() if getattr(profile, FIELD_COLUMNS[name]) != value]
+    # tags contains TagEntry objects, not the persisted list of names; compare it below.
+    changed = [name for name, value in values.items() if name != 'tags' and getattr(profile, FIELD_COLUMNS[name]) != value]
 
     tag_rows_before = profile_dao.get_tag_rows(db, talent_id)
     skills_final = values["skills"] if "skills" in values else list(profile.skills_json or [])
     tags_changed = _tags_changed(tag_rows_before, values)
+    if tags_changed:
+        changed.append('tags')
     skills_changed = "skills" in values and values["skills"] != list(profile.skills_json or [])
     rebuild_tags = tags_changed or skills_changed
     new_tag_rows = (
         build_tag_rows(tag_rows_before, values.get("tags"), skills_final,
                        skills_before=list(profile.skills_json or [])) if rebuild_tags else None
     )
+    reviewed_proofs = []
+    if payload.tag_proofs:
+        if 'tags' not in provided:
+            raise BizError(422, '标签原文确认须与标签一起保存')
+        from app.modules.talents import tag_review
+        final_tags = new_tag_rows if new_tag_rows is not None else [
+            (t.tag,t.tag_type,t.source) for t in tag_rows_before]
+        reviewed_proofs = tag_review.validate(db, profile, payload.tag_proofs, final_tags, scope)
+        confirmed = {item['tag'] for item in reviewed_proofs}
+        promoted = [(tag, kind, 'manual' if tag in confirmed else source) for tag, kind, source in final_tags]
+        if promoted != final_tags:
+            new_tag_rows = promoted
+            rebuild_tags = True
+        if (promoted != final_tags or 'tags' not in (profile.manual_edited_fields or [])) and 'tags' not in changed:
+            changed.append('tags')
 
     if changed:
         # tags 不走标量赋值：tags_json 由下面的标签行重建统一定名（否则 TagEntry 会泄进 JSON 列）
@@ -227,6 +245,10 @@ def patch_profile(
         profile_dao.replace_tag_rows(db, talent_id, new_tag_rows)
         profile.tags_json = [name for name, _, _ in new_tag_rows]
     if not changed and not rebuild_tags:
+        if reviewed_proofs:
+            from app.modules.talents.history import current_version
+            tag_review.persist(db, profile, reviewed_proofs, current_version(db, profile.id).version, user_id)
+            db.commit()
         # 无实际变化：不写库、不触发向量（验收点「改一个 hash 不变的字段则零 embedding」的极限情形）
         return {
             "profile": _profile_out(profile, tag_rows_before),
@@ -234,7 +256,9 @@ def patch_profile(
             "vector_status": profile.vector_status,
             "profile_text_changed": False,
         }
-    save_version(db, profile, "manual_edit", changed_by=user_id)
+    saved_version = save_version(db, profile, "manual_edit", changed_by=user_id)
+    if reviewed_proofs:
+        tag_review.persist(db, profile, reviewed_proofs, saved_version, user_id)
     db.commit()
     db.refresh(profile)
 
