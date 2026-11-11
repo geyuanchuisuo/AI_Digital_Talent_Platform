@@ -181,3 +181,49 @@ export function retryRun(threadId: string) {
     `/workflows/runs/${encodeURIComponent(threadId)}/retry`, {},
   );
 }
+
+// ---- T-D16/T-D10：节点元数据 + Dify DSL 导出/显式导入/对账（D 域画布对接）----
+
+export interface NodeTypeMeta {
+  type: string;
+  label: string;
+}
+
+export function fetchNodeTypes(): Promise<{
+  node_types: NodeTypeMeta[];
+  version_statuses: string[];
+  trigger_types: string[];
+}> {
+  return get('/workflows/meta/node-types');
+}
+
+export interface DifyDslExport {
+  version_id: number;
+  dsl_version: string;
+  app_name: string;
+  node_count: number;
+  edge_count: number;
+  yaml: string;
+}
+
+export function exportDifyDsl(versionId: number): Promise<DifyDslExport> {
+  return get<DifyDslExport>(`/workflows/versions/${versionId}/dify-dsl`);
+}
+
+export function importDifyDsl(
+  definitionId: number,
+  yaml: string,
+): Promise<{ definition_id: number; version_id: number; version: number; status: string; node_count: number; edge_count: number }> {
+  return post(`/workflows/definitions/${definitionId}/dify-import`, { yaml });
+}
+
+export interface DifyReconcileReport {
+  version_id: number;
+  identical: boolean;
+  nodes: { added: string[]; removed: string[]; changed: Array<{ node_key: string; fields: string[] }> };
+  edges: { added: Array<{ source: string; target: string; branch: string | null }>; removed: Array<{ source: string; target: string; branch: string | null }>; changed: Array<{ source: string; target: string; branch: string | null; fields: string[] }> };
+}
+
+export function reconcileDifyDsl(versionId: number, yaml: string): Promise<DifyReconcileReport> {
+  return post<DifyReconcileReport>(`/workflows/versions/${versionId}/dify-reconcile`, { yaml });
+}
