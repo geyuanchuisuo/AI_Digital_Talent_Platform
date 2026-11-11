@@ -122,6 +122,10 @@ class Settings(BaseSettings):
     # 超时由 PG statement_timeout 强制；行数由 fetchmany(max+1) 截断——均为 T-D09 ③ 默认口径。
     nl2sql_timeout_seconds: int = 30
     nl2sql_max_rows: int = 1000
+    # D14 生成器选择：openai_compat（默认，OpenAI 兼容 chat 生成）| vanna_native
+    # （vanna 2.0.2 Agent 架构原生接入——vanna 自带 OpenAILlmService + Agent 编排，
+    # 经 `VannaNativeGenerator` 适配同一 SQLGenerator 协议，校验器/执行器零改动）。
+    nl2sql_generator: str = "openai_compat"
 
     # ---- 应用与网络 ----
     cors_origins: str = "*"

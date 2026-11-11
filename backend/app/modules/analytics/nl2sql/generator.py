@@ -98,7 +98,19 @@ class RefusingGenerator:
 
 
 def get_generator() -> SQLGenerator:
-    """按配置选择生成器；spark key 可用 → OpenAI 兼容生成器，否则拒答兜底。"""
+    """按配置选择生成器；LLM key 可用 → 对应生成器，否则拒答兜底。
+
+    `NL2SQL_GENERATOR`：openai_compat（默认）| vanna_native（PRD D14 原生接入）。
+    """
     if _is_placeholder(settings.llm_api_key):
         return RefusingGenerator()
-    return OpenAICompatGenerator()
+    mode = (settings.nl2sql_generator or "openai_compat").strip().lower()
+    if mode == "vanna_native":
+        from app.modules.analytics.nl2sql.vanna_native import (  # noqa: PLC0415 可选链路延迟导入
+            VannaNativeGenerator,
+        )
+
+        return VannaNativeGenerator()
+    if mode in ("", "openai_compat"):
+        return OpenAICompatGenerator()
+    raise ValueError(f"NL2SQL_GENERATOR 非法：{settings.nl2sql_generator!r}（允许 openai_compat / vanna_native）")
