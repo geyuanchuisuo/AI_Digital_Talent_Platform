@@ -40,6 +40,8 @@ class InventoryReview(PKMixin, CrossDbUpdatedAtMixin, Base):
     # 正式评级所依据的九宫格标准配置版本；无经批准配置时保持 NULL（待评估）
     grid_config_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reviewer_manager_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 经理本人初评依据；仅由经理初评入口写入，管理侧代填不计（REQ-INV-002）
+    manager_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     reviewer_hr_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)

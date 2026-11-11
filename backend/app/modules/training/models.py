@@ -29,6 +29,20 @@ class TrainingCourse(PKMixin, CrossDbUpdatedAtMixin, Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     feedback_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     feedback_note_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # C06 报名审批链配置：none=免审批 / manager=直属经理审批 / admin=培训管理员审批
+    approval_mode: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="admin", server_default=str_default("admin")
+    )
+    # 涉及费用或占用工作时间：经理审批后仍须培训管理员复核
+    has_cost: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, default=0, server_default=text("0")
+    )
+    occupies_work_time: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, default=0, server_default=text("0")
+    )
+    # C08 正式完成条件（按课程配置）：{"min_evidence_score": float, "required_evidence_types": [str]}
+    # 未配置时回退平台默认阈值；正式完成只按本课程条件判定，不用全局固定值
+    completion_rules_json: Mapped[dict | None] = mapped_column(JSONDict, nullable=True)
     created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
     updated_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
@@ -217,6 +231,9 @@ class TrainingEnrollment(PKMixin, CrossDbUpdatedAtMixin, Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     decided_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # C06 直属经理审批留痕（manager 模式下先于管理员复核）；最终决定仍记 decided_by/at
+    manager_decided_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    manager_decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -240,6 +257,33 @@ class TrainingLearningEvidence(PKMixin, CrossDbUpdatedAtMixin, Base):
     payload_json: Mapped[dict] = mapped_column(JSONDict, nullable=False, default=dict)
     score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default=text("0"))
     verified_by: Mapped[str | None] = mapped_column(String(30), nullable=True)
+
+
+class TrainingStudySession(PKMixin, CrossDbUpdatedAtMixin, Base):
+    """服务端学习会话（C08 防挂机）：有效学时只累计「有交互心跳」的区间。
+
+    签发时建会话；员工学习期间须周期性发送心跳，服务端按相邻心跳间隔累计
+    `active_minutes`。仅签发后静默等待（无心跳）不产生有效学时，不能兑换学习证据。
+    `nonce` 与签名凭证一一对应，结算后置 `consumed` 防重放。
+    """
+
+    __tablename__ = "training_study_sessions"
+    __table_args__ = (
+        UniqueConstraint("nonce", name="uk_study_session_nonce"),
+        MYSQL_TABLE_OPTIONS,
+    )
+
+    learning_record_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    employee_user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    nonce: Mapped[str] = mapped_column(String(32), nullable=False)
+    issued_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    heartbeat_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    active_minutes: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default=text("0"))
+    consumed: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, default=0, server_default=text("0")
+    )
 
 
 class PrejobPlan(PKMixin, CrossDbUpdatedAtMixin, Base):

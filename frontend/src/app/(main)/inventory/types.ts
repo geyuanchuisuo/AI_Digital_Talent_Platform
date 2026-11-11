@@ -17,6 +17,7 @@ export interface InventoryReview {
   potential_hr_score?: number | null;
   grid_cell?: string | null;
   reviewer_manager_id: number | null;
+  manager_comment?: string | null;
   reviewer_hr_id: number | null;
   confirmed_at: string | null;
   summary: string | null;

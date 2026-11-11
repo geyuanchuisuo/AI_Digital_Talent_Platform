@@ -52,6 +52,7 @@ from app.modules.training.models import (
     TrainingPlanItem,
     TrainingPlanVersion,
     TrainingSession,
+    TrainingStudySession,
 )
 
 ALL_MODELS: tuple[type, ...] = (
@@ -82,6 +83,7 @@ ALL_MODELS: tuple[type, ...] = (
     TrainingGrowthEvent,
     TrainingEnrollment,
     TrainingLearningEvidence,
+    TrainingStudySession,
     PrejobPlan,
     PrejobPhase,
     PrejobPlanVersion,

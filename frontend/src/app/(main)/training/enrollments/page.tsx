@@ -21,12 +21,13 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { getUser, isManagement } from '@/lib/auth';
 import { getErrorMessage } from '@/lib/http';
 
 import {
+  adminReviewEnrollment,
   applyEnrollment,
   confirmEnrollment,
   confirmFormalCompletion,
@@ -35,7 +36,9 @@ import {
   fetchEnrollments,
   fetchLearningEvidence,
   fetchMyPlans,
+  managerDecideEnrollment,
   releaseExpiredEnrollments,
+  sendStudyHeartbeat,
   startLearningSession,
   submitLearningEvidence,
 } from '../api';
@@ -43,6 +46,7 @@ import type { LearningEvidence, TrainingCourse, TrainingEnrollment } from '../ty
 
 const ENROLL_STATUS: Record<string, { color: string; text: string }> = {
   pending: { color: 'processing', text: '待审批' },
+  pending_admin_review: { color: 'gold', text: '待管理员复核' },
   approved: { color: 'success', text: '已通过' },
   rejected: { color: 'error', text: '已拒绝' },
   waitlisted: { color: 'warning', text: '候补' },
@@ -74,7 +78,7 @@ function useCourses() {
   return courses;
 }
 
-function EnrollmentTable({ isAdmin }: { isAdmin: boolean }) {
+function EnrollmentTable({ isAdmin, isManager }: { isAdmin: boolean; isManager: boolean }) {
   const [rows, setRows] = useState<TrainingEnrollment[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -123,6 +127,32 @@ function EnrollmentTable({ isAdmin }: { isAdmin: boolean }) {
     }
   };
 
+  const managerDecide = async (row: TrainingEnrollment, status: 'approved' | 'rejected') => {
+    try {
+      const res = await managerDecideEnrollment(row.id, { status });
+      message.success(
+        status === 'rejected'
+          ? '经理已拒绝'
+          : res.status === 'pending_admin_review'
+            ? '经理已通过，涉费/工时转管理员复核'
+            : '经理已通过',
+      );
+      void load();
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    }
+  };
+
+  const adminReview = async (row: TrainingEnrollment, status: 'approved' | 'rejected') => {
+    try {
+      await adminReviewEnrollment(row.id, { status });
+      message.success(status === 'approved' ? '复核通过' : '复核拒绝');
+      void load();
+    } catch (error) {
+      message.error(getErrorMessage(error));
+    }
+  };
+
   const columns: ColumnsType<TrainingEnrollment> = [
     { title: '报名 ID', dataIndex: 'id', width: 80 },
     { title: '课程 ID', dataIndex: 'course_id', width: 90 },
@@ -139,9 +169,16 @@ function EnrollmentTable({ isAdmin }: { isAdmin: boolean }) {
           {
             title: '操作',
             key: 'action',
-            width: 150,
+            width: 170,
             render: (_: unknown, row: TrainingEnrollment) =>
-              row.status === 'pending' || row.status === 'waitlisted' ? (
+              row.status === 'pending_admin_review' ? (
+                <Space size={8}>
+                  <a onClick={() => void adminReview(row, 'approved')}>复核通过</a>
+                  <a style={{ color: '#cf1322' }} onClick={() => void adminReview(row, 'rejected')}>
+                    复核拒绝
+                  </a>
+                </Space>
+              ) : row.status === 'pending' || row.status === 'waitlisted' ? (
                 <Space size={8}>
                   <a onClick={() => void decide(row, 'approved')}>通过</a>
                   <a style={{ color: '#cf1322' }} onClick={() => void decide(row, 'rejected')}>
@@ -157,19 +194,38 @@ function EnrollmentTable({ isAdmin }: { isAdmin: boolean }) {
               ),
           },
         ]
-      : [
-          {
-            title: '操作',
-            key: 'action',
-            width: 120,
-            render: (_: unknown, row: TrainingEnrollment) =>
-              row.status === 'awaiting_confirmation' ? (
-                <a onClick={() => void confirmSeat(row)}>确认名额</a>
-              ) : (
-                '—'
-              ),
-          },
-        ]),
+      : isManager
+        ? [
+            {
+              title: '操作',
+              key: 'action',
+              width: 150,
+              render: (_: unknown, row: TrainingEnrollment) =>
+                row.status === 'pending' ? (
+                  <Space size={8}>
+                    <a onClick={() => void managerDecide(row, 'approved')}>经理通过</a>
+                    <a style={{ color: '#cf1322' }} onClick={() => void managerDecide(row, 'rejected')}>
+                      经理拒绝
+                    </a>
+                  </Space>
+                ) : (
+                  '—'
+                ),
+            },
+          ]
+        : [
+            {
+              title: '操作',
+              key: 'action',
+              width: 120,
+              render: (_: unknown, row: TrainingEnrollment) =>
+                row.status === 'awaiting_confirmation' ? (
+                  <a onClick={() => void confirmSeat(row)}>确认名额</a>
+                ) : (
+                  '—'
+                ),
+            },
+          ]),
   ];
 
   return (
@@ -182,8 +238,10 @@ function EnrollmentTable({ isAdmin }: { isAdmin: boolean }) {
     >
       <Typography.Paragraph type="secondary">
         {isAdmin
-          ? '待审批报名需在截止时间内处理，超时未审批可点「释放超时占位」自动释放并递补候补。'
-          : '报名后等待管理员审批；名额满时进入候补，收到递补通知后需在 24 小时内确认，确认后仍走审批规则，超时未确认名额将释放给下一位。'}
+          ? '待审批报名需在截止时间内处理；经理已通过且涉费/工时的报名进入「待管理员复核」，由管理员复核。超时未审批可点「释放超时占位」自动释放并递补候补。'
+          : isManager
+            ? '仅显示本部门员工的报名。manager 模式课程由直属经理本人审批，管理员不可越过经理环节；涉费/工时报名经理通过后转管理员复核。候补递补须员工本人确认，经理不可代确认。'
+            : '报名后按课程审批模式等待审批；名额满时进入候补，收到递补通知后需在 24 小时内本人确认，确认后仍走审批规则，超时未确认名额将释放给下一位。'}
       </Typography.Paragraph>
       <Table rowKey="id" size="small" loading={loading} columns={columns} dataSource={rows} pagination={false} />
     </Card>
@@ -236,6 +294,34 @@ function EvidencePanel({ isAdmin }: { isAdmin: boolean }) {
   const [recordId, setRecordId] = useState<number | null>(null);
   const [rows, setRows] = useState<LearningEvidence[]>([]);
   const [recordOptions, setRecordOptions] = useState<{ value: number; label: string }[]>([]);
+  const [session, setSession] = useState<{ recordId: number; token: string } | null>(null);
+  const [heartbeatCount, setHeartbeatCount] = useState(0);
+  const [activeMinutes, setActiveMinutes] = useState(0);
+  const heartbeatTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopHeartbeat = useCallback(() => {
+    if (heartbeatTimer.current) {
+      clearInterval(heartbeatTimer.current);
+      heartbeatTimer.current = null;
+    }
+  }, []);
+
+  useEffect(() => stopHeartbeat, [stopHeartbeat]);
+
+  const beat = useCallback(
+    async (id: number, token: string) => {
+      try {
+        const res = await sendStudyHeartbeat(id, token);
+        setHeartbeatCount(res.heartbeat_count);
+        setActiveMinutes(res.active_minutes);
+      } catch (error) {
+        message.error(getErrorMessage(error));
+        stopHeartbeat();
+        setSession(null);
+      }
+    },
+    [stopHeartbeat],
+  );
 
   useEffect(() => {
     if (isAdmin) return;
@@ -306,10 +392,26 @@ function EvidencePanel({ isAdmin }: { isAdmin: boolean }) {
       const res = await startLearningSession(id);
       form.setFieldValue('evidence_type', 'study_session');
       form.setFieldValue('payload', JSON.stringify({ session_token: res.session_token }));
-      message.success(`已领取学习会话凭证，${res.expires_at} 前结算，需有效学习满 5 分钟`);
+      stopHeartbeat();
+      setSession({ recordId: id, token: res.session_token });
+      setHeartbeatCount(0);
+      setActiveMinutes(0);
+      heartbeatTimer.current = setInterval(
+        () => void beat(id, res.session_token),
+        Math.max(1, res.heartbeat_interval_seconds) * 1000,
+      );
+      message.success(
+        `已领取学习会话凭证，${res.expires_at} 前结算；学习期间自动上报心跳，需有效学习满 5 分钟（无交互等待不计学时）`,
+      );
     } catch (error) {
       message.error(getErrorMessage(error));
     }
+  };
+
+  const stopSession = () => {
+    stopHeartbeat();
+    setSession(null);
+    message.info('已停止学习会话心跳，可提交证据结算');
   };
 
   const confirm = async () => {
@@ -376,8 +478,24 @@ function EvidencePanel({ isAdmin }: { isAdmin: boolean }) {
               ]}
             />
           </Form.Item>
-          <Button onClick={() => void startSession()}>领取学习会话凭证</Button>
+          <Button onClick={() => void startSession()} disabled={Boolean(session)}>
+            领取学习会话凭证
+          </Button>
+          {session && (
+            <>
+              <Button onClick={() => void beat(session.recordId, session.token)}>立即发送心跳</Button>
+              <Button danger onClick={stopSession}>
+                停止会话
+              </Button>
+            </>
+          )}
         </Space>
+        {session && (
+          <Typography.Paragraph type="secondary" style={{ marginTop: 8 }}>
+            学习会话进行中：已上报心跳 {heartbeatCount} 次，累计有效学时 {activeMinutes.toFixed(1)} 分钟。
+            需 ≥3 次心跳且有效学习满 5 分钟方可结算；停止或离开页面将中断心跳，挂机等待不计学时。
+          </Typography.Paragraph>
+        )}
         <Form.Item name="payload" label="证据内容（仅学习会话需填写 session_token）">
           <Input.TextArea rows={2} placeholder='{"session_token": "…"}' />
         </Form.Item>
@@ -426,17 +544,25 @@ function EvidencePanel({ isAdmin }: { isAdmin: boolean }) {
 
 export default function TrainingEnrollmentsPage() {
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isManager, setIsManager] = useState(false);
 
   useEffect(() => {
     setIsAdmin(isManagement());
+    setIsManager(getUser()?.role === 'dept_manager');
   }, []);
+
+  const listLabel = isAdmin ? '报名审批' : isManager ? '部门报名审批' : '我的报名';
 
   return (
     <Card title="培训报名与学习证据">
       <Tabs
         items={[
-          ...(isAdmin ? [] : [{ key: 'apply', label: '课程报名', children: <EmployeeApply /> }]),
-          { key: 'list', label: isAdmin ? '报名审批' : '我的报名', children: <EnrollmentTable isAdmin={isAdmin} /> },
+          ...(isAdmin || isManager ? [] : [{ key: 'apply', label: '课程报名', children: <EmployeeApply /> }]),
+          {
+            key: 'list',
+            label: listLabel,
+            children: <EnrollmentTable isAdmin={isAdmin} isManager={isManager} />,
+          },
           { key: 'evidence', label: '学习证据', children: <EvidencePanel isAdmin={isAdmin} /> },
         ]}
       />

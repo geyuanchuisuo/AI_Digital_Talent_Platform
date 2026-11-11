@@ -33,7 +33,9 @@ from app.modules.training.schemas import (
     CourseCreateRequest,
     CourseUpdateRequest,
     DraftRequest,
+    EnrollmentAdminReviewRequest,
     EnrollmentDecideRequest,
+    EnrollmentManagerDecideRequest,
     EnrollmentRequest,
     EvidenceSubmitRequest,
     ExtensionDecideRequest,
@@ -46,6 +48,7 @@ from app.modules.training.schemas import (
     ProgressUpdateRequest,
     ReminderScanRequest,
     SessionCreateRequest,
+    StudyHeartbeatRequest,
 )
 
 router = APIRouter(prefix="/api/training", tags=["training"])
@@ -61,6 +64,10 @@ def _course_out(row: TrainingCourse) -> dict[str, Any]:
         "capacity": row.capacity,
         "status": row.status,
         "version": row.version,
+        "approval_mode": row.approval_mode,
+        "has_cost": bool(row.has_cost),
+        "occupies_work_time": bool(row.occupies_work_time),
+        "completion_rules": dict(row.completion_rules_json) if row.completion_rules_json else None,
         "feedback_note": row.feedback_note,
         "feedback_note_at": row.feedback_note_at,
         "created_at": row.created_at,
@@ -346,7 +353,7 @@ def post_enrollment_confirm(
     return ok({"id": row.id, "status": row.status, "expires_at": row.expires_at.isoformat() if row.expires_at else None})
 
 
-@router.post("/enrollments/{enrollment_id}/decide", summary="审批报名")
+@router.post("/enrollments/{enrollment_id}/decide", summary="培训管理员审批报名（admin 模式 / 免审批涉费课程）")
 def post_enrollment_decide(
     enrollment_id: int,
     payload: EnrollmentDecideRequest,
@@ -354,6 +361,28 @@ def post_enrollment_decide(
     db: Annotated[Session, Depends(get_db)],
 ):
     row = service.decide_enrollment(db, enrollment_id, payload, admin=user)
+    return ok({"id": row.id, "status": row.status})
+
+
+@router.post("/enrollments/{enrollment_id}/manager-decide", summary="直属经理审批报名（manager 模式，本部门）")
+def post_enrollment_manager_decide(
+    enrollment_id: int,
+    payload: EnrollmentManagerDecideRequest,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    row = service.manager_decide_enrollment(db, enrollment_id, payload, user=user)
+    return ok({"id": row.id, "status": row.status})
+
+
+@router.post("/enrollments/{enrollment_id}/admin-review", summary="培训管理员复核（经理已通过、涉及费用/工时）")
+def post_enrollment_admin_review(
+    enrollment_id: int,
+    payload: EnrollmentAdminReviewRequest,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    row = service.admin_review_enrollment(db, enrollment_id, payload, admin=user)
     return ok({"id": row.id, "status": row.status})
 
 
@@ -367,7 +396,11 @@ def get_enrollments(
     return ok([
         {"id": r.id, "course_id": r.course_id, "employee_user_id": r.employee_user_id,
          "priority": r.priority, "status": r.status,
-         "expires_at": r.expires_at.isoformat() if r.expires_at else None, "note": r.note}
+         "expires_at": r.expires_at.isoformat() if r.expires_at else None, "note": r.note,
+         "manager_decided_by": r.manager_decided_by,
+         "manager_decided_at": r.manager_decided_at.isoformat() if r.manager_decided_at else None,
+         "decided_by": r.decided_by,
+         "decided_at": r.decided_at.isoformat() if r.decided_at else None}
         for r in rows
     ])
 
@@ -390,6 +423,16 @@ def post_study_session(
     db: Annotated[Session, Depends(get_db)],
 ):
     return ok(service.issue_study_session(db, record_id, user=user))
+
+
+@router.post("/learning-records/{record_id}/study-heartbeat", summary="学习心跳（员工本人，防挂机累计有效学时）")
+def post_study_heartbeat(
+    record_id: int,
+    payload: StudyHeartbeatRequest,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    return ok(service.record_study_heartbeat(db, record_id, payload, user=user))
 
 
 @router.post("/learning-evidence", summary="提交学习证据（分数/验证人由服务端计算）")
@@ -741,7 +784,7 @@ def create_capability_change(
     return ok(_capability_change_out(row))
 
 
-@router.get("/capability-rating-changes", summary="能力评级变更队列（管理侧全量 / 员工本人）")
+@router.get("/capability-rating-changes", summary="能力评级变更队列（管理侧/负责部门经理；员工不可见 F10）")
 def list_capability_changes(
     user: CurrentUser,
     db: Annotated[Session, Depends(get_db)],
@@ -765,7 +808,7 @@ def review_capability_change(
     return ok(_capability_change_out(row))
 
 
-@router.get("/capability-ratings", summary="正式能力评级历史（管理侧可按员工过滤 / 员工本人）")
+@router.get("/capability-ratings", summary="正式能力评级历史（管理侧/负责部门经理；员工不可见 F10）")
 def list_capability_ratings(
     user: CurrentUser,
     db: Annotated[Session, Depends(get_db)],

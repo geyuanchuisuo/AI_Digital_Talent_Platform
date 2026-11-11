@@ -21,13 +21,22 @@ export interface ReviewPayload {
   performance_source?: string;
   potential_manager_score?: number | null;
   potential_hr_score?: number | null;
-  reviewer_manager_id?: number | null;
-  reviewer_hr_id?: number | null;
   summary?: string | null;
 }
 
 export function createReview(payload: ReviewPayload) {
   return post<{ id: number }>('/inventory/reviews', payload);
+}
+
+/** C09 经理本人潜力初评（仅草稿、仅负责部门）；reviewer_manager_id 由后端记为初评经理本人 */
+export function managerInitialReview(
+  id: number,
+  payload: { potential_manager_score: number; comment?: string | null },
+) {
+  return post<{ id: number; reviewer_manager_id: number | null; potential_manager_score: number }>(
+    `/inventory/reviews/${id}/manager-assessment`,
+    payload,
+  );
 }
 
 export function updateReview(id: number, payload: Omit<ReviewPayload, 'employee_user_id' | 'cycle_name'>) {

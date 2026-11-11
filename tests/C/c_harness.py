@@ -203,6 +203,18 @@ class Harness:
     def headers(user: User) -> dict[str, str]:
         return {"X-Test-User": str(user.id)}
 
+    def set_department(self, user: User, department_id: int | None) -> User:
+        """设置账号所属部门（A06 部门行级范围测试用）；同步刷新传入对象。"""
+        db = self.SessionLocal()
+        try:
+            row = db.get(User, user.id)
+            row.department_id = department_id
+            db.commit()
+        finally:
+            db.close()
+        user.department_id = department_id
+        return user
+
     def session(self) -> Session:
         return self.SessionLocal()
 

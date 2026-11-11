@@ -22,6 +22,10 @@ class InventoryApiTest(unittest.TestCase):
         self.h = Harness()
         self.admin = self.h.create_user("a", role="admin")
         self.emp = self.h.create_user("e", role="employee")
+        # C09 经理本人初评须由负责部门经理提交：mgr 与 emp 同属 dept 10
+        self.mgr = self.h.create_user("invmgr", role="dept_manager")
+        self.h.set_department(self.mgr, 10)
+        self.h.set_department(self.emp, 10)
         self._seed_approved_config()
 
     def tearDown(self) -> None:
@@ -29,6 +33,16 @@ class InventoryApiTest(unittest.TestCase):
 
     def _post(self, path, payload, user):
         return self.h.client.post(path, json=payload, headers=Harness.headers(user))
+
+    def _manager_initial(self, rid, score=4, comment=None):
+        body = {"potential_manager_score": score}
+        if comment is not None:
+            body["comment"] = comment
+        r = self.h.client.post(
+            f"/api/inventory/reviews/{rid}/manager-assessment",
+            json=body, headers=Harness.headers(self.mgr))
+        self.assertEqual(r.status_code, 200, r.text)
+        return r.json()["data"]
 
     def _seed_approved_config(self, *, hi_min=4, mid_min=3):
         """新建并批准九宫格标准配置；返回配置 id（未批准则正式评级被拒）。"""
@@ -73,7 +87,11 @@ class InventoryApiTest(unittest.TestCase):
         payload.update(scores)
         r = self._post("/api/inventory/reviews", payload, self.admin)
         self.assertEqual(r.status_code, 200)
-        return r.json()["data"]["id"]
+        rid = r.json()["data"]["id"]
+        # 提供经理潜力分时，走经理本人初评入口（管理侧代填不计，C09）
+        if "potential_manager_score" in scores:
+            self._manager_initial(rid, scores["potential_manager_score"])
+        return rid
 
     def test_confirm_rejects_draft_without_submit(self):
         rid = self._create_review(performance_score=5, potential_manager_score=4, potential_hr_score=4)
@@ -85,7 +103,44 @@ class InventoryApiTest(unittest.TestCase):
         rid = self._create_review(performance_score=5, potential_hr_score=4)
         r = self.h.client.post(f"/api/inventory/reviews/{rid}/submit", headers=Harness.headers(self.admin))
         self.assertEqual(r.status_code, 400)
-        self.assertIn("经理初评", r.json()["message"])
+        self.assertIn("初评", r.json()["message"])
+
+    def test_admin_prefilled_manager_score_not_counted(self):
+        # 管理侧代填潜力分 ≠ 经理本人初评：缺 reviewer_manager_id 仍不可提交（C09）
+        r = self._post(
+            "/api/inventory/reviews",
+            {"employee_user_id": self.emp.id, "cycle_name": "2026H1",
+             "performance_score": 5, "potential_manager_score": 4, "potential_hr_score": 4},
+            self.admin,
+        )
+        rid = r.json()["data"]["id"]
+        s = self.h.client.post(f"/api/inventory/reviews/{rid}/submit", headers=Harness.headers(self.admin))
+        self.assertEqual(s.status_code, 400)
+        self.assertIn("初评", s.json()["message"])
+
+    def test_manager_assessment_requires_manager_tier(self):
+        # 管理侧不能替代经理本人初评入口
+        rid = self._create_review(performance_score=5, potential_hr_score=4)
+        r = self.h.client.post(
+            f"/api/inventory/reviews/{rid}/manager-assessment",
+            json={"potential_manager_score": 4}, headers=Harness.headers(self.admin))
+        self.assertEqual(r.status_code, 403)
+
+    def test_manager_assessment_out_of_department(self):
+        # 越权反例：非负责部门经理不可初评
+        other_mgr = self.h.create_user("invmgr2", role="dept_manager")
+        self.h.set_department(other_mgr, 99)
+        rid = self._create_review(performance_score=5, potential_hr_score=4)
+        r = self.h.client.post(
+            f"/api/inventory/reviews/{rid}/manager-assessment",
+            json={"potential_manager_score": 4}, headers=Harness.headers(other_mgr))
+        self.assertEqual(r.status_code, 403)
+
+    def test_manager_initial_records_self_as_reviewer(self):
+        rid = self._create_review(performance_score=5, potential_hr_score=4)
+        data = self._manager_initial(rid, 4, comment="潜力良好")
+        self.assertEqual(data["reviewer_manager_id"], self.mgr.id)
+        self.assertEqual(data["potential_manager_score"], 4)
 
     def test_submit_requires_performance_score(self):
         rid = self._create_review(potential_manager_score=4, potential_hr_score=4)
@@ -174,6 +229,7 @@ class InventoryApiTest(unittest.TestCase):
              "performance_score": 5, "potential_manager_score": 4, "potential_hr_score": 5},
             self.admin,
         ).json()["data"]["id"]
+        self._manager_initial(rid, 4)
         self.h.client.post(f"/api/inventory/reviews/{rid}/submit", headers=Harness.headers(self.admin))
         self.h.client.post(f"/api/inventory/reviews/{rid}/confirm", headers=Harness.headers(self.admin))
         # 异议
@@ -206,6 +262,7 @@ class InventoryApiTest(unittest.TestCase):
              "performance_score": 5, "potential_manager_score": 4, "potential_hr_score": 5},
             self.admin,
         ).json()["data"]["id"]
+        self._manager_initial(rid, 4)
         self.h.client.post(f"/api/inventory/reviews/{rid}/submit", headers=Harness.headers(self.admin))
         self.h.client.post(f"/api/inventory/reviews/{rid}/confirm", headers=Harness.headers(self.admin))
         r = self.h.client.get(
@@ -382,6 +439,175 @@ class TrainingEnrollmentTest(unittest.TestCase):
         self.assertEqual({row["id"]: row["status"] for row in rows}[eid], "expired")
 
 
+class EnrollmentApprovalChainTest(unittest.TestCase):
+    """C06 完整职责审批链：免审批/直属经理审批 + 涉费/工时管理员复核；本人确认不可绕过。"""
+
+    def setUp(self) -> None:
+        self.h = Harness()
+        self.admin = self.h.create_user("a", role="admin")
+        self.emp = self.h.create_user("e", role="employee")
+        self.mgr = self.h.create_user("m", role="dept_manager")
+        self.h.set_department(self.emp, 10)
+        self.h.set_department(self.mgr, 10)
+
+    def tearDown(self) -> None:
+        self.h.close()
+
+    def _course(self, **cfg):
+        body = {"title": "链", "description": "x", "material_url": "http://x"}
+        body.update(cfg)
+        return self.h.client.post(
+            "/api/training/courses", json=body, headers=Harness.headers(self.admin)).json()["data"]["id"]
+
+    def _apply(self, course_id, user=None):
+        return self.h.client.post(
+            "/api/training/enrollments", json={"course_id": course_id},
+            headers=Harness.headers(user or self.emp)).json()["data"]
+
+    def _manager_decide(self, eid, status, user=None):
+        return self.h.client.post(
+            f"/api/training/enrollments/{eid}/manager-decide", json={"status": status},
+            headers=Harness.headers(user or self.mgr))
+
+    def _admin_review(self, eid, status):
+        return self.h.client.post(
+            f"/api/training/enrollments/{eid}/admin-review", json={"status": status},
+            headers=Harness.headers(self.admin))
+
+    def test_none_mode_auto_approves(self):
+        cid = self._course(approval_mode="none")
+        row = self._apply(cid)
+        self.assertEqual(row["status"], "approved")
+
+    def test_none_mode_with_cost_still_needs_admin(self):
+        cid = self._course(approval_mode="none", has_cost=True)
+        row = self._apply(cid)
+        self.assertEqual(row["status"], "pending")
+        d = self.h.client.post(
+            f"/api/training/enrollments/{row['id']}/decide", json={"status": "approved"},
+            headers=Harness.headers(self.admin))
+        self.assertEqual(d.json()["data"]["status"], "approved")
+
+    def test_manager_mode_no_cost_manager_approves(self):
+        cid = self._course(approval_mode="manager")
+        row = self._apply(cid)
+        self.assertEqual(row["status"], "pending")
+        d = self._manager_decide(row["id"], "approved")
+        self.assertEqual(d.status_code, 200, d.text)
+        self.assertEqual(d.json()["data"]["status"], "approved")
+
+    def test_manager_mode_with_cost_requires_admin_review(self):
+        cid = self._course(approval_mode="manager", occupies_work_time=True)
+        row = self._apply(cid)
+        d = self._manager_decide(row["id"], "approved")
+        self.assertEqual(d.json()["data"]["status"], "pending_admin_review")
+        # 复核前不算正式通过
+        rows = self.h.client.get("/api/training/enrollments", headers=Harness.headers(self.admin)).json()["data"]
+        self.assertEqual({r["id"]: r["status"] for r in rows}[row["id"]], "pending_admin_review")
+        rv = self._admin_review(row["id"], "approved")
+        self.assertEqual(rv.json()["data"]["status"], "approved")
+
+    def test_admin_review_rejects(self):
+        cid = self._course(approval_mode="manager", has_cost=True)
+        row = self._apply(cid)
+        self._manager_decide(row["id"], "approved")
+        rv = self._admin_review(row["id"], "rejected")
+        self.assertEqual(rv.json()["data"]["status"], "rejected")
+
+    def test_admin_cannot_bypass_manager_step(self):
+        cid = self._course(approval_mode="manager")
+        row = self._apply(cid)
+        d = self.h.client.post(
+            f"/api/training/enrollments/{row['id']}/decide", json={"status": "approved"},
+            headers=Harness.headers(self.admin))
+        self.assertEqual(d.status_code, 400)
+        self.assertIn("经理", d.json()["message"])
+
+    def test_employee_cannot_manager_decide(self):
+        cid = self._course(approval_mode="manager")
+        row = self._apply(cid)
+        d = self._manager_decide(row["id"], "approved", user=self.emp)
+        self.assertEqual(d.status_code, 403)
+
+    def test_out_of_department_manager_cannot_decide(self):
+        other_mgr = self.h.create_user("m2", role="dept_manager")
+        self.h.set_department(other_mgr, 20)
+        cid = self._course(approval_mode="manager")
+        row = self._apply(cid)
+        d = self._manager_decide(row["id"], "approved", user=other_mgr)
+        self.assertEqual(d.status_code, 403)
+
+    def test_admin_review_only_on_pending_admin_review(self):
+        cid = self._course(approval_mode="manager")
+        row = self._apply(cid)
+        # 未经经理审批，不在复核环节
+        rv = self._admin_review(row["id"], "approved")
+        self.assertEqual(rv.status_code, 400)
+
+    def test_manager_decide_requires_manager_mode(self):
+        cid = self._course(approval_mode="admin")
+        row = self._apply(cid)
+        d = self._manager_decide(row["id"], "approved")
+        self.assertEqual(d.status_code, 400)
+
+    def test_manager_reject_promotes_waitlist(self):
+        cid = self._course(approval_mode="manager", capacity=1)
+        emp2 = self.h.create_user("e2", role="employee")
+        self.h.set_department(emp2, 10)
+        first = self._apply(cid)
+        second = self._apply(cid, user=emp2)
+        self.assertEqual(second["status"], "waitlisted")
+        d = self._manager_decide(first["id"], "rejected")
+        self.assertEqual(d.json()["data"]["status"], "rejected")
+        rows = self.h.client.get("/api/training/enrollments", headers=Harness.headers(self.admin)).json()["data"]
+        self.assertEqual({r["id"]: r["status"] for r in rows}[second["id"]], "awaiting_confirmation")
+
+    def test_awaiting_confirmation_not_bypassable_by_manager(self):
+        cid = self._course(approval_mode="manager", capacity=1)
+        emp2 = self.h.create_user("e2", role="employee")
+        self.h.set_department(emp2, 10)
+        first = self._apply(cid)
+        second = self._apply(cid, user=emp2)
+        self._manager_decide(first["id"], "rejected")  # 释放 → second 待确认
+        # 经理不能越过本人确认直接审批候补名额
+        d = self._manager_decide(second["id"], "approved")
+        self.assertEqual(d.status_code, 400)
+        self.assertIn("确认", d.json()["message"])
+        # 本人确认后转 pending，再走经理审批
+        self.h.client.post(
+            f"/api/training/enrollments/{second['id']}/confirm", headers=Harness.headers(emp2))
+        d2 = self._manager_decide(second["id"], "approved")
+        self.assertEqual(d2.json()["data"]["status"], "approved")
+
+    def test_none_mode_waitlist_confirm_auto_approves(self):
+        cid = self._course(approval_mode="none", capacity=1)
+        emp2 = self.h.create_user("e2", role="employee")
+        first = self._apply(cid)
+        self.assertEqual(first["status"], "approved")
+        second = self._apply(cid, user=emp2)
+        self.assertEqual(second["status"], "waitlisted")
+        self.h.client.post(
+            f"/api/training/enrollments/{first['id']}/decide", json={"status": "cancelled"},
+            headers=Harness.headers(self.admin))
+        # 递补待确认 → 本人确认 → 免审批课程即通过
+        self.h.client.post(
+            f"/api/training/enrollments/{second['id']}/confirm", headers=Harness.headers(emp2))
+        rows = self.h.client.get("/api/training/enrollments", headers=Harness.headers(self.admin)).json()["data"]
+        self.assertEqual({r["id"]: r["status"] for r in rows}[second["id"]], "approved")
+
+    def test_manager_lists_department_enrollments(self):
+        cid = self._course(approval_mode="manager")
+        row = self._apply(cid)
+        rows = self.h.client.get("/api/training/enrollments", headers=Harness.headers(self.mgr)).json()["data"]
+        self.assertIn(row["id"], {r["id"] for r in rows})
+        # 非本部门经理看不到
+        other_mgr = self.h.create_user("m3", role="dept_manager")
+        self.h.set_department(other_mgr, 20)
+        other_rows = self.h.client.get(
+            "/api/training/enrollments", headers=Harness.headers(other_mgr)).json()["data"]
+        self.assertNotIn(row["id"], {r["id"] for r in other_rows})
+
+
 class PrejobPlanApiTest(unittest.TestCase):
     def setUp(self) -> None:
         self.h = Harness()
@@ -476,6 +702,10 @@ class CapabilityRatingChainTest(unittest.TestCase):
         self.mgr = self.h.create_user("mgr", role="dept_manager")
         self.emp = self.h.create_user("capemp", role="employee")
         self.other_emp = self.h.create_user("capother", role="employee")
+        # C14 负责部门范围：mgr 负责 dept 10，emp 属 dept 10；other_emp 属 dept 20（越权反例）
+        self.h.set_department(self.mgr, 10)
+        self.h.set_department(self.emp, 10)
+        self.h.set_department(self.other_emp, 20)
 
     def tearDown(self) -> None:
         self.h.close()
@@ -653,7 +883,8 @@ class CapabilityRatingChainTest(unittest.TestCase):
         )
         self.assertEqual(r.status_code, 403)
 
-    def test_employee_only_sees_own_ratings(self):
+    def test_employee_cannot_see_internal_ratings(self):
+        # F10：正式能力评级属内部评级，员工本人也不可见（不再返回本人评级历史）
         change = self._submit()
         self.h.client.post(
             f"/api/training/capability-rating-changes/{change['id']}/review",
@@ -663,11 +894,58 @@ class CapabilityRatingChainTest(unittest.TestCase):
         mine = self.h.client.get(
             "/api/training/capability-ratings", headers=Harness.headers(self.emp)
         ).json()["data"]
-        self.assertEqual(len(mine), 1)
-        other = self.h.client.get(
-            "/api/training/capability-ratings", headers=Harness.headers(self.other_emp)
+        self.assertEqual(mine, [])
+        # 员工也看不到变更队列（含内部评级过程数据）
+        changes = self.h.client.get(
+            "/api/training/capability-rating-changes", headers=Harness.headers(self.emp)
         ).json()["data"]
-        self.assertEqual(other, [])
+        self.assertEqual(changes, [])
+        # HR 仍可见正式评级
+        hr_view = self.h.client.get(
+            f"/api/training/capability-ratings?employee_user_id={self.emp.id}",
+            headers=Harness.headers(self.hr),
+        ).json()["data"]
+        self.assertEqual(len(hr_view), 1)
+
+    def test_manager_cannot_submit_out_of_department(self):
+        # 越权反例：mgr 负责 dept 10，other_emp 属 dept 20 → 拒绝
+        r = self.h.client.post(
+            "/api/training/capability-rating-changes",
+            json=self._change_payload(employee_user_id=self.other_emp.id),
+            headers=Harness.headers(self.mgr),
+        )
+        self.assertEqual(r.status_code, 403)
+
+    def test_manager_cannot_list_out_of_department_ratings(self):
+        change = self._submit()
+        self.h.client.post(
+            f"/api/training/capability-rating-changes/{change['id']}/review",
+            json={"approve": True, "final_level": 4},
+            headers=Harness.headers(self.hr),
+        )
+        # 越权反例：mgr 显式查询非本部门员工评级 → 403
+        r = self.h.client.get(
+            f"/api/training/capability-ratings?employee_user_id={self.other_emp.id}",
+            headers=Harness.headers(self.mgr),
+        )
+        self.assertEqual(r.status_code, 403)
+        # mgr 不带过滤的列表只含本部门员工，不含 other_emp
+        rows = self.h.client.get(
+            "/api/training/capability-ratings", headers=Harness.headers(self.mgr)
+        ).json()["data"]
+        self.assertTrue(all(row["employee_user_id"] != self.other_emp.id for row in rows))
+
+    def test_out_of_department_manager_cannot_review(self):
+        # 越权反例：另一部门经理即便有审核接口权限也无负责范围（HR 审核须管理侧）
+        other_mgr = self.h.create_user("mgr2", role="dept_manager")
+        self.h.set_department(other_mgr, 20)
+        change = self._submit()
+        r = self.h.client.post(
+            f"/api/training/capability-rating-changes/{change['id']}/review",
+            json={"approve": True, "final_level": 4},
+            headers=Harness.headers(other_mgr),
+        )
+        self.assertEqual(r.status_code, 403)
 
 
 class GrowthTrajectoryTest(unittest.TestCase):
@@ -734,7 +1012,8 @@ class GrowthTrajectoryTest(unittest.TestCase):
 
     def test_domains_and_self_vs_formal(self):
         self._seed()
-        data = self._get(self.emp).json()["data"]
+        # 内部视角（HR）才可见 hr_ability 正式评级域；员工视角见 F10 反例测试
+        data = self._get(self.hr, f"?employee_user_id={self.emp.id}").json()["data"]
         self.assertEqual(data["employee_user_id"], self.emp.id)
         domains = {d["source_type"]: d for d in data["domains"]}
         self.assertEqual(domains["assessment"]["event_count"], 1)
@@ -748,17 +1027,63 @@ class GrowthTrajectoryTest(unittest.TestCase):
         self.assertFalse(by_event["course_formally_completed"]["self_reported"])
         self.assertTrue(by_event["course_formally_completed"]["formal"])
 
+    def test_employee_view_hides_internal_formal(self):
+        # F10 反例：员工本人轨迹不返回内部正式评级事件与等级数值
+        self._seed()
+        data = self._get(self.emp).json()["data"]
+        domains = {d["source_type"]: d for d in data["domains"]}
+        self.assertEqual(domains["hr_ability"]["event_count"], 0)
+        self.assertEqual(domains["hr_ability"]["formal_count"], 0)
+        self.assertFalse(any(t["source_type"] == "hr_ability" for t in data["timeline"]))
+        dims = {d["dimension_name"]: d for d in data["dimensions"]}
+        # 仅有正式评级（无测评覆盖）的维度对员工不出现
+        self.assertNotIn("沟通协作", dims)
+        self.assertEqual(dims["数据分析"]["status"], "assessed")
+        self.assertIsNone(dims["数据分析"]["formal_level"])
+
     def test_dimension_status_formal_assessed_notassessed(self):
         self._seed()
-        # 追加一个仅出现在培训维度目录里、无任何评级/测评的维度不会自动纳入宇宙；
-        # 这里验证 formal/assessed 两态
-        data = self._get(self.emp).json()["data"]
+        # 内部视角验证 formal/assessed 两态（员工视角 formal 不可见，见 F10 反例）
+        data = self._get(self.hr, f"?employee_user_id={self.emp.id}").json()["data"]
         dims = {d["dimension_name"]: d for d in data["dimensions"]}
         self.assertEqual(dims["沟通协作"]["status"], "formal")
         self.assertEqual(dims["沟通协作"]["formal_level"], 4)
         self.assertEqual(dims["数据分析"]["status"], "assessed")
         self.assertEqual(dims["数据分析"]["latest_assessment_score"], 78.5)
         self.assertIsNone(dims["数据分析"]["formal_level"])
+
+    def test_same_dimension_picks_latest_fact_not_assignment_order(self):
+        # C13：同维度多次测评取最新事实（按完成时间），不按 assignment 先后
+        AA, AR = self._AssessmentAssignment, self._AssessmentResult
+        db = self.h.session()
+        try:
+            early = AA(user_id=self.emp.id, purpose="employee", status="completed", mode="paper",
+                       plan_id=1, plan_version=1, idempotency_key="traj-early",
+                       completed_at=datetime(2026, 1, 1))
+            db.add(early)
+            db.flush()
+            db.add(AR(assignment_id=early.id, version=1,
+                      dimension_scores_json=[{"name": "数据分析", "score": 60.0}],
+                      total_score=60.0, pass_score=60, passed=1, grading_snapshot_json={}))
+            late = AA(user_id=self.emp.id, purpose="employee", status="completed", mode="paper",
+                      plan_id=1, plan_version=1, idempotency_key="traj-late",
+                      completed_at=datetime(2026, 6, 1))
+            db.add(late)
+            db.flush()
+            late_res = AR(assignment_id=late.id, version=1,
+                          dimension_scores_json=[{"name": "数据分析", "score": 90.0}],
+                          total_score=90.0, pass_score=60, passed=1, grading_snapshot_json={})
+            db.add(late_res)
+            db.commit()
+            late_res_id = late_res.id
+        finally:
+            db.close()
+        data = self._get(self.hr, f"?employee_user_id={self.emp.id}").json()["data"]
+        dims = {d["dimension_name"]: d for d in data["dimensions"]}
+        self.assertEqual(dims["数据分析"]["latest_assessment_score"], 90.0)
+        # 来源定位到最新事实的结果 id 与 assignment id
+        self.assertEqual(dims["数据分析"]["source"]["ref_id"], late_res_id)
+        self.assertEqual(dims["数据分析"]["source"]["ref_type"], "assessment_result")
 
     def test_no_data_dimension_is_not_assessed_not_zero(self):
         self._seed()
@@ -821,20 +1146,6 @@ class LearningEvidenceTest(unittest.TestCase):
             f"/api/training/learning-records/{self.record_id}/confirm-completion",
             headers=Harness.headers(self.admin))
 
-    def _issue_token(self, *, minutes_ago: float) -> str:
-        from app.models import User
-        from app.modules.training import service
-
-        db = self.h.session()
-        try:
-            token = service.issue_study_session(
-                db, self.record_id, user=db.get(User, self.emp.id),
-                now=datetime.now() - timedelta(minutes=minutes_ago),
-            )["session_token"]
-        finally:
-            db.close()
-        return token
-
     def _submit_study(self, token: str):
         from app.models import User
         from app.modules.training import service
@@ -853,6 +1164,39 @@ class LearningEvidenceTest(unittest.TestCase):
             )
         finally:
             db.close()
+
+    def _issue_at(self, base):
+        from app.models import User
+        from app.modules.training import service
+
+        db = self.h.session()
+        try:
+            return service.issue_study_session(
+                db, self.record_id, user=db.get(User, self.emp.id), now=base)["session_token"]
+        finally:
+            db.close()
+
+    def _heartbeat(self, token, at):
+        from app.models import User
+        from app.modules.training import service
+        from app.modules.training.schemas import StudyHeartbeatRequest
+
+        db = self.h.session()
+        try:
+            return service.record_study_heartbeat(
+                db, self.record_id, StudyHeartbeatRequest(session_token=token),
+                user=db.get(User, self.emp.id), now=at)
+        finally:
+            db.close()
+
+    def _active_study_token(self, *, minutes: float, base=None):
+        """签发会话并按 60s 间隔发送心跳，累计指定有效学时（防挂机下的真实交互）。"""
+        base = base or datetime.now()
+        token = self._issue_at(base)
+        count = int(minutes) + 1  # 首心跳建基准，其后每分钟一次
+        for i in range(count):
+            self._heartbeat(token, base + timedelta(seconds=60 * i))
+        return token
 
     def test_client_cannot_self_report_score_or_verifier(self):
         # 客户端直传 score/verified_by 或自定义证据类型一律拒绝（分数/验证人只能由服务端产生）
@@ -904,21 +1248,93 @@ class LearningEvidenceTest(unittest.TestCase):
     def test_study_session_rejects_short_forged_and_replay(self):
         from app.core.errors import BizError
 
-        # 不足最短有效时长（5 分钟）不计入证据
+        base = datetime.now()
+        # 防挂机：仅签发后静默等待（无心跳）不产生有效学时，不能结算
+        idle_token = self._issue_at(base)
         with self.assertRaises(BizError):
-            self._submit_study(self._issue_token(minutes_ago=1))
-        token = self._issue_token(minutes_ago=6)
+            self._submit_study(idle_token)
+        # 有效学时不足最短 5 分钟：心跳累计 2 分钟仍被拒
+        short_token = self._issue_at(base)
+        for i in range(3):
+            self._heartbeat(short_token, base + timedelta(seconds=60 * i))
+        with self.assertRaises(BizError):
+            self._submit_study(short_token)
+        # 持续交互 6 分钟（7 次心跳，间隔 60s）→ 有效学时 6 分钟，得分 6/45 < 60
+        token = self._active_study_token(minutes=6, base=base)
         first = self._submit_study(token)
-        self.assertLess(first.score, 60)  # 6/45 分钟，未达完成阈值
-        # 同一会话凭证重放被拒
+        self.assertLess(first.score, 60)
+        self.assertEqual(first.verified_by, "system.study_session")
+        # 同一会话凭证重放被拒（结算即作废）
         with self.assertRaises(BizError):
             self._submit_study(token)
-        # 篡改签发时间但签名不符被拒
+        # 篡改签名被拒
         forged = token[:-1] + ("0" if token[-1] != "0" else "1")
         with self.assertRaises(BizError):
             self._submit_study(forged)
         # 证据分未达阈值时不能认定正式完成
         self.assertEqual(self._confirm().status_code, 400)
+
+    def test_study_heartbeat_idle_gap_not_counted(self):
+        # 心跳间隔超过上限的静默段不计入有效学时（防挂机核心）
+        from app.core.errors import BizError
+
+        base = datetime.now()
+        token = self._issue_at(base)
+        self._heartbeat(token, base)                           # 基准
+        self._heartbeat(token, base + timedelta(seconds=60))   # +1 分钟
+        # 离开 10 分钟（>90s 上限）后再心跳：该静默段不计学时
+        r = self._heartbeat(token, base + timedelta(seconds=660))
+        self.assertAlmostEqual(r["active_minutes"], 1.0, places=2)
+        self._heartbeat(token, base + timedelta(seconds=720))  # +1 分钟
+        # 累计仅 2 分钟有效交互，不足 5 分钟不能结算
+        with self.assertRaises(BizError):
+            self._submit_study(token)
+
+    def test_per_course_completion_threshold(self):
+        # C08 按课程完成条件：本课程阈值 90 分；有效学时 45 分钟 → 100 分达标
+        self.h.client.patch(
+            f"/api/training/courses/{self.course_id}",
+            json={"completion_rules": {"min_evidence_score": 90}},
+            headers=Harness.headers(self.admin))
+        token = self._active_study_token(minutes=45)
+        ev = self._submit_study(token)
+        self.assertEqual(ev.score, 100.0)
+        self.assertEqual(self._confirm().status_code, 200)
+
+    def test_per_course_threshold_blocks_low_score(self):
+        # 本课程阈值 90 分；出勤证据虽 100 分但学习证据仅 13 分，取最高仍可达标——
+        # 改用仅学习证据场景：6 分钟学习证据 13 分 < 90 → 拒绝
+        self.h.client.patch(
+            f"/api/training/courses/{self.course_id}",
+            json={"completion_rules": {"min_evidence_score": 90}},
+            headers=Harness.headers(self.admin))
+        token = self._active_study_token(minutes=6)
+        self._submit_study(token)
+        r = self._confirm()
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("本课程完成阈值", r.json()["message"])
+
+    def test_per_course_required_evidence_types(self):
+        # C08 按课程完成条件：要求 assessment 证据；仅有 attendance 时不能认定正式完成
+        self.h.client.patch(
+            f"/api/training/courses/{self.course_id}",
+            json={"completion_rules": {"required_evidence_types": ["assessment"]}},
+            headers=Harness.headers(self.admin))
+        session = self.h.client.post(
+            f"/api/training/courses/{self.course_id}/sessions",
+            json={"instructor_name": "讲师", "starts_at": "2026-11-09T09:00:00",
+                  "ends_at": "2026-11-09T10:00:00"},
+            headers=Harness.headers(self.admin)).json()["data"]["id"]
+        self.h.client.post(
+            f"/api/training/sessions/{session}/attendance",
+            json={"employee_user_id": self.emp.id}, headers=Harness.headers(self.admin))
+        self.h.client.post(
+            "/api/training/learning-evidence",
+            json={"learning_record_id": self.record_id, "evidence_type": "attendance"},
+            headers=Harness.headers(self.emp))
+        r = self._confirm()
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("要求证据类型", r.json()["message"])
 
     def test_evidence_only_employee_of_record(self):
         other = self.h.create_user("e2", role="employee")
