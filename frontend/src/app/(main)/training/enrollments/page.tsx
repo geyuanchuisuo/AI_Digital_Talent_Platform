@@ -306,6 +306,7 @@ function EvidencePanel({ isAdmin }: { isAdmin: boolean }) {
   const lastInteractionRef = useRef(0);
   const pausedRef = useRef(false);
   const idleMsRef = useRef(90_000);
+  const intervalMsRef = useRef(30_000);
 
   const stopHeartbeat = useCallback(() => {
     if (heartbeatTimer.current) {
@@ -364,7 +365,7 @@ function EvidencePanel({ isAdmin }: { isAdmin: boolean }) {
     const events = ['pointerdown', 'keydown', 'wheel', 'touchstart', 'scroll'] as const;
     events.forEach((e) => window.addEventListener(e, markInteraction, { passive: true }));
     document.addEventListener('visibilitychange', onVisibility);
-    heartbeatTimer.current = setInterval(tick, idleMs);
+    heartbeatTimer.current = setInterval(tick, intervalMsRef.current);
     return () => {
       events.forEach((e) => window.removeEventListener(e, markInteraction));
       document.removeEventListener('visibilitychange', onVisibility);
@@ -442,7 +443,9 @@ function EvidencePanel({ isAdmin }: { isAdmin: boolean }) {
       form.setFieldValue('evidence_type', 'study_session');
       form.setFieldValue('payload', JSON.stringify({ session_token: res.session_token }));
       stopHeartbeat();
-      idleMsRef.current = Math.max(1, res.heartbeat_interval_seconds) * 1000;
+      // C08 三键分离：发送周期与空闲窗口分别取自服务端下发，不再同源
+      intervalMsRef.current = Math.max(1, res.heartbeat_interval_seconds) * 1000;
+      idleMsRef.current = Math.max(1, res.idle_seconds ?? res.heartbeat_interval_seconds) * 1000;
       lastInteractionRef.current = Date.now();
       pausedRef.current = false;
       setPauseReason(null);

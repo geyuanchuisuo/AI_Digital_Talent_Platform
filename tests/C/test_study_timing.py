@@ -149,7 +149,8 @@ class StudyTimingTest(unittest.TestCase):
     def test_idle_window_configurable(self):
         base = datetime.now()
         token = self._issue_at(base)
-        with mock.patch.object(settings, "study_heartbeat_idle_seconds", 30):
+        # 2026-11-12 C08 三键分离后，容差默认 10s；本用例验证纯窗口口径，显式置 0
+        with mock.patch.object(settings, "study_heartbeat_idle_seconds", 30),                 mock.patch.object(settings, "study_heartbeat_gap_tolerance_seconds", 0):
             self._heartbeat(token, base)
             self._heartbeat(token, base + timedelta(seconds=20))   # +20s
             r = self._heartbeat(token, base + timedelta(seconds=60))  # 间隔 40s > 30s 窗口

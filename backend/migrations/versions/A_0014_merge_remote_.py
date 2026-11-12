@@ -1,7 +1,7 @@
 """empty message
 
 Revision ID: A_0014_merge_remote
-Revises: C_0011_enrollment_chain_study_session, D_0013_nl2sql_audit_fields
+Revises: C_0011_enroll_study, D_0013_nl2sql_audit_fields
 Create Date: 2026-11-12 00:27:05.939644
 
 Naming convention (ruling U-05): use `A_*` for public/recruitment table changes,
@@ -16,7 +16,7 @@ import sqlalchemy as sa
 
 
 revision = 'A_0014_merge_remote'
-down_revision = ('C_0011_enrollment_chain_study_session', 'D_0013_nl2sql_audit_fields')
+down_revision = ('C_0011_enroll_study', 'D_0013_nl2sql_audit_fields')
 branch_labels = None
 depends_on = None
 

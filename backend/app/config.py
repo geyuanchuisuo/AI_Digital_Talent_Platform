@@ -57,9 +57,12 @@ class Settings(BaseSettings):
     rerank_local_device: str = ""           # local 模式：cpu/cuda/auto（空=auto）
 
     # ---- C08 防挂机学习心跳（training/service.py 消费；默认值为已确认的课程规则基线）----
-    # 空闲窗口：相邻心跳间隔超过此值视为离开，该静默段不计学时；前端心跳节奏随
-    # heartbeat_interval_seconds 下发。单次上限：单个心跳区间最多累计的秒数。
+    # 空闲窗口：相邻心跳间隔超过（空闲窗口 + 容差）视为离开，该静默段不计学时。
+    # 发送周期：前端心跳节奏（应明显小于空闲窗口）；三项分离配置，避免同源抖动丢段。
+    # 单次上限：单个心跳区间最多累计的秒数。
     study_heartbeat_idle_seconds: int = 90
+    study_heartbeat_interval_seconds: int = 30   # 前端发送周期；与空闲窗口分离（REQ-MASTER-20261112-004136-C）
+    study_heartbeat_gap_tolerance_seconds: int = 10  # 计费容差：gap ≤ 空闲窗口+容差仍计入，吸收调度/网络抖动
     study_heartbeat_credit_cap_seconds: int = 90
     study_heartbeat_min_count: int = 3      # 结算所需最少心跳次数，避免“签发即结算”
     study_session_min_minutes: float = 5.0  # 单次结算最短有效时长，避免“打开即完成”

@@ -1700,16 +1700,19 @@ def _next_session_id(db: Session, course_id: int, *, now: datetime) -> int | Non
     )
 
 
-def _reserved_awaiting_count(db: Session, course_id: int) -> int:
-    """已通知候补但员工尚未确认的名额预留数：不算正式占位，但限制超发。"""
-    return int(
-        db.scalar(
-            select(func.count())
-            .select_from(TrainingEnrollment)
-            .where(TrainingEnrollment.course_id == course_id, TrainingEnrollment.status == "awaiting_confirmation")
-        )
-        or 0
+def _reserved_awaiting_count(db: Session, course_id: int, *, exclude_id: int | None = None) -> int:
+    """已通知候补但员工尚未确认的名额预留数：不算正式占位，但限制超发。
+
+    exclude_id 用于候选补本人确认：其自身预留不占额度（确认只是把预留转为占位，总量不变）。
+    """
+    stmt = (
+        select(func.count())
+        .select_from(TrainingEnrollment)
+        .where(TrainingEnrollment.course_id == course_id, TrainingEnrollment.status == "awaiting_confirmation")
     )
+    if exclude_id is not None:
+        stmt = stmt.where(TrainingEnrollment.id != exclude_id)
+    return int(db.scalar(stmt) or 0)
 
 
 def _promote_waitlist(db: Session, course_id: int, *, now: datetime, actor_user_id: int | None = None) -> TrainingEnrollment | None:
@@ -1802,7 +1805,9 @@ def apply_enrollment(db: Session, payload: EnrollmentRequest, *, user: User) -> 
     按 approval_mode 走直属经理或培训管理员审批（涉及费用/工时再转管理员复核）。
     """
     _require_employee_caller(user)
-    course = _require_course(db, payload.course_id)
+    course = db.get(TrainingCourse, payload.course_id, with_for_update=True)
+    if course is None:
+        raise BizError(404, "课程不存在")
     if course.status != "active":
         raise BizError(400, "课程未开放")
     existing = db.scalar(
@@ -1814,7 +1819,11 @@ def apply_enrollment(db: Session, payload: EnrollmentRequest, *, user: User) -> 
     if existing:
         return existing
     now = datetime.now()
-    full = bool(course.capacity) and _occupying_count(db, payload.course_id) >= int(course.capacity)
+    # C06 统一容量口径：正式占位（pending/approved）+ 待确认预留合计达容量即满，
+    # 新报名只能进候补——不能以 pending 占位抢走已递补给候补的待确认名额。
+    # 课程行锁（MySQL）串行化同课报名，防止并发确认/递补/报名同时读到旧计数。
+    reserved_total = _occupying_count(db, payload.course_id) + _reserved_awaiting_count(db, payload.course_id)
+    full = bool(course.capacity) and reserved_total >= int(course.capacity)
     auto_approve = not full and course.approval_mode == "none" and not _requires_admin_review(course)
     if full:
         status, expires = "waitlisted", None
@@ -2005,7 +2014,12 @@ def confirm_waitlist_offer(
     course = db.get(TrainingCourse, row.course_id, with_for_update=True)
     if course is None:
         raise BizError(404, "课程不存在")
-    if course.capacity and _occupying_count(db, row.course_id) >= int(course.capacity):
+    # C06 确认口径：排除自身预留后已满才拒绝——本人确认只是把预留转为占位，总量不变；
+    # 若他人后来真占了名额（occupying 计入），确认仍按满员拒绝，由超时释放/管理员处理。
+    reserved_total = _occupying_count(db, row.course_id) + _reserved_awaiting_count(
+        db, row.course_id, exclude_id=row.id
+    )
+    if course.capacity and reserved_total >= int(course.capacity):
         raise BizError(400, "名额已满，暂无法确认，请联系培训管理员")
     # 条件更新：awaiting_confirmation 前置进 WHERE，与超时释放/审批并发时只生效一次；
     # 课程行锁（MySQL）串行化占位计数，防止确认/递补/审批并发占两份名额。
@@ -2149,7 +2163,9 @@ def issue_study_session(
         "learning_record_id": record.id,
         "session_token": _sign_study_token(record.id, user.id, int(moment.timestamp()), nonce),
         "expires_at": expires_at.isoformat(),
-        "heartbeat_interval_seconds": settings.study_heartbeat_idle_seconds,
+        # C08 三键分离：发送周期与空闲窗口分别下发，前端 idle 检测不再与服务端计费窗口同源
+        "heartbeat_interval_seconds": settings.study_heartbeat_interval_seconds,
+        "idle_seconds": settings.study_heartbeat_idle_seconds,
     }
 
 
@@ -2204,7 +2220,8 @@ def record_study_heartbeat(
     """员工学习期间上报心跳；服务端只结算有效且连续的活动区间（C08 防挂机）。
 
     计时完全以服务端时间为准：客户端不能上报“已学分钟”或 is_active（schema 拒绝
-    额外字段）。相邻心跳间隔超过空闲窗口视为离开，该静默段不计学时；单个区间累计
+    额外字段）。相邻心跳间隔超过（空闲窗口 + 容差）视为离开，该静默段不计学时；
+    容差仅吸收发送周期与空闲窗口分离后的调度/网络抖动。单个区间累计
     不超过配置上限。乱序心跳拒绝，同一时刻重复心跳幂等（不加时也不加次数）；
     行锁 + 条件更新保证多端并发心跳不会把同一区间累计两次。
     """
@@ -2218,6 +2235,7 @@ def record_study_heartbeat(
     )
     idle_seconds = settings.study_heartbeat_idle_seconds
     cap_seconds = settings.study_heartbeat_credit_cap_seconds
+    tolerance_seconds = settings.study_heartbeat_gap_tolerance_seconds
     previous = session.last_heartbeat_at
     credit_seconds = 0.0
     if previous is not None:
@@ -2232,9 +2250,10 @@ def record_study_heartbeat(
                 "active_minutes": round(float(session.active_minutes), 2),
                 "expires_at": session.expires_at.isoformat(),
             }
-        if gap_seconds <= idle_seconds:
+        if gap_seconds <= idle_seconds + tolerance_seconds:
             credit_seconds = min(gap_seconds, cap_seconds)
-        # 间隔超过空闲窗口视为离开：该段静默时间不计入有效学时
+        # 间隔超过（空闲窗口 + 容差）视为离开：该段静默时间不计入有效学时；
+        # 容差只吸收调度/网络抖动，不放宽离开判定本身
     new_minutes = float(session.active_minutes) + credit_seconds / 60.0
     new_count = int(session.heartbeat_count) + 1
     result = db.execute(
