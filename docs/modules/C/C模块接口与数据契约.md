@@ -1,6 +1,6 @@
 # C 模块接口与数据契约
 
-日期：2026-11-06；更新：2026-11-07（自适应测评 + 一期扩表：盘点/AI 面试间/报名审批/学习证据）；2026-11-11（MASTER 集成收口 C06/C08/C09/C13/C14：报名职责审批链、学习心跳防挂机与按课程完成条件、经理本人初评与负责范围、成长轨迹最新事实与 F10 隔离、正式评级授权范围，迁移 C_0011）；维护角色：C；状态：实施中（C 自有代码与测试已落地后更新验证结论）。
+日期：2026-11-06；更新：2026-11-07（自适应测评 + 一期扩表：盘点/AI 面试间/报名审批/学习证据）；2026-11-11（MASTER 集成收口 C06/C08/C09/C13/C14：报名职责审批链、学习心跳防挂机与按课程完成条件、经理本人初评与负责范围、成长轨迹最新事实与 F10 隔离、正式评级授权范围，迁移 C_0011）；2026-11-12（MASTER 按 REQ-MASTER-20261112-004136-C 修复：C06 容量口径含待确认预留、C08 心跳三键分离与计费容差、乱序/重复语义入契约；C_0011 迁移文件改名 `C_0011_enroll_study.py`，revision id 缩短至 ≤32 字符，MySQL VARCHAR(32) 版本列可升级）；维护角色：C；状态：实施中（C 自有代码与测试已落地后更新验证结论）。
 依据：[一期需求细化](一期需求细化.md)、[需求细化与确认](需求细化与确认.md) C-Q01～15、[跨模块配合清单](跨模块配合清单.md)。
 
 本文件只描述 C 自有实现，不用“已完成/已验收”描述待 A/B/D 接入的部分。所有接口统一使用现有 `{code,message,data}` 信封，成功由 `app.core.response.ok()` 返回；错误由 `BizError` 抛出。
@@ -45,8 +45,8 @@ AI 面试间：`ai_interview_sessions`、`ai_interview_questions`、`ai_intervie
 - 培训计划：员工 user_id、目标岗位、来源（ai/manual）、状态（draft/assigned）、证据快照、计划版本；项目保存课程快照，不随课程后续编辑回写；`training_plan_versions` 保存历史快照。
 - 学习记录：按计划项+员工唯一，状态 not_started/learning/completed，备注、自报时间；完成仅代表自报，不等于正式完成。
 - 学习证据：`evidence_type` 仅 `attendance`（本人该课程真实出勤）/`assessment`（本人已通过的员工测评）/`study_session`（服务端签发的一次性学习会话凭证）；`score` 与 `verified_by` 只能由服务端可信来源计算（`system.attendance`/`system.assessment`/`system.study_session`），客户端不可直传；`learning_record_id + evidence_key` 唯一，阻止同一来源重复计入与凭证重放。C08：`study_session` 有效学时改由服务端心跳累计（见下），不再按签发后经过时间折算。
-- 学习会话（C08，`training_study_sessions`）：`nonce`（唯一，HMAC 签名绑定学习记录/员工）、`issued_at`/`expires_at`（有效期 120 分钟）、`last_heartbeat_at`、`heartbeat_count`、`active_minutes`、`consumed`（一次性兑换标记）。员工学习期间周期性上报心跳，服务端仅累计相邻心跳间隔 ≤90 秒的有效学时；需 ≥3 次心跳且有效学习 ≥5 分钟方可结算证据，挂机等待（无心跳）不计学时。凭证兑换后 `consumed=1`，重放拒绝。
-- 报名（C06，`training_enrollments`）：状态扩 `pending_admin_review`（经理已通过、涉费/工时待管理员复核）；新增 `manager_decided_by`/`manager_decided_at`（经理本人审批留痕）。审批链按课程 `approval_mode`：`none` 且无费用/工时→报名即通过；`manager`→直属经理本人审批（管理员不可越过），涉费/工时再转 `pending_admin_review` 由管理员复核；`admin`→管理员审批。占位计数含 `pending`/`pending_admin_review`/`approved`。候补递补 `awaiting_confirmation` 须员工本人 24h 内确认，经理/管理员不可代确认。
+- 学习会话（C08，`training_study_sessions`）：`nonce`（唯一，HMAC 签名绑定学习记录/员工）、`issued_at`/`expires_at`（有效期 `STUDY_SESSION_TTL_MINUTES`，默认 120 分钟）、`last_heartbeat_at`、`heartbeat_count`、`active_minutes`、`consumed`（一次性兑换标记）。员工学习期间周期性上报心跳，服务端仅累计相邻心跳间隔 ≤（空闲窗口 + 容差）的有效学时，单区间累计 ≤ 单次上限；需 ≥ 最少心跳次数且有效学习 ≥ 最短时长方可结算证据，挂机等待（无心跳）不计学时。**计时参数全部配置化**（`config.py`）：`STUDY_HEARTBEAT_INTERVAL_SECONDS`（发送周期，默认 30）、`STUDY_HEARTBEAT_IDLE_SECONDS`（空闲窗口，默认 90）、`STUDY_HEARTBEAT_GAP_TOLERANCE_SECONDS`（计费容差，默认 10，仅吸收调度/网络抖动，不放宽离开判定）、`STUDY_HEARTBEAT_CREDIT_CAP_SECONDS`（单次上限，默认 90）、`STUDY_HEARTBEAT_MIN_COUNT`（默认 3）、`STUDY_SESSION_MIN_MINUTES`（默认 5）。发送周期应明显小于空闲窗口。**时序语义**：计时全用服务端时间，客户端自报分钟/is_active 被 schema 拒绝（422）；乱序心跳（早于上次）400；同一时刻重复心跳幂等（不加时不加次数）；过期/已结算会话拒绝；行锁 + 条件更新防多端并发把同一区间累计两次。凭证兑换后 `consumed=1`，重放拒绝。
+- 报名（C06，`training_enrollments`）：状态扩 `pending_admin_review`（经理已通过、涉费/工时待管理员复核）；新增 `manager_decided_by`/`manager_decided_at`（经理本人审批留痕）。审批链按课程 `approval_mode`：`none` 且无费用/工时→报名即通过；`manager`→直属经理本人审批（管理员不可越过），涉费/工时再转 `pending_admin_review` 由管理员复核；`admin`→管理员审批。**容量口径**：满员判定 = 正式占位（`pending`/`pending_admin_review`/`approved`）+ 未过期 `awaiting_confirmation` 预留合计 ≥ 容量；新报名不得抢走已递补给候补的待确认名额。报名/递补/确认共用课程行锁串行化。候补递补 `awaiting_confirmation` 须员工本人 24h 内确认，经理/管理员不可代确认；**本人确认的容量预检排除自身预留**（确认只是预留转占位，总量不变），他人真实占位已满仍拒绝。waitlisted 仅可取消或经递补→本人确认→审批链，不可直批。
 - 成长事件：追加式记录测评完成、培训分配、课程自报完成（`course_completed`，`self_reported=true`）与正式完成（`course_formally_completed`，`self_reported=false`，引用计划版本与可信证据分/验证人）；正式完成仅在 `formal_completed` 0→1 时追加一次，重复确认不重复写入。
 
 ## 3. 固定与自适应测评及计分规则
@@ -111,9 +111,9 @@ AI 面试间：`ai_interview_sessions`、`ai_interview_questions`、`ai_intervie
 - `POST /enrollments/{id}/admin-review`（C06 培训管理员复核，仅 `pending_admin_review` 状态；`approved`/`rejected`，拒绝触发候补递补。）
 - `POST /enrollments/release-expired`（管理员/外部调度：把超时未决定的 pending/pending_admin_review 与超期未确认的 awaiting_confirmation 置为 `expired` 释放占位/预留，并按课程递补候补；有期次时投递 `course.waitlist_promoted`）
 - `POST /prejob-plans`、`GET /prejob-plans`、`GET /prejob-plans/{id}`、`PATCH /prejob-plans/{id}`、`POST /prejob-plans/{id}/assign`、`POST /prejob-plans/{id}/revise`（C12/F05 岗前培养计划：管理员为待上岗人员创建分阶段（目标、阶段、课程、导师）草稿，`assign` 生效并追加 `prejob_assigned` 成长事件，`revise` 生成新版本草稿保留历史。阶段课程须为目录内有效课程，失效/不存在即拒绝，不生成假课程；员工仅读本人计划；岗前计划不自动报名、不投递课程指派通知，与在职培训分配分离。）
-- `POST /learning-records/{id}/study-sessions`（员工本人领取服务端签名的学习会话凭证，含有效期与 `heartbeat_interval_seconds` 建议心跳间隔）
-- `POST /learning-records/{id}/study-heartbeat`（C08 员工本人学习心跳，body `session_token`；服务端按相邻心跳间隔 ≤90 秒累计 `active_minutes` 并递增 `heartbeat_count`，返回当前心跳数/有效学时/有效期。无心跳的挂机等待不计学时。）
-- `POST /learning-evidence`、`GET /learning-records/{id}/evidence`（员工提交学习证据：出勤/已通过测评/学习会话；分数与验证人由服务端计算，客户端字段 `score`/`verified_by` 被严格拒绝；`study_session` 须 ≥3 次心跳且有效学习 ≥5 分钟，凭证一次性兑换；列表本人或管理员可见）
+- `POST /learning-records/{id}/study-sessions`（员工本人领取服务端签名的学习会话凭证，含有效期；**三键分离下发**：`heartbeat_interval_seconds` 前端发送周期、`idle_seconds` 服务端计费空闲窗口，两者独立配置不再同源）
+- `POST /learning-records/{id}/study-heartbeat`（C08 员工本人学习心跳，body 仅 `session_token`（额外字段 422）；服务端按相邻心跳间隔 ≤（`idle_seconds` + 容差）累计 `active_minutes`（单区间 ≤ 上限）并递增 `heartbeat_count`，返回当前心跳数/有效学时/有效期。乱序 400、同一时刻重复幂等、过期/已结算拒绝；无心跳的挂机等待不计学时。）
+- `POST /learning-evidence`、`GET /learning-records/{id}/evidence`（员工提交学习证据：出勤/已通过测评/学习会话；分数与验证人由服务端计算，客户端字段 `score`/`verified_by` 被严格拒绝；`study_session` 须 ≥ 最少心跳次数且有效学习 ≥ 最短时长（均配置化，默认 3 次/5 分钟），凭证一次性兑换；列表本人或管理员可见）
 - `POST /learning-records/{id}/confirm-completion`（管理员依据服务端校验证据认定正式完成：无证据返回 400；**C08 按课程完成条件**——读取课程 `completion_rules_json`，最高证据分须 ≥`min_evidence_score`（缺省全局阈值），且须覆盖 `required_evidence_types` 全部必备证据类型，未达返回 400 并说明缺阈值或缺类型。）
 - `POST /plan-items/{id}/extension`（管理员延期必修期限，`new_due_date` + `reason` 必填；留 `training_due_extended` 事件并通知）
 - `POST /reminders/scan`（管理员/外部调度：按 `today`、`days_ahead` 扫描到期与逾期，经 D 通知中心投递，幂等）
@@ -149,7 +149,7 @@ AI 面试间 `/api/ai-interviews`：
 固定试卷保留为兼容模式，不作为自适应替代；在线运行时不自动生成并直接使用未审核题目（生成题一律 `pending` 待人工审核）。其余原"不做"项全部纳入一期实施：
 
 - AI 面试间：在线考试与结构化问答组织记录、AI 评判；音视频/情绪推断涉及个人信息的须先完成告知授权与隐私评审后启用（隐私评审前不上线音视频）。
-- 防挂机/有效学习证据：学习进度须由服务端可校验的学习证据支撑，自报与正式完成分离。具体规则：`study_session` 凭证由服务端 HMAC 签名并绑定学习记录/员工，凭证有效期 120 分钟、同一 nonce 只能兑换一次；**C08 收口**：有效学时由员工周期性心跳上报、服务端按相邻心跳间隔 ≤90 秒累计（`training_study_sessions.active_minutes`），需 ≥3 次心跳且有效学习 ≥5 分钟方可结算，无交互的挂机等待不计学时（不再按签发后经过时间折算）；正式完成按课程 `completion_rules_json`（最低证据分 + 必备证据类型）判定，缺省用全局阈值。出勤与已通过测评各按其真实记录键去重。
+- 防挂机/有效学习证据：学习进度须由服务端可校验的学习证据支撑，自报与正式完成分离。具体规则：`study_session` 凭证由服务端 HMAC 签名并绑定学习记录/员工，凭证有效期配置化（默认 120 分钟）、同一 nonce 只能兑换一次；**C08 收口**：有效学时由员工周期性心跳上报、服务端按相邻心跳间隔 ≤（空闲窗口 + 容差）累计（`training_study_sessions.active_minutes`，单区间 ≤ 上限），需 ≥ 最少心跳次数且有效学习 ≥ 最短时长方可结算（参数均配置化，默认 90s 窗口/10s 容差/90s 上限/3 次/5 分钟），无交互的挂机等待不计学时（不再按签发后经过时间折算）；乱序拒绝、重复幂等、行锁 + 条件更新防多端双计；前端仅页面可见且近期有真实学习交互时发送心跳，隐藏/空闲暂停明示。心跳/浏览器活动仅为有限学习证据，不能独自证明知识掌握；正式完成按课程 `completion_rules_json`（最低证据分 + 必备证据类型）判定，缺省用全局阈值。出勤与已通过测评各按其真实记录键去重。
 - 课程审批/候补/名额占位/24h 超时：员工可自主报名必修/选修课，审批占位、候补队列、24h 未确认超时释放。
 - 九宫格/人才池（F10）：绩效（最近 HR 确认周期）+ 潜力（经理初评、HR 审核）→ 九宫格；人才池进出审批、年度/提前复核、员工异议、个人发展计划、部门匿名汇总 <5 隐藏、导出审计。
 - 有效学时证明：按服务端可信证据认定正式完成，无证据不认定；一期固定阈值——出勤或已通过员工测评计 100 分并达标，`study_session` 按累计时长/45 分钟折算，正式完成需可信证据最高分 ≥60 分。课程级完成条件配置未落库前使用该统一常量，后续接入按课程取值。
