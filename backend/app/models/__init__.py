@@ -105,10 +105,16 @@ from app.modules.inventory.models import (
     InventoryDevelopmentPlan,
     InventoryDispute,
     InventoryEvent,
+    InventoryGridConfig,
     InventoryReview,
     InventoryTalentPool,
 )
 from app.modules.training.models import (
+    CapabilityRating,
+    CapabilityRatingChange,
+    PrejobPhase,
+    PrejobPlan,
+    PrejobPlanVersion,
     TrainingAttendance,
     TrainingCourse,
     TrainingEnrollment,
@@ -121,6 +127,7 @@ from app.modules.training.models import (
     TrainingPlanItem,
     TrainingPlanVersion,
     TrainingSession,
+    TrainingStudySession,
 )
 
 from app.models.talent import ProfileQuestion, ProfileQuestionJob
@@ -177,11 +184,18 @@ MODEL_CLASSES: tuple[type[Base], ...] = (
     TrainingLearningEvidence,
     TrainingEnrollment,
     TrainingGrowthEvent,
+    TrainingStudySession,
+    CapabilityRating,
+    CapabilityRatingChange,
+    PrejobPlan,
+    PrejobPlanVersion,
+    PrejobPhase,
     InventoryReview,
     InventoryTalentPool,
     InventoryDispute,
     InventoryDevelopmentPlan,
     InventoryEvent,
+    InventoryGridConfig,
     ProjectGroup,
     Project,
     ProjectDemand,

@@ -54,6 +54,10 @@ C_DOMAIN_TABLES = frozenset(
         "training_enrollments", "training_growth_events",
         "inventory_reviews", "inventory_talent_pools", "inventory_disputes",
         "inventory_development_plans", "inventory_events",
+        # C_0008 / C_0011：培养期配置、能力评分与学习会话
+        "inventory_grid_configs", "capability_ratings", "capability_rating_changes",
+        "prejob_plans", "prejob_plan_versions", "prejob_phases",
+        "training_study_sessions",
     )
 )
 
@@ -295,6 +299,7 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     "training_courses": {
         "id", "title", "description", "material_url", "dimension_names_json",
         "status", "version", "feedback_note", "feedback_note_at", "capacity",
+        "has_cost", "occupies_work_time", "approval_mode", "completion_rules_json",
         "created_by", "updated_by", "created_at", "updated_at",
         "capacity",  # C_0006_course_capacity（课程名额上限）
     },
@@ -343,6 +348,7 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     "training_enrollments": {
         "id", "course_id", "employee_user_id", "priority", "status",
         "expires_at", "decided_by", "decided_at", "note", "created_at", "updated_at",
+        "manager_decided_by", "manager_decided_at",  # C_0011 报名职责审批链
     },
     "training_growth_events": {
         "id", "employee_user_id", "talent_profile_id", "source_type", "event_type",
@@ -352,6 +358,7 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
         "id", "employee_user_id", "talent_profile_id", "cycle_name", "review_type",
         "status", "performance_score", "performance_source",
         "potential_manager_score", "potential_hr_score", "grid_cell",
+        "grid_config_version", "manager_comment",  # C_0008 / C_0011 盘点经理初评
         "reviewer_manager_id", "reviewer_hr_id", "confirmed_at", "summary",
         "payload_json", "created_at", "updated_at",
     },
@@ -370,6 +377,45 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     "inventory_events": {
         "id", "review_id", "event_type", "operator_id", "note",
         "payload_json", "created_at", "updated_at",
+    },
+    # ---- C_0008 九宫格配置（盘点评分卡版本化）----
+    "inventory_grid_configs": {
+        "id", "job_family", "version", "status", "performance_bands_json",
+        "potential_bands_json", "labels_json", "note",
+        "created_by", "updated_by", "approved_by", "approved_at",
+        "created_at", "updated_at",
+    },
+    # ---- C_0010 能力评分（当前值 + 变更记录）----
+    "capability_ratings": {
+        "id", "talent_profile_id", "employee_user_id", "dimension_name",
+        "level", "version", "basis_json", "source_change_id", "effective",
+        "created_by", "created_at", "updated_at",
+    },
+    "capability_rating_changes": {
+        "id", "talent_profile_id", "employee_user_id", "dimension_name",
+        "manager_level", "manager_comment", "manager_user_id",
+        "hr_level", "hr_comment", "hr_user_id", "evidence_json", "status",
+        "created_by", "updated_by", "created_at", "updated_at",
+    },
+    # ---- C_0009 上岗前培养计划（计划/版本/阶段）----
+    "prejob_plans": {
+        "id", "employee_user_id", "talent_profile_id", "target_job_title",
+        "goal", "status", "version", "input_snapshot_json",
+        "created_by", "updated_by", "created_at", "updated_at",
+    },
+    "prejob_plan_versions": {
+        "id", "plan_id", "version", "status", "snapshot_json", "note",
+        "created_by", "created_at", "updated_at",
+    },
+    "prejob_phases": {
+        "id", "plan_id", "plan_version", "seq", "name", "goal",
+        "courses_json", "mentor_user_id", "status", "created_at", "updated_at",
+    },
+    # ---- C_0011 防挂机学习会话 ----
+    "training_study_sessions": {
+        "id", "learning_record_id", "employee_user_id", "nonce",
+        "issued_at", "expires_at", "last_heartbeat_at", "heartbeat_count",
+        "active_minutes", "consumed", "created_at", "updated_at",
     },
     # ---- D 通知中心（T-D03，契约 docs/modules/D/通知契约.md §2）----
     "notifications": {
@@ -396,6 +442,7 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     # ---- D 自由问数（T-D09）----
     "nl2sql_audit": {
         "id", "question", "generated_sql", "stage", "refused_reason",
+        "executed_sql", "truncated",  # D_0013 受控执行留痕
         "row_count", "duration_ms", "created_by", "created_at",
     },
     # ---- D 问数反馈（T-D12）----
