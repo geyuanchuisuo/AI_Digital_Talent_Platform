@@ -276,13 +276,13 @@ def test_demand_gap_summary_t_a24(client: TestClient, auth: dict):
         rows = {r["demand_id"]: r for r in resp.json()["data"]["items"]}
         return rows[demand_id]
 
-    # 无申请：A gap=3、B gap=2
+    # 无申请：A gap=3、B gap=2（人工推进数同为 0）
     row_a, row_b = _gap_row(demand_a["id"]), _gap_row(demand_b["id"])
-    assert (row_a["headcount"], row_a["hired_count"], row_a["gap"]) == (3, 0, 3)
-    assert (row_b["headcount"], row_b["hired_count"], row_b["gap"]) == (2, 0, 2)
+    assert (row_a["headcount"], row_a["advanced_count"], row_a["hired_count"], row_a["gap"]) == (3, 0, 0, 3)
+    assert (row_b["headcount"], row_b["advanced_count"], row_b["hired_count"], row_b["gap"]) == (2, 0, 0, 2)
 
     talent_id = 398  # seed 演示个人账号绑定的主档（虚构数据）
-    # 推进到 offer_accepted 但未 HR 确认 → 不计入已录用
+    # 推进到 offer_accepted 但未 HR 确认 → 不计入已录用；人工推进数 +1（≠ new）
     resp = client.post(
         "/api/recruitment/applications", json={"talent_profile_id": talent_id, "job_profile_id": job_id}, headers=auth
     )
@@ -293,7 +293,7 @@ def test_demand_gap_summary_t_a24(client: TestClient, auth: dict):
     )
     assert resp.status_code == 200, resp.text
     row_a = _gap_row(demand_a["id"])
-    assert (row_a["hired_count"], row_a["gap"]) == (0, 3)
+    assert (row_a["advanced_count"], row_a["hired_count"], row_a["gap"]) == (1, 0, 3)
 
     # HR 确认录用 → 计入，gap=2
     resp = client.post(f"/api/recruitment/applications/{app_row['id']}/result-confirm", headers=auth)
@@ -301,7 +301,8 @@ def test_demand_gap_summary_t_a24(client: TestClient, auth: dict):
     row_a = _gap_row(demand_a["id"])
     assert (row_a["hired_count"], row_a["gap"]) == (1, 2)
 
-    # 终态后重新申请同岗 → 推进 rejected + 确认 not_hired → 不计入已录用
+    # 终态后重新申请同岗 → 推进 rejected + 确认 not_hired → 不计入已录用；
+    # 同一候选人去重，人工推进数不因重复申请行 +1
     resp = client.post(
         "/api/recruitment/applications", json={"talent_profile_id": talent_id, "job_profile_id": job_id}, headers=auth
     )
@@ -318,7 +319,7 @@ def test_demand_gap_summary_t_a24(client: TestClient, auth: dict):
     assert resp.status_code == 200, resp.text
     assert resp.json()["data"]["result_category"] == "not_hired"
     row_a = _gap_row(demand_a["id"])
-    assert (row_a["hired_count"], row_a["gap"]) == (1, 2)
+    assert (row_a["advanced_count"], row_a["hired_count"], row_a["gap"]) == (1, 1, 2)
 
     # 状态过滤：A/B 仍 open；过滤到 closed 时本组两条均不出现
     resp = client.get(

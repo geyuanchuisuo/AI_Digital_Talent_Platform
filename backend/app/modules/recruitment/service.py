@@ -691,6 +691,7 @@ def demand_gap_summary(
     rows = db.execute(rows_stmt.offset(offset).limit(limit)).scalars().all()
 
     hired_counts: dict[int, int] = {}
+    advanced_counts: dict[int, int] = {}
     job_ids = {row.job_profile_id for row in rows if row.job_profile_id is not None}
     if job_ids:
         hired_stmt = (
@@ -706,10 +707,26 @@ def demand_gap_summary(
             .group_by(Application.job_profile_id)
         )
         hired_counts = {int(job_id): int(cnt) for job_id, cnt in db.execute(hired_stmt)}
+        # T-A24 页面口径「人工标记进入下一步人数」：同一岗位申请中曾被人
+        # 工推进（internal_stage ≠ new）的候选人去重数（含后续录用/淘汰，
+        # 与「已录用」分列展示，二者不混称——§12.3）。
+        advanced_stmt = (
+            select(
+                Application.job_profile_id,
+                func.count(func.distinct(Application.talent_profile_id)),
+            )
+            .where(
+                Application.job_profile_id.in_(job_ids),
+                Application.internal_stage != "new",
+            )
+            .group_by(Application.job_profile_id)
+        )
+        advanced_counts = {int(job_id): int(cnt) for job_id, cnt in db.execute(advanced_stmt)}
 
     items = []
     for row in rows:
         hired = hired_counts.get(row.job_profile_id, 0) if row.job_profile_id is not None else 0
+        advanced = advanced_counts.get(row.job_profile_id, 0) if row.job_profile_id is not None else 0
         items.append(
             {
                 "demand_id": row.id,
@@ -719,6 +736,7 @@ def demand_gap_summary(
                 "job_profile_id": row.job_profile_id,
                 "demand_status": row.status,
                 "headcount": row.headcount,
+                "advanced_count": advanced,
                 "hired_count": hired,
                 "gap": row.headcount - hired,
             }

@@ -12,6 +12,7 @@ import {
   AuditOutlined,
   BarChartOutlined,
   BellOutlined,
+  CarOutlined,
   DashboardOutlined,
   FileSearchOutlined,
   LogoutOutlined,
@@ -34,6 +35,8 @@ const MENU_ITEMS = [
   { key: '/screen', icon: <FileSearchOutlined />, label: '简历筛选' },
   { key: '/talents', icon: <TeamOutlined />, label: '人才画像' },
   { key: '/job-profiles', icon: <ProfileOutlined />, label: '岗位条件' },
+  // 人才需求与缺口（T-A21/T-A24，A 侧 M3-V2.6）
+  { key: '/demands', icon: <CarOutlined />, label: '人才需求' },
   { key: '/match', icon: <BarChartOutlined />, label: '岗位匹配' },
   // C 模块三域（C 请求 §5.3，页面已位于 app/(main)/ 下）
   { key: '/assessments', icon: <AuditOutlined />, label: '岗位测评' },
