@@ -1,9 +1,9 @@
 'use client';
 
 /**
- * 人才需求与缺口（2026-11-14，T-A21/T-A24 前端收口）。
+ * 人才需求与缺口（2026-11-14，T-A21/T-A24）。
  *
- * 数据：GET /api/recruitment/demands/gap-summary（A 侧 T-A24 端点）。
+ * 数据：GET /api/recruitment/demands/gap-summary（T-A24 端点）。
  * 口径（指标口径交付 §7 + 需求 §12.3，页面明示）：
  * - 需求人数 = project_demands.headcount；
  * - 人工推进 = 同岗申请中曾被人工作业（internal_stage ≠ new）的候选人去重数，
@@ -12,25 +12,18 @@
  *   候选人去重数；未经确认不计入；
  * - 剩余需求（缺口）= 需求人数 − 已录用；负值表示超编，如实显示。
  * 未关联岗位的需求无录用路径，人工推进/已录用恒为 0。
+ * 管理：新建（POST）/编辑（PATCH，状态流转白名单后端校验）→ DemandFormModal。
  */
 
-import { CarOutlined, ReloadOutlined } from '@ant-design/icons';
-import { Alert, Button, Card, Select, Space, Table, Tag, Typography } from 'antd';
+import { CarOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, Select, Space, Table, Tag, Typography, message } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 
-import { get, getErrorMessage } from '@/lib/http';
+import { getErrorMessage } from '@/lib/http';
 
-interface GapRow {
-  demand_id: number;
-  position_name: string;
-  project_id: number | null;
-  job_profile_id: number | null;
-  demand_status: string;
-  headcount: number;
-  advanced_count: number;
-  hired_count: number;
-  gap: number;
-}
+import DemandFormModal from './DemandFormModal';
+import { fetchDemand, fetchGapSummary } from './api';
+import type { DemandItem, GapRow } from './types';
 
 const STATUS_META: Record<string, { label: string; color: string }> = {
   open: { label: '待启动', color: 'default' },
@@ -50,31 +43,39 @@ export default function DemandsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | undefined>(undefined);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState<DemandItem | null>(null);
+  const [editLoading, setEditLoading] = useState(false);
 
-  const load = useCallback(
-    async (statusFilter?: string) => {
-      setLoading(true);
-      setError(null);
-      try {
-        const params = new URLSearchParams({ page_size: '50' });
-        if (statusFilter) params.set('status', statusFilter);
-        const data = await get<{ items: GapRow[]; total: number }>(
-          `/recruitment/demands/gap-summary?${params.toString()}`,
-        );
-        setRows(data.items);
-        setTotal(data.total);
-      } catch (err) {
-        setError(getErrorMessage(err));
-      } finally {
-        setLoading(false);
-      }
-    },
-    [],
-  );
+  const load = useCallback(async (statusFilter?: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await fetchGapSummary(statusFilter ? { status: statusFilter } : {});
+      setRows(data.items);
+      setTotal(data.total);
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     void load(undefined);
   }, [load]);
+
+  const openEdit = (row: GapRow) => {
+    setEditLoading(true);
+    setModalOpen(true);
+    fetchDemand(row.demand_id)
+      .then((item) => setEditing(item))
+      .catch((err) => {
+        setModalOpen(false);
+        void message.error(getErrorMessage(err));
+      })
+      .finally(() => setEditLoading(false));
+  };
 
   return (
     <div>
@@ -96,6 +97,16 @@ export default function DemandsPage() {
           />
           <Button icon={<ReloadOutlined />} onClick={() => void load(status)} loading={loading}>
             刷新
+          </Button>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => {
+              setEditing(null);
+              setModalOpen(true);
+            }}
+          >
+            新建需求
           </Button>
         </Space>
       </Space>
@@ -153,8 +164,31 @@ export default function DemandsPage() {
                 <Typography.Text strong={v > 0}>{v}</Typography.Text>
               ),
           },
-          { title: '岗位条件 ID', dataIndex: 'job_profile_id', render: (v: number | null) => v ?? '未关联' },
+          { title: '岗位条件 ID', dataIndex: 'job_profile_id', width: 110, render: (v: number | null) => v ?? '未关联' },
+          {
+            title: '操作',
+            width: 90,
+            render: (_: unknown, row: GapRow) => (
+              <Button
+                size="small"
+                icon={<EditOutlined />}
+                loading={editLoading}
+                onClick={() => openEdit(row)}
+              >
+                编辑
+              </Button>
+            ),
+          },
         ]}
+      />
+      <DemandFormModal
+        open={modalOpen}
+        editing={editing}
+        onClose={() => {
+          setModalOpen(false);
+          setEditing(null);
+        }}
+        onSaved={() => void load(status)}
       />
     </div>
   );
