@@ -663,3 +663,64 @@ def list_jd_publications(
     total = db.execute(stmt).scalar_one()
     rows = db.execute(rows_stmt.offset(offset).limit(limit)).scalars().all()
     return list(rows), int(total)
+
+
+def demand_gap_summary(
+    db: Session, *, status: str | None, project_id: int | None, offset: int, limit: int
+) -> tuple[list[dict[str, Any]], int]:
+    """缺口统计（T-A24，指标口径交付 §7）：缺口 = headcount − 已录用数。
+
+    已录用数取 HR 确认口径（§12.3「人工推进 vs 已录用不混称」）：与本需求
+    `job_profile_id` 同岗的 `applications` 中 `internal_stage='offer_accepted'`
+    且 `result_confirmed_by` 非空的行，按候选人去重计数（同一人的历史申请行
+    不重复计入）。需求未关联岗位（job_profile_id 空）时无录用路径，
+    hired 恒为 0、缺口 = headcount。gap 为负表示超编，如实返回不做截断。
+    过滤参数（status/project_id）与 `list_demands` 同口径。
+    """
+    stmt = select(func.count()).select_from(ProjectDemand)
+    rows_stmt = select(ProjectDemand).order_by(ProjectDemand.id.desc())
+    if status is not None:
+        if status not in DEMAND_STATUSES:
+            raise BizError(400, f"status 仅支持 {' / '.join(DEMAND_STATUSES)}")
+        stmt = stmt.where(ProjectDemand.status == status)
+        rows_stmt = rows_stmt.where(ProjectDemand.status == status)
+    if project_id is not None:
+        stmt = stmt.where(ProjectDemand.project_id == project_id)
+        rows_stmt = rows_stmt.where(ProjectDemand.project_id == project_id)
+    total = db.execute(stmt).scalar_one()
+    rows = db.execute(rows_stmt.offset(offset).limit(limit)).scalars().all()
+
+    hired_counts: dict[int, int] = {}
+    job_ids = {row.job_profile_id for row in rows if row.job_profile_id is not None}
+    if job_ids:
+        hired_stmt = (
+            select(
+                Application.job_profile_id,
+                func.count(func.distinct(Application.talent_profile_id)),
+            )
+            .where(
+                Application.job_profile_id.in_(job_ids),
+                Application.internal_stage == "offer_accepted",
+                Application.result_confirmed_by.is_not(None),
+            )
+            .group_by(Application.job_profile_id)
+        )
+        hired_counts = {int(job_id): int(cnt) for job_id, cnt in db.execute(hired_stmt)}
+
+    items = []
+    for row in rows:
+        hired = hired_counts.get(row.job_profile_id, 0) if row.job_profile_id is not None else 0
+        items.append(
+            {
+                "demand_id": row.id,
+                "position_name": row.position_name,
+                "project_id": row.project_id,
+                "project_group_id": row.project_group_id,
+                "job_profile_id": row.job_profile_id,
+                "demand_status": row.status,
+                "headcount": row.headcount,
+                "hired_count": hired,
+                "gap": row.headcount - hired,
+            }
+        )
+    return items, int(total)

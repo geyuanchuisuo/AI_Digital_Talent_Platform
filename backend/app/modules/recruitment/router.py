@@ -160,6 +160,22 @@ def list_demands(
     )
 
 
+@router.get("/demands/gap-summary", summary="缺口统计（T-A24：headcount − HR 确认已录用数）")
+def demand_gap_summary(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    status: str | None = Query(None),
+    project_id: int | None = Query(None),
+    user: CurrentUser = None,
+    db: Annotated[Session, Depends(get_db)] = None,
+):
+    """缺口口径见 service.demand_gap_summary / 指标口径交付 §7；gap 为负=超编。"""
+    items, total = recruitment_service.demand_gap_summary(
+        db, status=status, project_id=project_id, offset=(page - 1) * page_size, limit=page_size
+    )
+    return ok(PageData(items=items, total=total, page=page, page_size=page_size).model_dump())
+
+
 @router.get("/demands/{demand_id}", summary="人才需求详情")
 def get_demand(demand_id: int, user: CurrentUser, db: Annotated[Session, Depends(get_db)]):
     return ok(_demand_out(recruitment_service.get_demand(db, demand_id)))
