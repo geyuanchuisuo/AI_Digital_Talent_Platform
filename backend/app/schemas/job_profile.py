@@ -107,3 +107,30 @@ class JobProfileDeleteData(BaseModel):
 
     deleted: bool
     soft_deleted: bool = Field(description="有批次引用 → 软删（is_active=0）；无引用 → 物理删除")
+
+
+class JobProfileJdDraftRequest(BaseModel):
+    """`POST /job-profiles/jd-draft`（T-A22）：AI 生成 JD 草稿的素材输入。
+
+    全部字段是草稿素材：title 必填（JD 主语），其余可空——素材越全草稿越准，
+    空缺项由模板规则标注「（待确认）」，不虚构硬性门槛。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=100)
+    department: str | None = Field(default=None, max_length=100)
+    requirements_text: str | None = Field(default=None, max_length=2000)
+    min_degree: str | None = Field(default=None, max_length=20)
+    must_skills: list[str] = Field(default_factory=list, max_length=50)
+    bonus_skills: list[str] = Field(default_factory=list, max_length=50)
+    remarks: str | None = Field(default=None, max_length=500)
+
+
+class JobProfileJdDraftData(BaseModel):
+    """`POST /job-profiles/jd-draft` 响应 data：草稿正文 + 模型/Prompt 版本留痕。"""
+
+    draft_md: str = Field(description="JD 草稿 markdown 正文（可编辑，保存走 POST/PUT 岗位）")
+    model_version: str = Field(description="本次生成实际使用的 LLM 模型名")
+    prompt_version: str = Field(description="JD 草稿模板版本（jd_draft.txt 变更时递增）")
+    generated_at: datetime = Field(description="生成时间（服务器时钟）")

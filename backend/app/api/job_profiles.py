@@ -16,6 +16,7 @@ from app.core.response import ok, paginated
 from app.database import get_db
 from app.schemas.job_profile import (
     JobProfileDeleteData,
+    JobProfileJdDraftRequest,
     JobProfileListItem,
     JobProfileOut,
     JobProfileWriteRequest,
@@ -89,6 +90,15 @@ def create_job_profile(
     """校验统一 400（weights 总和 / pass>pending / min_degree 六档字面值）；技能归一化后存储。"""
     row = job_profile_service.create_job(db, payload, user_id=user.id)
     return ok(_out(row))
+
+
+@router.post("/jd-draft", summary="AI 生成 JD 草稿（真实模型；失败 502 明确报错，不返回样例）")
+def create_jd_draft(
+    payload: JobProfileJdDraftRequest,
+    user: CurrentUser,
+):
+    """T-A22：草稿不落库，人工编辑确认后随岗位 POST/PUT 保存（jd_text 承担「保存后可查」）。"""
+    return ok(job_profile_service.generate_jd_draft(payload))
 
 
 @router.get("/{job_id}", summary="岗位条件详情（完整配置）")

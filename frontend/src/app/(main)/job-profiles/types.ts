@@ -75,3 +75,22 @@ export interface JobProfileDeleteData {
   deleted: boolean;
   soft_deleted: boolean;
 }
+
+/** POST /job-profiles/jd-draft 请求体（T-A22，素材均可空除 title） */
+export interface JdDraftPayload {
+  title: string;
+  department?: string | null;
+  requirements_text?: string | null;
+  min_degree?: string | null;
+  must_skills?: string[];
+  bonus_skills?: string[];
+  remarks?: string | null;
+}
+
+/** POST /job-profiles/jd-draft 响应 data：草稿 markdown + 版本留痕 */
+export interface JdDraftData {
+  draft_md: string;
+  model_version: string;
+  prompt_version: string;
+  generated_at: string;
+}
