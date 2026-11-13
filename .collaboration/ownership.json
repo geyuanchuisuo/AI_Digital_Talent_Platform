@@ -208,6 +208,7 @@
       "frontend/src/test/setup.ts",
       "frontend/vitest.config.ts",
       "docs/源码接入与需求决策.md",
+      "frontend/src/app/(main)/demands/**",
       "frontend/src/app/(main)/job-profiles/**",
       "frontend/src/app/(main)/match/**",
       "frontend/src/app/(person)/**",
