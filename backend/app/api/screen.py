@@ -7,7 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.api.deps import CurrentUser, PageParams, pagination
+from app.api.deps import CurrentUser, ManagementDep, PageParams, pagination
 from app.core.errors import BizError
 from app.core.response import ok, paginated
 from app.database import get_db
@@ -28,7 +28,7 @@ router = APIRouter(prefix="/api/screen", tags=["screen"])
 @router.post("/batches", summary="发起筛选批次（同步圈人 + 成员快照，202）")
 def create_screen_batch(
     payload: ScreenBatchCreateRequest,
-    user: CurrentUser,
+    user: ManagementDep,
     db: Annotated[Session, Depends(get_db)],
 ):
     """同步阶段 ≤2s：圈定 `resolved_ids` 快照 + 硬门槛预检估 LLM 次数；执行由 TaskRunner 异步。"""
@@ -44,7 +44,7 @@ def create_screen_batch(
 
 @router.get("/batches", summary="筛选批次列表")
 def list_screen_batches(
-    user: CurrentUser,
+    user: ManagementDep,
     db: Annotated[Session, Depends(get_db)],
     page: Annotated[PageParams, Depends(pagination)],
     job_profile_id: int | None = Query(None, ge=1),
@@ -76,7 +76,7 @@ def list_screen_batches(
 @router.get("/batches/{batch_id}", summary="筛选批次详情（轮询）")
 def get_screen_batch(
     batch_id: int,
-    user: CurrentUser,
+    user: ManagementDep,
     db: Annotated[Session, Depends(get_db)],
 ):
     data = screen_service.get_batch_detail(db, batch_id)
@@ -86,7 +86,7 @@ def get_screen_batch(
 @router.post("/batches/{batch_id}/retry", summary="重试失败批次（复用原批次，D-E）")
 def retry_screen_batch(
     batch_id: int,
-    user: CurrentUser,
+    user: ManagementDep,
     db: Annotated[Session, Depends(get_db)],
 ):
     data = screen_service.retry_batch(db, batch_id)
@@ -96,7 +96,7 @@ def retry_screen_batch(
 @router.get("/batches/{batch_id}/results", summary="筛选结果分页（硬淘汰置底）")
 def list_screen_results(
     batch_id: int,
-    user: CurrentUser,
+    user: ManagementDep,
     db: Annotated[Session, Depends(get_db)],
     page: Annotated[PageParams, Depends(pagination)],
     verdict: str | None = Query(None, description="按有效结论过滤（manual_verdict ?? verdict）"),
@@ -121,7 +121,7 @@ def list_screen_results(
 def patch_screen_result(
     result_id: int,
     payload: ManualVerdictRequest,
-    user: CurrentUser,
+    user: ManagementDep,
     db: Annotated[Session, Depends(get_db)],
 ):
     data = screen_service.set_manual_verdict(db, result_id, payload.manual_verdict, user_id=user.id)

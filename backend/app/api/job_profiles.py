@@ -10,7 +10,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.api.deps import CurrentUser, PageParams, pagination
+from app.api.deps import CurrentUser, ManagementDep, PageParams, pagination
 from app.core.errors import BizError
 from app.core.response import ok, paginated
 from app.database import get_db
@@ -69,7 +69,7 @@ def _item(row) -> dict:
 
 @router.get("", summary="岗位条件列表（不含全文）")
 def list_job_profiles(
-    user: CurrentUser,
+    user: ManagementDep,
     db: Annotated[Session, Depends(get_db)],
     page: Annotated[PageParams, Depends(pagination)],
     keyword: str | None = Query(None, max_length=100, description="岗位名/部门模糊"),
@@ -84,7 +84,7 @@ def list_job_profiles(
 @router.post("", summary="新建岗位条件")
 def create_job_profile(
     payload: JobProfileWriteRequest,
-    user: CurrentUser,
+    user: ManagementDep,
     db: Annotated[Session, Depends(get_db)],
 ):
     """校验统一 400（weights 总和 / pass>pending / min_degree 六档字面值）；技能归一化后存储。"""
@@ -95,7 +95,7 @@ def create_job_profile(
 @router.post("/jd-draft", summary="AI 生成 JD 草稿（真实模型；失败 502 明确报错，不返回样例）")
 def create_jd_draft(
     payload: JobProfileJdDraftRequest,
-    user: CurrentUser,
+    user: ManagementDep,
 ):
     """T-A22：草稿不落库，人工编辑确认后随岗位 POST/PUT 保存（jd_text 承担「保存后可查」）。"""
     return ok(job_profile_service.generate_jd_draft(payload))
@@ -104,7 +104,7 @@ def create_jd_draft(
 @router.get("/{job_id}", summary="岗位条件详情（完整配置）")
 def get_job_profile(
     job_id: int,
-    user: CurrentUser,
+    user: ManagementDep,
     db: Annotated[Session, Depends(get_db)],
 ):
     row = job_profile_service.get_job(db, job_id)
@@ -115,7 +115,7 @@ def get_job_profile(
 def put_job_profile(
     job_id: int,
     payload: JobProfileWriteRequest,
-    user: CurrentUser,
+    user: ManagementDep,
     db: Annotated[Session, Depends(get_db)],
 ):
     """历史批次读快照不受影响（数据库 §6.1）；响应含新 version。"""
@@ -126,7 +126,7 @@ def put_job_profile(
 @router.delete("/{job_id}", summary="删除岗位条件（有批次引用软删）")
 def delete_job_profile(
     job_id: int,
-    user: CurrentUser,
+    user: ManagementDep,
     db: Annotated[Session, Depends(get_db)],
 ):
     """存在筛选/匹配批次引用 → `is_active=0` 软删（`soft_deleted:true`）；无引用 → 物理删除；重复删除 404。"""
