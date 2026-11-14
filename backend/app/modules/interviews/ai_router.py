@@ -21,6 +21,7 @@ from app.modules.interviews.ai_models import (
     AiInterviewQuestion,
     AiInterviewSession,
 )
+from app.modules.interviews.service import validate_application_ref
 
 router = APIRouter(prefix="/api/ai-interviews", tags=["ai-interviews"])
 
@@ -59,6 +60,8 @@ def create_session(payload: SessionCreate, user: CurrentUser, db: Session = Depe
     is_admin = _is_management(db, user)
     if not is_admin:
         raise BizError(403, "仅管理员可创建 AI 面试")
+    # REQ-A-20261114-220500-C：AI 面试自动安排路径与人工轮次同口径校验申请引用
+    validate_application_ref(db, payload.application_id, payload.talent_profile_id)
     session = AiInterviewSession(**payload.model_dump())
     db.add(session)
     db.flush()

@@ -294,6 +294,7 @@
       "backend/app/modules/assessments/**",
       "frontend/src/features/interviews/**",
       "backend/app/modules/interviews/**",
+      "backend/tests/test_interview_application_ref_reqa.py",
       "frontend/src/features/training/**",
       "backend/app/modules/training/**",
       "frontend/src/features/inventory/**",
