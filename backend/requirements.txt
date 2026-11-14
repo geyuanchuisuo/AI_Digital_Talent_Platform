@@ -71,3 +71,7 @@ reportlab>=4.0,<5
 # 的进程内推理；仅 EMBEDDING_MODE=local / RERANK_MODE=local 需要（API 模式客户可不装）。
 # 含 torch CPU 版传递依赖（~2GB）；GPU 环境按官方指引另装对应 torch。
 sentence-transformers>=2.7,<7
+
+# ---- T-A51 显式补齐（2026-11-14）：此前靠 vanna 传递依赖隐式提供，上游变化即断 ----
+PyYAML>=6,<7          # workflows/dify_bridge/dsl.py（yaml.safe_dump/load）
+sqlparse>=0.5,<1      # analytics/nl2sql/validator.py（NL2SQL 白名单校验）
