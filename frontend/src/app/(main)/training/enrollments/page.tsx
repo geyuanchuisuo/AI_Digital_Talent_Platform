@@ -178,13 +178,17 @@ function EnrollmentTable({ isAdmin, isManager }: { isAdmin: boolean; isManager: 
                     复核拒绝
                   </a>
                 </Space>
-              ) : row.status === 'pending' || row.status === 'waitlisted' ? (
+              ) : row.status === 'pending' ? (
                 <Space size={8}>
                   <a onClick={() => void decide(row, 'approved')}>通过</a>
                   <a style={{ color: '#cf1322' }} onClick={() => void decide(row, 'rejected')}>
                     拒绝
                   </a>
                 </Space>
+              ) : row.status === 'waitlisted' ? (
+                <a style={{ color: '#cf1322' }} onClick={() => void decide(row, 'cancelled')}>
+                  取消排队
+                </a>
               ) : row.status === 'approved' ? (
                 <a style={{ color: '#cf1322' }} onClick={() => void decide(row, 'cancelled')}>
                   取消并递补
@@ -238,7 +242,7 @@ function EnrollmentTable({ isAdmin, isManager }: { isAdmin: boolean; isManager: 
     >
       <Typography.Paragraph type="secondary">
         {isAdmin
-          ? '待审批报名需在截止时间内处理；经理已通过且涉费/工时的报名进入「待管理员复核」，由管理员复核。超时未审批可点「释放超时占位」自动释放并递补候补。'
+          ? '待审批报名需在截止时间内处理；经理已通过且涉费/工时的报名进入「待管理员复核」，由管理员复核。候补报名须先递补并由员工本人确认后才能审批，不可直接通过。超时未审批可点「释放超时占位」自动释放并递补候补。'
           : isManager
             ? '仅显示本部门员工的报名。manager 模式课程由直属经理本人审批，管理员不可越过经理环节；涉费/工时报名经理通过后转管理员复核。候补递补须员工本人确认，经理不可代确认。'
             : '报名后按课程审批模式等待审批；名额满时进入候补，收到递补通知后需在 24 小时内本人确认，确认后仍走审批规则，超时未确认名额将释放给下一位。'}
@@ -297,7 +301,12 @@ function EvidencePanel({ isAdmin }: { isAdmin: boolean }) {
   const [session, setSession] = useState<{ recordId: number; token: string } | null>(null);
   const [heartbeatCount, setHeartbeatCount] = useState(0);
   const [activeMinutes, setActiveMinutes] = useState(0);
+  const [pauseReason, setPauseReason] = useState<'hidden' | 'idle' | null>(null);
   const heartbeatTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastInteractionRef = useRef(0);
+  const pausedRef = useRef(false);
+  const idleMsRef = useRef(90_000);
+  const intervalMsRef = useRef(30_000);
 
   const stopHeartbeat = useCallback(() => {
     if (heartbeatTimer.current) {
@@ -305,8 +314,6 @@ function EvidencePanel({ isAdmin }: { isAdmin: boolean }) {
       heartbeatTimer.current = null;
     }
   }, []);
-
-  useEffect(() => stopHeartbeat, [stopHeartbeat]);
 
   const beat = useCallback(
     async (id: number, token: string) => {
@@ -322,6 +329,49 @@ function EvidencePanel({ isAdmin }: { isAdmin: boolean }) {
     },
     [stopHeartbeat],
   );
+
+  // C08：心跳仅在页面可见且近期有真实学习交互时发送；隐藏/空闲即暂停并明示，
+  // 恢复交互时立即重发心跳重新确认会话。定时器本身不构成学习证据。
+  useEffect(() => {
+    if (!session) return;
+    const idleMs = idleMsRef.current;
+    const setPaused = (reason: 'hidden' | 'idle' | null) => {
+      pausedRef.current = reason !== null;
+      setPauseReason(reason);
+    };
+    const markInteraction = () => {
+      lastInteractionRef.current = Date.now();
+      if (pausedRef.current && document.visibilityState === 'visible') {
+        setPaused(null);
+        void beat(session.recordId, session.token);
+      }
+    };
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') setPaused('hidden');
+      // 回到前台不自动恢复计时：等待真实学习交互重新确认
+    };
+    const tick = () => {
+      if (document.visibilityState !== 'visible') {
+        setPaused('hidden');
+        return;
+      }
+      if (Date.now() - lastInteractionRef.current > idleMs) {
+        setPaused('idle');
+        return;
+      }
+      setPaused(null);
+      void beat(session.recordId, session.token);
+    };
+    const events = ['pointerdown', 'keydown', 'wheel', 'touchstart', 'scroll'] as const;
+    events.forEach((e) => window.addEventListener(e, markInteraction, { passive: true }));
+    document.addEventListener('visibilitychange', onVisibility);
+    heartbeatTimer.current = setInterval(tick, intervalMsRef.current);
+    return () => {
+      events.forEach((e) => window.removeEventListener(e, markInteraction));
+      document.removeEventListener('visibilitychange', onVisibility);
+      stopHeartbeat();
+    };
+  }, [session, beat, stopHeartbeat]);
 
   useEffect(() => {
     if (isAdmin) return;
@@ -393,15 +443,17 @@ function EvidencePanel({ isAdmin }: { isAdmin: boolean }) {
       form.setFieldValue('evidence_type', 'study_session');
       form.setFieldValue('payload', JSON.stringify({ session_token: res.session_token }));
       stopHeartbeat();
+      // C08 三键分离：发送周期与空闲窗口分别取自服务端下发，不再同源
+      intervalMsRef.current = Math.max(1, res.heartbeat_interval_seconds) * 1000;
+      idleMsRef.current = Math.max(1, res.idle_seconds ?? res.heartbeat_interval_seconds) * 1000;
+      lastInteractionRef.current = Date.now();
+      pausedRef.current = false;
+      setPauseReason(null);
       setSession({ recordId: id, token: res.session_token });
       setHeartbeatCount(0);
       setActiveMinutes(0);
-      heartbeatTimer.current = setInterval(
-        () => void beat(id, res.session_token),
-        Math.max(1, res.heartbeat_interval_seconds) * 1000,
-      );
       message.success(
-        `已领取学习会话凭证，${res.expires_at} 前结算；学习期间自动上报心跳，需有效学习满 5 分钟（无交互等待不计学时）`,
+        `已领取学习会话凭证，${res.expires_at} 前结算；仅页面可见且有学习操作时累计学时，需达到最少心跳次数与有效学时要求（挂机等待不计学时）`,
       );
     } catch (error) {
       message.error(getErrorMessage(error));
@@ -411,6 +463,8 @@ function EvidencePanel({ isAdmin }: { isAdmin: boolean }) {
   const stopSession = () => {
     stopHeartbeat();
     setSession(null);
+    pausedRef.current = false;
+    setPauseReason(null);
     message.info('已停止学习会话心跳，可提交证据结算');
   };
 
@@ -492,8 +546,10 @@ function EvidencePanel({ isAdmin }: { isAdmin: boolean }) {
         </Space>
         {session && (
           <Typography.Paragraph type="secondary" style={{ marginTop: 8 }}>
-            学习会话进行中：已上报心跳 {heartbeatCount} 次，累计有效学时 {activeMinutes.toFixed(1)} 分钟。
-            需 ≥3 次心跳且有效学习满 5 分钟方可结算；停止或离开页面将中断心跳，挂机等待不计学时。
+            {pauseReason
+              ? `学习计时已暂停（${pauseReason === 'hidden' ? '页面切到后台' : '长时间无学习操作'}）：暂停期间不计学时，回到页面并继续操作后自动恢复。`
+              : `学习会话进行中：已上报心跳 ${heartbeatCount} 次，累计有效学时 ${activeMinutes.toFixed(1)} 分钟。`}
+            需达到最少心跳次数与有效学时要求方可结算；仅页面可见且有学习操作时累计，挂机/后台不计学时。
           </Typography.Paragraph>
         )}
         <Form.Item name="payload" label="证据内容（仅学习会话需填写 session_token）">

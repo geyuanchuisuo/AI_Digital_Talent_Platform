@@ -8,7 +8,7 @@
 
 'use client';
 
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { LinkOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import {
   Button,
   Card,
@@ -17,6 +17,7 @@ import {
   Modal,
   Space,
   Table,
+  Tabs,
   Tag,
   Typography,
   message,
@@ -29,11 +30,15 @@ import {
   createDefinition,
   createDraftVersion,
   deactivateVersion,
+  exportDifyDsl,
   fetchDefinitions,
+  fetchNodeTypes,
   fetchRunDetail,
   fetchRuns,
   fetchVersionDetail,
   fetchVersions,
+  importDifyDsl,
+  reconcileDifyDsl,
   approveRun,
   cancelRun,
   cancelRunningRun,
@@ -42,6 +47,8 @@ import {
   reviewVersion,
   rollbackDefinition,
   submitVersion,
+  type DifyReconcileReport,
+  type NodeTypeMeta,
   type VersionDetail,
   type WorkflowRunDetail,
   type WorkflowRunSummary,
@@ -49,6 +56,7 @@ import {
   type WorkflowVersion,
   type WorkflowVersionStatus,
 } from './api';
+import { GraphCanvas, type GraphValue } from '@/features/workflows/GraphCanvas';
 
 const { Text } = Typography;
 
@@ -76,7 +84,23 @@ export default function WorkflowsPage() {
   const [draftText, setDraftText] = useState('{\n  "nodes": [],\n  "edges": []\n}');
   const [rejectTarget, setRejectTarget] = useState<WorkflowVersion | null>(null);
   const [rejectNote, setRejectNote] = useState('');
+  const [draftTab, setDraftTab] = useState('canvas');
+  const [canvasValue, setCanvasValue] = useState<GraphValue>({ nodes: [], edges: [] });
+  const [nodeTypes, setNodeTypes] = useState<NodeTypeMeta[]>([]);
+  const [difyModalOpen, setDifyModalOpen] = useState(false);
+  const [difyTab, setDifyTab] = useState('export');
+  const [difyYaml, setDifyYaml] = useState('');
+  const [difyExport, setDifyExport] = useState<{ app_name: string; node_count: number; edge_count: number; yaml: string } | null>(null);
+  const [difyReport, setDifyReport] = useState<DifyReconcileReport | null>(null);
+  const [difyBusy, setDifyBusy] = useState(false);
   const [form] = Form.useForm();
+
+  useEffect(() => {
+    if (!draftModalOpen) return;
+    fetchNodeTypes()
+      .then((meta) => setNodeTypes(meta.node_types))
+      .catch((e) => message.error(getErrorMessage(e)));
+  }, [draftModalOpen]);
 
   const loadDefinitions = useCallback(async () => {
     try {
@@ -200,14 +224,81 @@ export default function WorkflowsPage() {
   const doCreateDraft = async () => {
     if (selectedId == null) return;
     try {
-      const parsed = JSON.parse(draftText) as { nodes: unknown[]; edges: unknown[] };
-      await createDraftVersion(selectedId, { nodes: parsed.nodes ?? [], edges: parsed.edges ?? [] });
+      const graph =
+        draftTab === 'canvas'
+          ? canvasValue
+          : (JSON.parse(draftText) as { nodes: unknown[]; edges: unknown[] });
+      await createDraftVersion(selectedId, {
+        nodes: (graph.nodes ?? []) as unknown[],
+        edges: (graph.edges ?? []) as unknown[],
+      });
       message.success('草稿版本已创建');
       setDraftModalOpen(false);
       reloadVersions();
     } catch (e) {
       message.error(e instanceof SyntaxError ? 'JSON 解析失败，请检查格式' : getErrorMessage(e));
     }
+  };
+
+  const doExportDify = async (versionId: number) => {
+    setDifyBusy(true);
+    try {
+      const result = await exportDifyDsl(versionId);
+      setDifyExport(result);
+      setDifyYaml(result.yaml);
+      setDifyReport(null);
+      setDifyModalOpen(true);
+      setDifyTab('export');
+    } catch (e) {
+      message.error(getErrorMessage(e));
+    } finally {
+      setDifyBusy(false);
+    }
+  };
+
+  const doReconcileDify = async (versionId: number) => {
+    if (!difyYaml.trim()) {
+      message.warning('请先粘贴 Dify DSL YAML');
+      return;
+    }
+    setDifyBusy(true);
+    try {
+      setDifyReport(await reconcileDifyDsl(versionId, difyYaml));
+    } catch (e) {
+      message.error(getErrorMessage(e));
+    } finally {
+      setDifyBusy(false);
+    }
+  };
+
+  const doImportDify = async () => {
+    if (selectedId == null || !difyYaml.trim()) {
+      message.warning('请先粘贴 Dify DSL YAML');
+      return;
+    }
+    setDifyBusy(true);
+    try {
+      const result = await importDifyDsl(selectedId, difyYaml);
+      message.success(`已导入为新草稿版本 v${result.version}（${result.node_count} 节点 / ${result.edge_count} 连线）`);
+      setDifyModalOpen(false);
+      setDifyYaml('');
+      reloadVersions();
+    } catch (e) {
+      message.error(getErrorMessage(e));
+    } finally {
+      setDifyBusy(false);
+    }
+  };
+
+  const downloadDifyYaml = () => {
+    if (!difyExport) return;
+    const blob = new Blob([difyExport.yaml], { type: 'application/x-yaml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${difyExport.app_name}.yml`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const doSubmit = async (v: WorkflowVersion) => {
@@ -494,23 +585,139 @@ export default function WorkflowsPage() {
       </Modal>
 
       <Modal
-        title="新建草稿版本（JSON 整图输入，服务端校验）"
+        title="新建草稿版本（画布编辑，服务端校验）"
         open={draftModalOpen}
         onOk={() => void doCreateDraft()}
         onCancel={() => setDraftModalOpen(false)}
         okText="创建草稿"
         cancelText="取消"
-        width={640}
+        width={1160}
       >
-        <Text type="secondary">
-          nodes：key/name/node_type（白名单六类）+ inputs/outputs 引用；edges：source/target/branch
-          （人工审批出边必须 approve/reject）。画布编辑器归 T-D16。
-        </Text>
-        <Input.TextArea
-          rows={14}
-          value={draftText}
-          onChange={(e) => setDraftText(e.target.value)}
-          style={{ marginTop: 12, fontFamily: 'monospace' }}
+        <Tabs
+          activeKey={draftTab}
+          onChange={setDraftTab}
+          items={[
+            {
+              key: 'canvas',
+              label: '画布编辑',
+              children: (
+                <GraphCanvas
+                  nodeTypes={nodeTypes}
+                  value={canvasValue}
+                  onChange={setCanvasValue}
+                />
+              ),
+            },
+            {
+              key: 'json',
+              label: 'JSON 输入（高级）',
+              children: (
+                <>
+                  <Text type="secondary">
+                    nodes：key/name/node_type（白名单六类）+ inputs/outputs 引用；edges：source/target/branch
+                    （人工审批出边必须 approve/reject）。服务端整图校验兜底。
+                  </Text>
+                  <Input.TextArea
+                    rows={14}
+                    value={draftText}
+                    onChange={(e) => setDraftText(e.target.value)}
+                    style={{ marginTop: 12, fontFamily: 'monospace' }}
+                  />
+                </>
+              ),
+            },
+          ]}
+        />
+      </Modal>
+
+      <Modal
+        title={`Dify DSL · ${difyExport?.app_name ?? ''}`}
+        open={difyModalOpen}
+        footer={null}
+        onCancel={() => setDifyModalOpen(false)}
+        width={760}
+      >
+        <Tabs
+          activeKey={difyTab}
+          onChange={setDifyTab}
+          items={[
+            {
+              key: 'export',
+              label: '导出 DSL',
+              children: (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <Text type="secondary">
+                    节点 {difyExport?.node_count ?? '—'} / 连线 {difyExport?.edge_count ?? '—'}｜DSL 版本以导出内容为准
+                  </Text>
+                  <Button onClick={downloadDifyYaml} disabled={!difyExport} data-testid="download-dsl">
+                    下载 .yml
+                  </Button>
+                  <Input.TextArea
+                    rows={12}
+                    readOnly
+                    value={difyExport?.yaml ?? ''}
+                    style={{ fontFamily: 'monospace' }}
+                  />
+                </div>
+              ),
+            },
+            {
+              key: 'reconcile',
+              label: '版本对账',
+              children: (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <Text type="secondary">
+                    粘贴 Dify 侧导出的 DSL，与本落库版本对账（identical=一致；差异列 added/removed/changed）。
+                  </Text>
+                  <Input.TextArea
+                    rows={10}
+                    value={difyYaml}
+                    onChange={(e) => setDifyYaml(e.target.value)}
+                    style={{ fontFamily: 'monospace' }}
+                    placeholder="粘贴 Dify DSL YAML"
+                  />
+                  <Button
+                    loading={difyBusy}
+                    onClick={() => detail && void doReconcileDify(detail.version.id)}
+                    data-testid="reconcile-dsl"
+                  >
+                    对账
+                  </Button>
+                  {difyReport && (
+                    <pre style={{ background: '#fafafa', padding: 8, fontSize: 12, maxHeight: 220, overflow: 'auto' }}>
+                      {JSON.stringify(difyReport, null, 2)}
+                    </pre>
+                  )}
+                </div>
+              ),
+            },
+            {
+              key: 'import',
+              label: '显式导入',
+              children: (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <Text type="secondary">
+                    导入为新草稿版本（画布外改动需显式导入；已发布版本不受影响）。
+                  </Text>
+                  <Input.TextArea
+                    rows={10}
+                    value={difyYaml}
+                    onChange={(e) => setDifyYaml(e.target.value)}
+                    style={{ fontFamily: 'monospace' }}
+                    placeholder="粘贴 Dify DSL YAML"
+                  />
+                  <Button
+                    type="primary"
+                    loading={difyBusy}
+                    onClick={() => void doImportDify()}
+                    data-testid="import-dsl"
+                  >
+                    导入为新草稿版本
+                  </Button>
+                </div>
+              ),
+            },
+          ]}
         />
       </Modal>
 
@@ -544,6 +751,15 @@ export default function WorkflowsPage() {
               <Text type="secondary">提交人 {detail.version.submitted_by ?? '—'}</Text>
               <Text type="secondary">提交 {fmt(detail.version.submitted_at)}</Text>
               <Text type="secondary">发布 {fmt(detail.version.published_at)}</Text>
+              <Button
+                size="small"
+                icon={<LinkOutlined />}
+                data-testid="dify-dsl"
+                loading={difyBusy}
+                onClick={() => void doExportDify(detail.version.id)}
+              >
+                Dify DSL（导出/对账/导入）
+              </Button>
             </Space>
             {detail.version.review_note && (
               <Text type="warning">审核意见：{detail.version.review_note}</Text>

@@ -57,6 +57,18 @@ class Settings(BaseSettings):
     rerank_local_model_path: str = ""       # local 模式：bge-reranker 模型目录（客户本地）
     rerank_local_device: str = ""           # local 模式：cpu/cuda/auto（空=auto）
 
+    # ---- C08 防挂机学习心跳（training/service.py 消费；默认值为已确认的课程规则基线）----
+    # 空闲窗口：相邻心跳间隔超过（空闲窗口 + 容差）视为离开，该静默段不计学时。
+    # 发送周期：前端心跳节奏（应明显小于空闲窗口）；三项分离配置，避免同源抖动丢段。
+    # 单次上限：单个心跳区间最多累计的秒数。
+    study_heartbeat_idle_seconds: int = 90
+    study_heartbeat_interval_seconds: int = 30   # 前端发送周期；与空闲窗口分离（REQ-MASTER-20261112-004136-C）
+    study_heartbeat_gap_tolerance_seconds: int = 10  # 计费容差：gap ≤ 空闲窗口+容差仍计入，吸收调度/网络抖动
+    study_heartbeat_credit_cap_seconds: int = 90
+    study_heartbeat_min_count: int = 3      # 结算所需最少心跳次数，避免“签发即结算”
+    study_session_min_minutes: float = 5.0  # 单次结算最短有效时长，避免“打开即完成”
+    study_session_ttl_minutes: int = 120    # 学习会话凭证有效期
+
     # ---- MySQL ----
     mysql_host: str = "localhost"
     mysql_port: int = 3306
@@ -132,6 +144,10 @@ class Settings(BaseSettings):
     # 超时由 PG statement_timeout 强制；行数由 fetchmany(max+1) 截断——均为 T-D09 ③ 默认口径。
     nl2sql_timeout_seconds: int = 30
     nl2sql_max_rows: int = 1000
+    # D14 生成器选择：openai_compat（默认，OpenAI 兼容 chat 生成）| vanna_native
+    # （vanna 2.0.2 Agent 架构原生接入——vanna 自带 OpenAILlmService + Agent 编排，
+    # 经 `VannaNativeGenerator` 适配同一 SQLGenerator 协议，校验器/执行器零改动）。
+    nl2sql_generator: str = "openai_compat"
 
     # ---- 应用与网络 ----
     cors_origins: str = "*"

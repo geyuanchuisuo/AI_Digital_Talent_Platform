@@ -15,7 +15,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Callable
 from urllib.parse import urlparse
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -1671,6 +1671,14 @@ def update_feedback_note(
 
 ENROLLMENT_TTL_HOURS = 24
 
+# C06 状态×动作白名单：候补只能经递补→本人确认进入审批链，管理员旧入口不得
+# 直接批准/拒绝 waitlisted；取消是候补的合法退出。approved 仅允许取消。
+_ENROLLMENT_DECIDE_ACTIONS = {
+    "pending": ("approved", "rejected", "cancelled"),
+    "waitlisted": ("cancelled",),
+    "approved": ("cancelled",),
+}
+
 
 def _occupying_count(db: Session, course_id: int, *, exclude_id: int | None = None) -> int:
     """占用名额的报名数：pending 占位、pending_admin_review 复核占位、approved 占用。"""
@@ -1692,16 +1700,19 @@ def _next_session_id(db: Session, course_id: int, *, now: datetime) -> int | Non
     )
 
 
-def _reserved_awaiting_count(db: Session, course_id: int) -> int:
-    """已通知候补但员工尚未确认的名额预留数：不算正式占位，但限制超发。"""
-    return int(
-        db.scalar(
-            select(func.count())
-            .select_from(TrainingEnrollment)
-            .where(TrainingEnrollment.course_id == course_id, TrainingEnrollment.status == "awaiting_confirmation")
-        )
-        or 0
+def _reserved_awaiting_count(db: Session, course_id: int, *, exclude_id: int | None = None) -> int:
+    """已通知候补但员工尚未确认的名额预留数：不算正式占位，但限制超发。
+
+    exclude_id 用于候选补本人确认：其自身预留不占额度（确认只是把预留转为占位，总量不变）。
+    """
+    stmt = (
+        select(func.count())
+        .select_from(TrainingEnrollment)
+        .where(TrainingEnrollment.course_id == course_id, TrainingEnrollment.status == "awaiting_confirmation")
     )
+    if exclude_id is not None:
+        stmt = stmt.where(TrainingEnrollment.id != exclude_id)
+    return int(db.scalar(stmt) or 0)
 
 
 def _promote_waitlist(db: Session, course_id: int, *, now: datetime, actor_user_id: int | None = None) -> TrainingEnrollment | None:
@@ -1710,7 +1721,7 @@ def _promote_waitlist(db: Session, course_id: int, *, now: datetime, actor_user_
     需求 F05：有空位通知下一位、员工 24 小时内确认、超时通知下位、确认仍走课程审批规则、不自动报名。
     预留口径：正式占位（pending/approved）+ 待确认预留不得超过容量，避免超发。
     """
-    course = db.get(TrainingCourse, course_id)
+    course = db.get(TrainingCourse, course_id, with_for_update=True)
     if not course or not course.capacity:
         return None
     reserved = _occupying_count(db, course_id) + _reserved_awaiting_count(db, course_id)
@@ -1794,7 +1805,9 @@ def apply_enrollment(db: Session, payload: EnrollmentRequest, *, user: User) -> 
     按 approval_mode 走直属经理或培训管理员审批（涉及费用/工时再转管理员复核）。
     """
     _require_employee_caller(user)
-    course = _require_course(db, payload.course_id)
+    course = db.get(TrainingCourse, payload.course_id, with_for_update=True)
+    if course is None:
+        raise BizError(404, "课程不存在")
     if course.status != "active":
         raise BizError(400, "课程未开放")
     existing = db.scalar(
@@ -1806,7 +1819,11 @@ def apply_enrollment(db: Session, payload: EnrollmentRequest, *, user: User) -> 
     if existing:
         return existing
     now = datetime.now()
-    full = bool(course.capacity) and _occupying_count(db, payload.course_id) >= int(course.capacity)
+    # C06 统一容量口径：正式占位（pending/approved）+ 待确认预留合计达容量即满，
+    # 新报名只能进候补——不能以 pending 占位抢走已递补给候补的待确认名额。
+    # 课程行锁（MySQL）串行化同课报名，防止并发确认/递补/报名同时读到旧计数。
+    reserved_total = _occupying_count(db, payload.course_id) + _reserved_awaiting_count(db, payload.course_id)
+    full = bool(course.capacity) and reserved_total >= int(course.capacity)
     auto_approve = not full and course.approval_mode == "none" and not _requires_admin_review(course)
     if full:
         status, expires = "waitlisted", None
@@ -1849,12 +1866,10 @@ def decide_enrollment(
         raise BizError(404, "报名记录不存在")
     if row.status == "awaiting_confirmation":
         raise BizError(400, "候补名额待员工确认，确认后方可进入审批")
-    if row.status not in ("pending", "waitlisted") and not (
-        row.status == "approved" and payload.status == "cancelled"
-    ):
+    if payload.status not in _ENROLLMENT_DECIDE_ACTIONS.get(row.status, ()):
         raise BizError(400, "该报名已处理")
     course = _require_course(db, row.course_id)
-    if course.approval_mode == "manager" and row.status == "pending" and payload.status != "cancelled":
+    if course.approval_mode == "manager" and payload.status in ("approved", "rejected"):
         # 经理审批课程：管理员不可越过直属经理环节直接通过/拒绝（C06 职责审批链）
         raise BizError(400, "该课程须先由直属经理审批，管理员不可越过经理环节")
     now = datetime.now()
@@ -1865,18 +1880,21 @@ def decide_enrollment(
         _promote_waitlist(db, row.course_id, now=now, actor_user_id=admin.id)
         db.commit()
         raise BizError(400, "报名已超时释放，需员工重新申请")
-    if payload.status == "approved":
-        course = _require_course(db, row.course_id)
-        if course.capacity and row.status == "waitlisted":
-            if _occupying_count(db, row.course_id, exclude_id=row.id) >= int(course.capacity):
-                raise BizError(400, "名额已满，无法通过该候补报名")
-    row.status = payload.status
-    row.decided_by = admin.id
-    row.decided_at = now
+    # 条件更新落地最终状态：来源状态进 WHERE，并发重复审批/取消只生效一次；
+    # 占位口径不变（pending 已占位，approved 不新增占位），候补直批路径已删除。
+    values: dict[str, Any] = {"status": payload.status, "decided_by": admin.id, "decided_at": now}
     if payload.note is not None:
-        row.note = payload.note
-    if row.status == "approved":
-        row.expires_at = None
+        values["note"] = payload.note
+    if payload.status == "approved":
+        values["expires_at"] = None
+    result = db.execute(
+        update(TrainingEnrollment)
+        .where(TrainingEnrollment.id == row.id, TrainingEnrollment.status == row.status)
+        .values(**values)
+    )
+    if result.rowcount != 1:
+        db.rollback()
+        raise BizError(400, "该报名已处理")
     db.commit()
     db.refresh(row)
     notified = True
@@ -1993,16 +2011,34 @@ def confirm_waitlist_offer(
         _promote_waitlist(db, row.course_id, now=now, actor_user_id=user.id)
         db.commit()
         raise BizError(400, "候补名额已超时释放，请重新报名或等待下一次通知")
-    course = _require_course(db, row.course_id)
-    if course.capacity and _occupying_count(db, row.course_id) >= int(course.capacity):
+    course = db.get(TrainingCourse, row.course_id, with_for_update=True)
+    if course is None:
+        raise BizError(404, "课程不存在")
+    # C06 确认口径：排除自身预留后已满才拒绝——本人确认只是把预留转为占位，总量不变；
+    # 若他人后来真占了名额（occupying 计入），确认仍按满员拒绝，由超时释放/管理员处理。
+    reserved_total = _occupying_count(db, row.course_id) + _reserved_awaiting_count(
+        db, row.course_id, exclude_id=row.id
+    )
+    if course.capacity and reserved_total >= int(course.capacity):
         raise BizError(400, "名额已满，暂无法确认，请联系培训管理员")
+    # 条件更新：awaiting_confirmation 前置进 WHERE，与超时释放/审批并发时只生效一次；
+    # 课程行锁（MySQL）串行化占位计数，防止确认/递补/审批并发占两份名额。
     if course.approval_mode == "none" and not _requires_admin_review(course):
         # 免审批课程：本人确认后按审批规则即通过（确认这一步本身不可跳过）
-        row.status = "approved"
-        row.expires_at = None
-        row.decided_at = now
-        db.commit()
-        db.refresh(row)
+        values: dict[str, Any] = {"status": "approved", "expires_at": None, "decided_at": now}
+    else:
+        values = {"status": "pending", "expires_at": now + timedelta(hours=ENROLLMENT_TTL_HOURS)}
+    result = db.execute(
+        update(TrainingEnrollment)
+        .where(TrainingEnrollment.id == row.id, TrainingEnrollment.status == "awaiting_confirmation")
+        .values(**values)
+    )
+    if result.rowcount != 1:
+        db.rollback()
+        raise BizError(400, "当前状态不可确认候补名额")
+    db.commit()
+    db.refresh(row)
+    if row.status == "approved":
         try:
             notify.course_enrollment_reviewed(
                 db,
@@ -2014,11 +2050,6 @@ def confirm_waitlist_offer(
             db.commit()
         except Exception:  # noqa: BLE001 - 通知失败不回滚已生效的免审批结果
             db.rollback()
-        return row
-    row.status = "pending"
-    row.expires_at = now + timedelta(hours=ENROLLMENT_TTL_HOURS)
-    db.commit()
-    db.refresh(row)
     return row
 
 
@@ -2071,11 +2102,8 @@ def list_enrollments(db: Session, *, course_id: int | None = None, user: User) -
 # 平台默认完成阈值：仅在课程未配置 completion_rules 时回退使用；正式完成按课程条件判定（C08）。
 FORMAL_COMPLETION_MIN_SCORE = 60.0
 COURSE_STUDY_TARGET_MINUTES = 45.0  # 单门课有效学时目标，累计达到即计满分
-MIN_STUDY_SESSION_MINUTES = 5.0  # 单次学习会话最短有效时长，避免“打开即完成”
-STUDY_SESSION_TTL_MINUTES = 120  # 学习会话凭证有效期
-# 防挂机心跳：有效学时只累计「有交互心跳」的区间，静默等待不计学时（C08）。
-STUDY_HEARTBEAT_MAX_GAP_SECONDS = 90  # 相邻心跳间隔超过此值视为离开，间隔不计入有效学时
-STUDY_HEARTBEAT_MIN_COUNT = 3  # 结算所需最少心跳次数，避免“签发即结算”
+# C08 防挂机计时参数配置化（settings.study_heartbeat_* / study_session_*，默认值为已确认
+# 的课程规则基线）：只结算有效且连续的活动区间，空闲窗口与单次累计上限均可按部署调整。
 
 EVIDENCE_PROVIDER_ATTENDANCE = "system.attendance"
 EVIDENCE_PROVIDER_ASSESSMENT = "system.assessment"
@@ -2120,7 +2148,7 @@ def issue_study_session(
     record = _evidence_record(db, learning_record_id, user)
     moment = now or datetime.now()
     nonce = secrets.token_hex(8)
-    expires_at = moment + timedelta(minutes=STUDY_SESSION_TTL_MINUTES)
+    expires_at = moment + timedelta(minutes=settings.study_session_ttl_minutes)
     db.add(
         TrainingStudySession(
             learning_record_id=record.id,
@@ -2135,7 +2163,9 @@ def issue_study_session(
         "learning_record_id": record.id,
         "session_token": _sign_study_token(record.id, user.id, int(moment.timestamp()), nonce),
         "expires_at": expires_at.isoformat(),
-        "heartbeat_interval_seconds": STUDY_HEARTBEAT_MAX_GAP_SECONDS,
+        # C08 三键分离：发送周期与空闲窗口分别下发，前端 idle 检测不再与服务端计费窗口同源
+        "heartbeat_interval_seconds": settings.study_heartbeat_interval_seconds,
+        "idle_seconds": settings.study_heartbeat_idle_seconds,
     }
 
 
@@ -2158,15 +2188,20 @@ def _verify_study_token(token: str, *, record_id: int, employee_id: int, now: da
     elapsed_minutes = (now - issued_at).total_seconds() / 60.0
     if elapsed_minutes < 0:
         raise BizError(400, "学习会话凭证签发时间异常")
-    if elapsed_minutes > STUDY_SESSION_TTL_MINUTES:
+    if elapsed_minutes > settings.study_session_ttl_minutes:
         raise BizError(400, "学习会话凭证已过期，请重新开始学习")
     return nonce
 
 
 def _load_study_session(
-    db: Session, nonce: str, *, record_id: int, employee_id: int, now: datetime
+    db: Session, nonce: str, *, record_id: int, employee_id: int, now: datetime,
+    lock: bool = False,
 ) -> TrainingStudySession:
-    session = db.scalar(select(TrainingStudySession).where(TrainingStudySession.nonce == nonce))
+    stmt = select(TrainingStudySession).where(TrainingStudySession.nonce == nonce)
+    if lock:
+        # 心跳/结算串行化：多端并发时行锁防止同一区间被累计两次（SQLite 空操作，MySQL 生效）
+        stmt = stmt.with_for_update()
+    session = db.scalar(stmt)
     if session is None:
         raise BizError(400, "学习会话不存在，请重新领取凭证")
     if session.learning_record_id != record_id or session.employee_user_id != employee_id:
@@ -2182,31 +2217,63 @@ def record_study_heartbeat(
     db: Session, learning_record_id: int, payload: StudyHeartbeatRequest, *, user: User,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """员工学习期间上报心跳；服务端按相邻心跳间隔累计有效学时（防挂机）。
+    """员工学习期间上报心跳；服务端只结算有效且连续的活动区间（C08 防挂机）。
 
-    只有持续交互（心跳间隔不超过上限）才累计学时；签发后静默等待不产生有效学时。
+    计时完全以服务端时间为准：客户端不能上报“已学分钟”或 is_active（schema 拒绝
+    额外字段）。相邻心跳间隔超过（空闲窗口 + 容差）视为离开，该静默段不计学时；
+    容差仅吸收发送周期与空闲窗口分离后的调度/网络抖动。单个区间累计
+    不超过配置上限。乱序心跳拒绝，同一时刻重复心跳幂等（不加时也不加次数）；
+    行锁 + 条件更新保证多端并发心跳不会把同一区间累计两次。
     """
     record = _evidence_record(db, learning_record_id, user)
     moment = now or datetime.now()
     nonce = _verify_study_token(
         payload.session_token, record_id=record.id, employee_id=user.id, now=moment
     )
-    session = _load_study_session(db, nonce, record_id=record.id, employee_id=user.id, now=moment)
-    if session.last_heartbeat_at is not None:
-        gap_seconds = (moment - session.last_heartbeat_at).total_seconds()
+    session = _load_study_session(
+        db, nonce, record_id=record.id, employee_id=user.id, now=moment, lock=True
+    )
+    idle_seconds = settings.study_heartbeat_idle_seconds
+    cap_seconds = settings.study_heartbeat_credit_cap_seconds
+    tolerance_seconds = settings.study_heartbeat_gap_tolerance_seconds
+    previous = session.last_heartbeat_at
+    credit_seconds = 0.0
+    if previous is not None:
+        gap_seconds = (moment - previous).total_seconds()
         if gap_seconds < 0:
-            raise BizError(400, "心跳时间异常")
-        if gap_seconds <= STUDY_HEARTBEAT_MAX_GAP_SECONDS:
-            session.active_minutes = float(session.active_minutes) + gap_seconds / 60.0
-        # 间隔过大视为离开：该段静默时间不计入有效学时
-    session.last_heartbeat_at = moment
-    session.heartbeat_count = int(session.heartbeat_count) + 1
+            raise BizError(400, "心跳时间乱序（早于上次心跳），不计入有效学时")
+        if gap_seconds == 0:
+            # 重复心跳（同一服务端时刻）：幂等返回现状，不累计学时也不累计次数
+            return {
+                "learning_record_id": record.id,
+                "heartbeat_count": int(session.heartbeat_count),
+                "active_minutes": round(float(session.active_minutes), 2),
+                "expires_at": session.expires_at.isoformat(),
+            }
+        if gap_seconds <= idle_seconds + tolerance_seconds:
+            credit_seconds = min(gap_seconds, cap_seconds)
+        # 间隔超过（空闲窗口 + 容差）视为离开：该段静默时间不计入有效学时；
+        # 容差只吸收调度/网络抖动，不放宽离开判定本身
+    new_minutes = float(session.active_minutes) + credit_seconds / 60.0
+    new_count = int(session.heartbeat_count) + 1
+    result = db.execute(
+        update(TrainingStudySession)
+        .where(
+            TrainingStudySession.id == session.id,
+            TrainingStudySession.last_heartbeat_at == previous,
+            TrainingStudySession.heartbeat_count == int(session.heartbeat_count),
+            TrainingStudySession.consumed == 0,
+        )
+        .values(last_heartbeat_at=moment, heartbeat_count=new_count, active_minutes=new_minutes)
+    )
+    if result.rowcount != 1:
+        db.rollback()
+        raise BizError(400, "学习会话存在并发心跳或已结算，请重试")
     db.commit()
-    db.refresh(session)
     return {
         "learning_record_id": record.id,
-        "heartbeat_count": session.heartbeat_count,
-        "active_minutes": round(float(session.active_minutes), 2),
+        "heartbeat_count": new_count,
+        "active_minutes": round(new_minutes, 2),
         "expires_at": session.expires_at.isoformat(),
     }
 
@@ -2265,14 +2332,18 @@ def _study_evidence(
     if not token:
         raise BizError(400, "学习会话凭证缺失，请先领取 study-sessions 凭证")
     nonce = _verify_study_token(token, record_id=record.id, employee_id=employee_id, now=now)
-    session = _load_study_session(db, nonce, record_id=record.id, employee_id=employee_id, now=now)
+    session = _load_study_session(
+        db, nonce, record_id=record.id, employee_id=employee_id, now=now, lock=True
+    )
     # 有效学时 = 心跳累计，而非签发后经过时间；无交互等待不能兑换学习证据（C08 防挂机）
     minutes = float(session.active_minutes)
-    if int(session.heartbeat_count) < STUDY_HEARTBEAT_MIN_COUNT:
+    min_count = settings.study_heartbeat_min_count
+    min_minutes = settings.study_session_min_minutes
+    if int(session.heartbeat_count) < min_count:
         raise BizError(400, "学习交互不足，请在学习过程中保持心跳后再结算")
-    if minutes < MIN_STUDY_SESSION_MINUTES:
+    if minutes < min_minutes:
         raise BizError(
-            400, f"有效学习时长不足 {MIN_STUDY_SESSION_MINUTES:g} 分钟，本次不计入证据"
+            400, f"有效学习时长不足 {min_minutes:g} 分钟，本次不计入证据"
         )
     previous = list(
         db.scalars(

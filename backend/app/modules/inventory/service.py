@@ -20,9 +20,6 @@ from app.modules.inventory.models import (
 from app.modules.inventory.scoring import grid_cell, public_safe_review, visible_summary
 from app.modules.training import authz
 
-ADMIN_ROLES = {"admin", "hr"}  # 历史行级「自/他 + 管理」判定保留；纯管理门改走 A06 角色门禁
-
-
 def _viewer_role(db: Session, user) -> str:
     """字段级可见性等价角色：管理侧/经理按内部可见，员工按公开视图（F10 矩阵）。"""
     tier = authz.viewer_tier(db, user)
@@ -102,6 +99,7 @@ def update_review(db: Session, review_id: int, payload, user) -> InventoryReview
     review = db.get(InventoryReview, review_id)
     if not review:
         raise BizError(404, "复核不存在")
+    authz.require_employee_in_scope(db, user, review.employee_user_id)
     if review.status == "confirmed":
         raise BizError(400, "已确认复核不可修改，请新建复核")
     data = payload.model_dump(exclude_unset=True)
@@ -145,6 +143,7 @@ def submit_review(db: Session, review_id: int, user) -> InventoryReview:
     review = db.get(InventoryReview, review_id)
     if not review:
         raise BizError(404, "复核不存在")
+    authz.require_employee_in_scope(db, user, review.employee_user_id)
     if review.status == "confirmed":
         raise BizError(400, "已确认复核不可再提交，请新建复核")
     if not review.performance_score:
@@ -171,6 +170,7 @@ def confirm_review(db: Session, review_id: int, user) -> InventoryReview:
     review = db.get(InventoryReview, review_id)
     if not review:
         raise BizError(404, "复核不存在")
+    authz.require_employee_in_scope(db, user, review.employee_user_id)
     if review.status == "confirmed":
         raise BizError(400, "复核已确认，不可重复确认")
     if review.status != "submitted":
@@ -235,6 +235,7 @@ def get_review(db: Session, review_id: int, user) -> dict[str, Any]:
 
 def nominate_pool(db: Session, payload, user) -> InventoryTalentPool:
     _require_admin(user)
+    authz.require_employee_in_scope(db, user, payload.employee_user_id)
     pool = InventoryTalentPool(
         employee_user_id=payload.employee_user_id,
         pool_type=payload.pool_type,
@@ -252,6 +253,7 @@ def decide_pool(db: Session, pool_id: int, payload, user) -> InventoryTalentPool
     pool = db.get(InventoryTalentPool, pool_id)
     if not pool:
         raise BizError(404, "人才池记录不存在")
+    authz.require_employee_in_scope(db, user, pool.employee_user_id)
     pool.status = payload.status
     pool.decided_by = user.id
     pool.decided_at = datetime.now()
@@ -261,9 +263,12 @@ def decide_pool(db: Session, pool_id: int, payload, user) -> InventoryTalentPool
 
 
 def list_pools(db: Session, user) -> list[InventoryTalentPool]:
-    if user.role in ADMIN_ROLES:
-        return db.execute(select(InventoryTalentPool).order_by(InventoryTalentPool.id.desc())).scalars().all()
-    raise BizError(403, "仅管理员可查看人才池")
+    _require_admin(user)
+    stmt = select(InventoryTalentPool).order_by(InventoryTalentPool.id.desc())
+    scoped = authz.scoped_employee_ids(db, user)
+    if scoped is not None:
+        stmt = stmt.where(InventoryTalentPool.employee_user_id.in_(scoped))
+    return db.execute(stmt).scalars().all()
 
 
 def create_dispute(db: Session, review_id: int, payload, user) -> InventoryDispute:
@@ -280,6 +285,7 @@ def respond_dispute(db: Session, dispute_id: int, payload, user) -> InventoryDis
     dispute = db.get(InventoryDispute, dispute_id)
     if not dispute:
         raise BizError(404, "异议不存在")
+    authz.require_employee_in_scope(db, user, dispute.employee_user_id)
     dispute.status = payload.status
     dispute.response = payload.response
     dispute.responded_by = user.id
@@ -290,8 +296,9 @@ def upsert_idp(db: Session, review_id: int, payload, user) -> InventoryDevelopme
     review = db.get(InventoryReview, review_id)
     if not review:
         raise BizError(404, "复核不存在")
-    if user.role not in ADMIN_ROLES and review.employee_user_id != user.id:
-        raise BizError(403, "无权操作他人发展计划")
+    if review.employee_user_id != user.id:
+        _require_admin(user)
+        authz.require_employee_in_scope(db, user, review.employee_user_id)
     existing = db.execute(
         select(InventoryDevelopmentPlan).where(InventoryDevelopmentPlan.review_id == review_id)
     ).scalar_one_or_none()
@@ -327,10 +334,13 @@ def export_summary(db: Session, *, user, cycle_name: str | None = None) -> tuple
     """
     _require_admin(user)
     stmt = select(InventoryReview).where(InventoryReview.status == "confirmed")
+    scoped = authz.scoped_employee_ids(db, user)
+    if scoped is not None:
+        stmt = stmt.where(InventoryReview.employee_user_id.in_(scoped))
     if cycle_name:
         stmt = stmt.where(InventoryReview.cycle_name == cycle_name)
     rows = db.execute(stmt).scalars().all()
-    summary = visible_summary([_review_dict(r) for r in rows], viewer_role=user.role)
+    summary = visible_summary([_review_dict(r) for r in rows], viewer_role=_viewer_role(db, user))
     lines = ["grid_cell,label,count"]
     for cell, count in summary["cells"].items():
         label = summary["labels"].get(cell) or "低于门槛合并"

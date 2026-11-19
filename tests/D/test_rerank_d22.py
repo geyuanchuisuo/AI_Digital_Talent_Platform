@@ -215,6 +215,128 @@ def test_rank_candidates_explicit_mode_overrides_settings(monkeypatch):
     assert [c.id for c in out.candidates] == ["id0", "id1", "id2"]
 
 
+# ---- 候选集合完整性校验（REQ-MASTER-20261111-233731-D）----
+
+def _stub_rerank(monkeypatch, results):
+    """替身重排器：直接返回指定 [(index, score)]，绕过 API 层形状校验。"""
+    monkeypatch.setattr("app.config.settings.rerank_mode", "api")
+    monkeypatch.setattr(rerank_client, "rerank", lambda q, docs: results)
+
+
+def _assert_original_order(out, cands, error_keyword):
+    assert out.reranked is False, "异常结果必须明确降级，不得静默重排"
+    assert [c.id for c in out.candidates] == [c.id for c in cands], "降级保持原序原集合"
+    assert out.error is not None and error_keyword in out.error
+
+
+def test_rank_candidates_duplicate_index_falls_back(monkeypatch):
+    """本轮复现：候选 A/B，替身返回 [(0,0.9),(0,0.8)] → 原序 A/B 且明确降级。"""
+    cands = _cands("a", "b")
+    _stub_rerank(monkeypatch, [(0, 0.9), (0, 0.8)])
+    out = rank_candidates("q", cands)
+    _assert_original_order(out, cands, "重复")
+
+
+def test_rank_candidates_missing_index_falls_back(monkeypatch):
+    """遗漏候选：数量不足或索引未完整覆盖 0..n-1 → 降级。"""
+    cands = _cands("a", "b", "c")
+    _stub_rerank(monkeypatch, [(0, 0.9), (1, 0.8)])
+    _assert_original_order(rank_candidates("q", cands), cands, "数量")
+    # 数量相等但覆盖不全（重复占位）同样降级
+    _stub_rerank(monkeypatch, [(0, 0.9), (0, 0.8), (1, 0.7)])
+    _assert_original_order(rank_candidates("q", cands), cands, "重复")
+
+
+def test_rank_candidates_out_of_range_index_falls_back(monkeypatch):
+    cands = _cands("a", "b")
+    _stub_rerank(monkeypatch, [(0, 0.9), (2, 0.8)])
+    _assert_original_order(rank_candidates("q", cands), cands, "越界")
+    _stub_rerank(monkeypatch, [(0, 0.9), (-1, 0.8)])
+    _assert_original_order(rank_candidates("q", cands), cands, "越界")
+
+
+def test_rank_candidates_non_integer_index_falls_back(monkeypatch):
+    cands = _cands("a", "b")
+    for bad_idx in ("1", 1.0, True, None):
+        _stub_rerank(monkeypatch, [(0, 0.9), (bad_idx, 0.8)])
+        _assert_original_order(rank_candidates("q", cands), cands, "非整数")
+
+
+def test_rank_candidates_non_finite_score_falls_back(monkeypatch):
+    cands = _cands("a", "b")
+    for bad_score in (float("nan"), float("inf"), float("-inf")):
+        _stub_rerank(monkeypatch, [(0, bad_score), (1, 0.8)])
+        _assert_original_order(rank_candidates("q", cands), cands, "有限数")
+
+
+def test_rank_candidates_malformed_element_falls_back(monkeypatch):
+    """元素形状非法（非二元组）→ 降级而非崩溃。"""
+    cands = _cands("a", "b")
+    _stub_rerank(monkeypatch, [(0, 0.9, 0.5), (1, 0.8)])
+    _assert_original_order(rank_candidates("q", cands), cands, "形状")
+
+
+def test_rank_candidates_valid_reverse_order(monkeypatch):
+    """合法完整集合的逆序返回：按分降序重排，集合不变。"""
+    cands = _cands("a", "b")
+    _stub_rerank(monkeypatch, [(1, 0.9), (0, 0.8)])
+    out = rank_candidates("q", cands)
+    assert out.reranked is True and out.error is None
+    assert [c.id for c in out.candidates] == ["id1", "id0"]
+    assert [c.rerank_score for c in out.candidates] == [0.9, 0.8]
+
+
+def test_rank_candidates_stable_sort_on_equal_scores(monkeypatch):
+    """同分稳定排序：保持返回结果中的相对顺序。"""
+    cands = _cands("a", "b", "c")
+    _stub_rerank(monkeypatch, [(1, 0.5), (0, 0.5), (2, 0.9)])
+    out = rank_candidates("q", cands)
+    assert out.reranked is True
+    assert [c.id for c in out.candidates] == ["id2", "id1", "id0"]
+
+
+def test_rank_candidates_top_n_after_full_validation(monkeypatch):
+    """合法集合先按分排序再按 top_n 截断；非法集合不受 top_n 掩盖。"""
+    cands = _cands("a", "b", "c")
+    _stub_rerank(monkeypatch, [(2, 0.9), (0, 0.5), (1, 0.7)])
+    out = rank_candidates("q", cands, top_n=2)
+    assert out.reranked is True
+    assert [c.id for c in out.candidates] == ["id2", "id1"]
+    # 重复索引即使 top_n 小于候选数也必须降级（校验在截断前）
+    _stub_rerank(monkeypatch, [(0, 0.9), (0, 0.8), (1, 0.7)])
+    out = rank_candidates("q", cands, top_n=1)
+    _assert_original_order(out, cands, "重复")
+
+
+def test_rank_candidates_duplicate_business_ids_are_legal(monkeypatch):
+    """重复业务 id ≠ 索引重复：合法完整集合正常重排，不按 id 合并候选。"""
+    cands = [RerankCandidate(id="same", text="a", score=1.0),
+             RerankCandidate(id="same", text="b", score=0.5)]
+    _stub_rerank(monkeypatch, [(1, 0.9), (0, 0.8)])
+    out = rank_candidates("q", cands)
+    assert out.reranked is True and out.error is None
+    assert [c.text for c in out.candidates] == ["b", "a"]
+
+
+def test_rank_candidates_duplicate_index_via_api_layer(monkeypatch):
+    """端到端：API 层返回重复索引（形状合法）→ 框架层降级原序。"""
+    monkeypatch.setattr("app.config.settings.rerank_mode", "api")
+    monkeypatch.setattr("app.config.settings.rerank_base_url", "http://127.0.0.1:9")
+
+    class DupResp:
+        status_code = 200
+        text = ""
+        def json(self):
+            return {"results": [{"index": 0, "relevance_score": 0.9},
+                                {"index": 0, "relevance_score": 0.8}]}
+
+    monkeypatch.setattr("httpx.post", lambda *a, **k: DupResp())
+    reset_reranker()
+    cands = _cands("a", "b")
+    out = rank_candidates("q", cands)
+    _assert_original_order(out, cands, "重复")
+
+
 # ---- API 模式（httpx 假传输）----
 
 def test_api_reranker_parses_results_and_sorts(monkeypatch):

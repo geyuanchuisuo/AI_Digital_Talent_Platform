@@ -144,6 +144,8 @@ class ScreenResult(PKMixin, CreatedAtMixin, Base):
     reason_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     hits_json: Mapped[list | None] = mapped_column(JSONList, nullable=True)
     misses_json: Mapped[list | None] = mapped_column(JSONList, nullable=True)
+    # T-A42 逐结果失败：引擎异常/超时的单份失败原因；非空=失败行（retry 重跑目标）
+    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     # ---- 结果快照与版本追溯（T-A33/T-A43，2026-11-07 功能 5b；D 指标口径可追溯基础）----
     model_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     prompt_version: Mapped[str | None] = mapped_column(String(20), nullable=True)
@@ -219,6 +221,8 @@ class MatchResult(PKMixin, CreatedAtMixin, Base):
     hits_json: Mapped[list | None] = mapped_column(JSONList, nullable=True)
     misses_json: Mapped[list | None] = mapped_column(JSONList, nullable=True)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # T-A42 逐结果失败：引擎异常/超时的单份失败原因；非空=失败行（retry 重跑目标）
+    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     # ---- 结果快照与版本追溯（T-A33/T-A43，2026-11-07 功能 5b）----
     model_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     prompt_version: Mapped[str | None] = mapped_column(String(20), nullable=True)

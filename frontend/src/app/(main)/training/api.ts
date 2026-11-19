@@ -346,7 +346,10 @@ export function startLearningSession(recordId: number) {
     learning_record_id: number;
     session_token: string;
     expires_at: string;
+    /** C08 三键分离：心跳发送周期（应明显小于空闲窗口） */
     heartbeat_interval_seconds: number;
+    /** 服务端计费空闲窗口：前端 idle 检测以此为准，不再与服务端同源漂移 */
+    idle_seconds: number;
   }>(`/training/learning-records/${recordId}/study-sessions`);
 }
 

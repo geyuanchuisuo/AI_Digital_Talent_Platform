@@ -2,9 +2,11 @@
 
 环境说明：
 - 不依赖 MySQL/Milvus/真实模型：用 SQLite 持久化 + 测试内注入评分/草稿替身。
-- 当前开发机未安装 pytest 与 python-jose；本夹具为 JWT 库注入最小替身，
-  只为让 `app.api.deps` 可导入，测试本身不使用真实 token。
+- jose 优先导入真实库；仅在未安装时注入最小替身让 `app.api.deps` 可导入，
+  测试本身不使用真实 token。替身不覆盖已安装的真实库（防跨套件进程级污染）。
 - 只创建 C 的 17 张表；`users` 表因公共模型使用 MySQL 专用类型，按同结构手写 SQLite DDL。
+- 全局 `app.database.SessionLocal` 在 Harness 生命周期内替换为内存 SQLite，
+  `close()` 恢复原值——从仓库根混跑 pytest 时不污染其他套件。
 """
 
 from __future__ import annotations
@@ -25,7 +27,9 @@ os.environ.setdefault("LLM_API_KEY", "test")
 os.environ.setdefault("MYSQL_PASSWORD", "test")
 os.environ.setdefault("JWT_SECRET", "test")
 
-if "jose" not in sys.modules:
+try:
+    import jose  # noqa: F401  真实库优先，避免替身遮蔽已安装的 python-jose
+except ImportError:
     jose_stub = types.ModuleType("jose")
 
     class JWTError(Exception):
@@ -132,6 +136,8 @@ class Harness:
         # 真实 MySQL 并因查不到角色表而把所有账号判为 personal。
         import app.database as _app_database
 
+        self._app_database = _app_database
+        self._prev_session_local = _app_database.SessionLocal
         _app_database.SessionLocal = self.SessionLocal
 
         app = FastAPI()
@@ -222,3 +228,5 @@ class Harness:
     def close(self) -> None:
         self.client.close()
         self.engine.dispose()
+        # 恢复全局 SessionLocal，避免混跑时其他套件拿到已 dispose 的 SQLite 工厂
+        self._app_database.SessionLocal = self._prev_session_local

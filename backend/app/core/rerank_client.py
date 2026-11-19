@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import threading
 from dataclasses import dataclass, field
 from typing import Any, Protocol, Sequence
@@ -248,6 +249,31 @@ class RerankOutcome:
     error: str | None = None
 
 
+def _validate_rerank_results(results: list[tuple[int, float]], n: int) -> str | None:
+    """组装前完整校验：数量=候选数、索引为范围内整数、无重复、分数有限。
+
+    数量+范围+唯一三者合取即保证索引集合恰为 0..n-1；任一不满足返回降级原因，
+    不允许「跳过坏索引」掩盖错误（REQ-MASTER-20261111-233731-D）。
+    """
+    if len(results) != n:
+        return f"重排结果数量与候选不一致（返回 {len(results)}，候选 {n}）"
+    seen: set[int] = set()
+    for item in results:
+        if not isinstance(item, (tuple, list)) or len(item) != 2:
+            return f"重排结果元素形状非法：{item!r}"
+        idx, score = item
+        if not isinstance(idx, int) or isinstance(idx, bool):
+            return f"重排结果索引非整数：{idx!r}"
+        if not 0 <= idx < n:
+            return f"重排结果索引越界：{idx!r}（候选数 {n}）"
+        if idx in seen:
+            return f"重排结果索引重复：{idx}"
+        seen.add(idx)
+        if not isinstance(score, (int, float)) or isinstance(score, bool) or not math.isfinite(score):
+            return f"重排结果分数非有限数：{score!r}"
+    return None
+
+
 def rank_candidates(
     query: str,
     candidates: Sequence[RerankCandidate],
@@ -260,11 +286,13 @@ def rank_candidates(
     降级策略（保持候选集合不变，只改顺序；不静默重排）：
     - ``mode=off`` / 空候选 / 单候选 → 原序返回，``reranked=False``；
     - 重排调用失败（网络/超时/配置）→ 原序返回，``reranked=False``，``error`` 说明原因；
-    - 重排结果数量与候选不一致 → 原序返回，``reranked=False``；
-    - 成功 → 按重排分降序，``reranked=True``；``top_n`` 截断在重排后应用。
+    - 重排结果数量/索引整数与范围/索引唯一与完整覆盖/分数有限性任一不满足
+      → 原序返回，``reranked=False``，``error`` 说明原因（不跳过坏索引）；
+    - 成功 → 按重排分降序稳定排序，``reranked=True``；``top_n`` 截断在重排后应用。
 
     ``mode=None`` 时读 ``settings.rerank_mode``；分数仅供同一次召回内排序，
-    跨模式（api vs local）分制不可比。
+    跨模式（api vs local）分制不可比。候选以输入下标为准，不用业务 id 判唯一
+    （同一输入允许重复业务 id），也不从模型返回文本重建候选。
     """
     if not candidates:
         return RerankOutcome(candidates=[], reranked=False)
@@ -283,20 +311,18 @@ def rank_candidates(
     if results is None:
         return RerankOutcome(candidates=list(candidates), reranked=False)
 
-    reranked: list[RerankCandidate] = []
-    for idx, score in results:
-        if 0 <= idx < len(candidates):
-            c = candidates[idx]
-            reranked.append(RerankCandidate(
-                id=c.id, text=c.text, score=c.score, rerank_score=float(score),
-            ))
+    error = _validate_rerank_results(results, len(candidates))
+    if error is not None:
+        return RerankOutcome(candidates=list(candidates), reranked=False, error=error)
 
-    # 候选集合完整性：数量不一致说明重排器行为异常，降级为原序
-    if len(reranked) != len(candidates):
-        return RerankOutcome(
-            candidates=list(candidates), reranked=False,
-            error="重排结果数量与候选不一致",
+    ordered = sorted(results, key=lambda p: p[1], reverse=True)
+    reranked = [
+        RerankCandidate(
+            id=candidates[idx].id, text=candidates[idx].text,
+            score=candidates[idx].score, rerank_score=float(score),
         )
+        for idx, score in ordered
+    ]
 
     if top_n is not None and top_n >= 0:
         reranked = reranked[:top_n]
