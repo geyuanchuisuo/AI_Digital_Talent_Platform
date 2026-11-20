@@ -10,12 +10,13 @@
 
 'use client';
 
-import { Form, Input, InputNumber, Modal, Select, Slider, Switch, Typography, message } from 'antd';
+import { RobotOutlined } from '@ant-design/icons';
+import { Button, Form, Input, InputNumber, Modal, Select, Slider, Space, Switch, Typography, message } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 
 import { getErrorMessage } from '@/lib/http';
 
-import { createJobProfile, putJobProfile } from './api';
+import { createJobProfile, generateJdDraft, putJobProfile } from './api';
 import { DEGREE_OPTIONS } from './types';
 import type { JobProfileOut, JobProfileWritePayload, Weights } from './types';
 
@@ -40,6 +41,7 @@ export default function JobProfileFormModal({ open, editing, onClose, onSaved }:
   const [form] = Form.useForm();
   const [weights, setWeights] = useState<Weights>({ skills: 40, experience: 30, education: 15, others: 15 });
   const [saving, setSaving] = useState(false);
+  const [draftLoading, setDraftLoading] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -75,6 +77,46 @@ export default function JobProfileFormModal({ open, editing, onClose, onSaved }:
     [weights],
   );
   const weightsOk = weightTotal === 100;
+
+  const handleGenerateDraft = async () => {
+    const values = form.getFieldsValue();
+    if (!values.title?.trim()) {
+      void message.warning('请先填写岗位名称，AI 依此生成草稿');
+      return;
+    }
+    setDraftLoading(true);
+    try {
+      const data = await generateJdDraft({
+        title: values.title.trim(),
+        department: values.department || null,
+        requirements_text: values.requirements_text || null,
+        min_degree: values.min_degree ?? null,
+        must_skills: values.must_skills ?? [],
+        bonus_skills: values.bonus_skills ?? [],
+      });
+      // 按 ## 标题拆段：职责 → jd_text；任职要求（并入加分项）→ requirements_text；
+      // 拆不开时整段入 jd_text（人工再调整）。
+      const sections = data.draft_md.split(/\n(?=## )/).map((s) => s.trim());
+      const body = (s: string) => s.replace(/^## [^\n]*\n?/, '').trim();
+      const jd = sections.find((s) => s.startsWith('## 岗位职责'));
+      const req = sections.find((s) => s.startsWith('## 任职要求'));
+      const bonus = sections.find((s) => s.startsWith('## 加分项'));
+      if (jd && req) {
+        form.setFieldsValue({
+          jd_text: body(jd),
+          requirements_text: bonus ? `${body(req)}\n\n加分项：${body(bonus)}` : body(req),
+        });
+      } else {
+        form.setFieldsValue({ jd_text: data.draft_md });
+      }
+      void message.success(`草稿已生成（${data.model_version}），请人工编辑确认后保存`);
+    } catch (err) {
+      // 后端 503 明确报错原样展示；绝不以样例文案顶替草稿
+      void message.error(getErrorMessage(err));
+    } finally {
+      setDraftLoading(false);
+    }
+  };
 
   const submit = async () => {
     try {
@@ -141,6 +183,17 @@ export default function JobProfileFormModal({ open, editing, onClose, onSaved }:
             <Input maxLength={100} />
           </Form.Item>
         </Space_row>
+        <Space style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+          <Text type="secondary">职责描述与任职要求可由 AI 生成草稿后人工编辑确认（T-A22）</Text>
+          <Button
+            size="small"
+            icon={<RobotOutlined />}
+            loading={draftLoading}
+            onClick={() => void handleGenerateDraft()}
+          >
+            AI 生成 JD 草稿
+          </Button>
+        </Space>
         <Form.Item
           name="jd_text"
           label="职责描述（JD）"

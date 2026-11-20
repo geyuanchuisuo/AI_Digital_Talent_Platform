@@ -16,7 +16,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.api.deps import CurrentUser, require_roles
+from app.api.deps import CurrentUser, ManagementDep, require_roles
 from app.core.auth.scope import account_is_management, get_account_scope
 from app.core.errors import BizError
 from app.core.response import ok
@@ -58,7 +58,7 @@ _GATE_RECORDS = Depends(require_roles(*DEMAND_RECORD_READ_ROLES))
 
 
 @router.post("/project-groups", summary="创建项目群")
-def create_project_group(payload: ProjectGroupCreate, user: CurrentUser, db: Annotated[Session, Depends(get_db)]):
+def create_project_group(payload: ProjectGroupCreate, user: ManagementDep, db: Annotated[Session, Depends(get_db)]):
     row = recruitment_service.create_project_group(
         db, name=payload.name, description=payload.description, user_id=user.id
     )
@@ -69,7 +69,7 @@ def create_project_group(payload: ProjectGroupCreate, user: CurrentUser, db: Ann
 def list_project_groups(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
-    user: CurrentUser = None,
+    user: ManagementDep = None,
     db: Annotated[Session, Depends(get_db)] = None,
 ):
     rows, total = recruitment_service.list_project_groups(db, offset=(page - 1) * page_size, limit=page_size)
@@ -87,7 +87,7 @@ def list_project_groups(
 
 
 @router.post("/projects", summary="创建项目")
-def create_project(payload: ProjectCreate, user: CurrentUser, db: Annotated[Session, Depends(get_db)]):
+def create_project(payload: ProjectCreate, user: ManagementDep, db: Annotated[Session, Depends(get_db)]):
     row = recruitment_service.create_project(
         db, name=payload.name, project_group_id=payload.project_group_id,
         description=payload.description, user_id=user.id,
@@ -100,7 +100,7 @@ def list_projects(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     project_group_id: int | None = Query(None),
-    user: CurrentUser = None,
+    user: ManagementDep = None,
     db: Annotated[Session, Depends(get_db)] = None,
 ):
     rows, total = recruitment_service.list_projects(
@@ -120,7 +120,7 @@ def list_projects(
 
 
 @router.post("/demands", summary="创建人才需求（同岗位同项目在途需求 409）")
-def create_demand(payload: ProjectDemandCreate, user: CurrentUser, db: Annotated[Session, Depends(get_db)]):
+def create_demand(payload: ProjectDemandCreate, user: ManagementDep, db: Annotated[Session, Depends(get_db)]):
     row = recruitment_service.create_demand(
         db,
         {
@@ -144,7 +144,7 @@ def list_demands(
     page_size: int = Query(20, ge=1, le=200),
     status: str | None = Query(None),
     project_id: int | None = Query(None),
-    user: CurrentUser = None,
+    user: ManagementDep = None,
     db: Annotated[Session, Depends(get_db)] = None,
 ):
     rows, total = recruitment_service.list_demands(
@@ -160,8 +160,24 @@ def list_demands(
     )
 
 
+@router.get("/demands/gap-summary", summary="缺口统计（T-A24：headcount − HR 确认已录用数）")
+def demand_gap_summary(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    status: str | None = Query(None),
+    project_id: int | None = Query(None),
+    user: ManagementDep = None,
+    db: Annotated[Session, Depends(get_db)] = None,
+):
+    """缺口口径见 service.demand_gap_summary / 指标口径交付 §7；gap 为负=超编。"""
+    items, total = recruitment_service.demand_gap_summary(
+        db, status=status, project_id=project_id, offset=(page - 1) * page_size, limit=page_size
+    )
+    return ok(PageData(items=items, total=total, page=page, page_size=page_size).model_dump())
+
+
 @router.get("/demands/{demand_id}", summary="人才需求详情")
-def get_demand(demand_id: int, user: CurrentUser, db: Annotated[Session, Depends(get_db)]):
+def get_demand(demand_id: int, user: ManagementDep, db: Annotated[Session, Depends(get_db)]):
     return ok(_demand_out(recruitment_service.get_demand(db, demand_id)))
 
 
@@ -169,7 +185,7 @@ def get_demand(demand_id: int, user: CurrentUser, db: Annotated[Session, Depends
 def update_demand(
     demand_id: int,
     payload: ProjectDemandUpdate,
-    user: CurrentUser,
+    user: ManagementDep,
     db: Annotated[Session, Depends(get_db)],
 ):
     changes = payload.model_dump(exclude_unset=True)
@@ -238,7 +254,7 @@ def list_demand_approval_records(
 @router.post("/applications", summary="创建岗位申请（同岗位在途申请 409；对外阶段按已确认映射自动更新）")
 def create_application(
     payload: dict,
-    user: CurrentUser,
+    user: ManagementDep,
     db: Annotated[Session, Depends(get_db)] = None,
 ):
     for key in ("talent_profile_id", "job_profile_id"):
@@ -286,7 +302,7 @@ def list_applications(
 def set_application_stage(
     application_id: int,
     payload: dict,
-    user: CurrentUser,
+    user: ManagementDep,
     db: Annotated[Session, Depends(get_db)] = None,
 ):
     stage = payload.get("internal_stage")
@@ -299,7 +315,7 @@ def set_application_stage(
 
 
 @router.post("/applications/{application_id}/result-confirm", summary="HR 确认终态结果类别（确认后才对外发布）")
-def confirm_application_result(application_id: int, user: CurrentUser, db: Annotated[Session, Depends(get_db)] = None):
+def confirm_application_result(application_id: int, user: ManagementDep, db: Annotated[Session, Depends(get_db)] = None):
     row = recruitment_service.confirm_application_result(db, application_id, user_id=user.id)
     return ok(_application_out(row))
 
@@ -310,7 +326,7 @@ def confirm_application_result(application_id: int, user: CurrentUser, db: Annot
 )
 def get_application_input_snapshot(
     application_id: int,
-    user: CurrentUser,
+    user: ManagementDep,
     _gate: Annotated[tuple[str, ...], _GATE_SNAPSHOT],
     db: Annotated[Session, Depends(get_db)] = None,
 ):
@@ -370,7 +386,7 @@ def _application_out(row) -> dict:
 
 
 @router.post("/jd-publications", summary="投放 JD（草稿经授权确认后发布，渠道/版本留痕）")
-def create_jd_publication(payload: dict, user: CurrentUser, db: Annotated[Session, Depends(get_db)] = None):
+def create_jd_publication(payload: dict, user: ManagementDep, db: Annotated[Session, Depends(get_db)] = None):
     for key in ("job_profile_id", "title", "content", "channel"):
         if payload.get(key) in (None, ""):
             raise BizError(400, f"{key} 必填")
@@ -391,7 +407,7 @@ def list_jd_publications(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     job_profile_id: int | None = Query(None),
-    user: CurrentUser = None,
+    user: ManagementDep = None,
     db: Annotated[Session, Depends(get_db)] = None,
 ):
     rows, total = recruitment_service.list_jd_publications(
@@ -401,7 +417,7 @@ def list_jd_publications(
 
 
 @router.post("/jd-publications/{publication_id}/withdraw", summary="撤回 JD 投放（留痕可追溯）")
-def withdraw_jd_publication(publication_id: int, user: CurrentUser, db: Annotated[Session, Depends(get_db)] = None):
+def withdraw_jd_publication(publication_id: int, user: ManagementDep, db: Annotated[Session, Depends(get_db)] = None):
     row = recruitment_service.withdraw_jd_publication(db, publication_id, user_id=user.id)
     return ok(_jd_out(row))
 

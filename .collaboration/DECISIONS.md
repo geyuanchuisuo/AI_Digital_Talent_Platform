@@ -88,3 +88,10 @@
 
 - 用户审阅截至141927c的SSE、工作流/事件授权、测试配置、执行入口与C迁移变化后明确回复同意。允许保存已验收B第二轮成果并将指定版本合入Anhoa，统一公共实现与新增差异字段、汇合B/C迁移、完成必要兼容修复及验证。
 - 不包含后续新公共变更或远端master发布。冲突账本保留双方独立决定，不互相覆盖；新增B_0005空迁移保留两条历史。实际验证与集成提交见本轮MASTER交接。
+
+### DEC-20261114-C-IDENTITY：用户纠正本会话 Agent 身份为 C
+
+- 用户 2026-11-14 本会话明确：本 ZCode Agent 身份为 **C**，MASTER 由 Codex Agent 承担；此纠正取代根 AGENTS.md「2026-11-07 治理修订」中「本 Codex Agent 固定承担 MASTER、C 由 TRAE 负责」与本机相关的表述。
+- 与本机既有配置一致：collab.actor=C、collab.branch=master_YB；据此本会话 REQ-A-20261114-220500-C 的受理与交付（修复提交 40dc84e）按 C 身份成立，交付记录以 [C 受理交付记录](../docs/updates/C/20261114-222723-application_id引用完整性受理交付.md) 为准。
+- 最初误以 MASTER 身份登记于 docs/updates/MASTER/（提交 361261e）的记录已在该纠正提交中移除（系本会话自身错置写入，非他人历史，MASTER 目录恢复原状）；纠正前提交因 actor=C 与 MASTER 记录错配使用的 --no-verify 豁免随之失效作废，纠正后按 C 身份正常通过 check_scope。
+- 根 AGENTS.md 与相关治理文本的同步修改属 A 维护的治理文件，本次未修改，待 A/MASTER 按账本登记回传同步；本条不改变 ownership.json 机器归属，不构成对 master 的发布授权。

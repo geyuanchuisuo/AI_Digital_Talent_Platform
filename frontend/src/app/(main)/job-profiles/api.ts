@@ -7,6 +7,8 @@ import { del, get, post, request } from '@/lib/http';
 import type { PageData } from '@/lib/types';
 
 import type {
+  JdDraftData,
+  JdDraftPayload,
   JobProfileDeleteData,
   JobProfileListItem,
   JobProfileOut,
@@ -40,4 +42,10 @@ export function putJobProfile(id: number, payload: JobProfileWritePayload): Prom
 /** 有批次引用 → 软删（soft_deleted:true）；无引用 → 物理删除；重复删除 404 */
 export function deleteJobProfile(id: number): Promise<JobProfileDeleteData> {
   return del<JobProfileDeleteData>(`/job-profiles/${id}`);
+}
+
+/** T-A22：AI 生成 JD 草稿（真实模型；失败 503 明确报错，前端不返回样例）。
+ * 真实生成耗时 10–60s 级，单请求放宽到 120s（覆盖 lib/http 公共默认超时，不改公共层）。 */
+export function generateJdDraft(payload: JdDraftPayload): Promise<JdDraftData> {
+  return post<JdDraftData>('/job-profiles/jd-draft', payload, { timeout: 120_000 });
 }

@@ -18,6 +18,7 @@ from app.models import User
 from app.modules.assessments.service import is_admin, require_admin
 from app.modules.interviews.models import InterviewFeedback, InterviewRound, InterviewRoundEvent
 from app.modules.interviews.schemas import FeedbackSaveRequest, RoundCreateRequest, RoundUpdateRequest
+from app.modules.recruitment.models import Application
 
 
 def _is_interviewer(round_row: InterviewRound, user: User) -> bool:
@@ -58,6 +59,26 @@ def _event(
     )
 
 
+def validate_application_ref(
+    db: Session, application_id: int | None, talent_profile_id: int | None
+) -> None:
+    """落库前校验 application_id 引用完整性（REQ-A-20261114-220500-C）。
+
+    - `application_id` 非空时必须在 applications 中存在，否则 400（物理外键仅
+      RESTRICT 防误删，悬空 id 会以 500 IntegrityError 暴露；A 契约 §1 约定
+      引用一致性由 service 层保证）；
+    - 与轮次侧 talent_profile_id 都非空时须归属一致，否则 400（防止把面试
+      挂到他人的申请上）。
+    """
+    if application_id is None:
+        return
+    application = db.get(Application, application_id)
+    if application is None:
+        raise BizError(400, "application_id 不存在")
+    if talent_profile_id is not None and application.talent_profile_id != talent_profile_id:
+        raise BizError(400, "application_id 与 talent_profile_id 归属不一致")
+
+
 def create_round(db: Session, payload: RoundCreateRequest, *, admin: User) -> InterviewRound:
     require_admin(admin)
     if payload.candidate_user_id is None and payload.talent_profile_id is None:
@@ -68,6 +89,8 @@ def create_round(db: Session, payload: RoundCreateRequest, *, admin: User) -> In
         )
         if existing is not None:
             return existing
+    # 引用完整性校验：幂等命中直接返回不落库，无需重复校验
+    validate_application_ref(db, payload.application_id, payload.talent_profile_id)
     row = InterviewRound(
         candidate_user_id=payload.candidate_user_id,
         talent_profile_id=payload.talent_profile_id,

@@ -146,3 +146,92 @@ def graph_source(db: Session, job_id: int, version: int, *, user_id: int) -> dic
         raise BizError(409, '岗位版本或来源当前不可用')
     return dict(job_id=row.id, version=row.version, title=row.title, jd_text=row.jd_text,
                 must_skills=list(row.must_skills_json or []))
+
+
+# ---- T-A22：AI JD 草稿（真实模型生成，失败明确报错，不返回样例） ----
+
+JD_DRAFT_PROMPT_VERSION = "jd-v1"
+
+
+def _extract_jd_md(raw: str | None) -> str:
+    """模型响应清洗（T-A22 真机实测发现偶发包装）：
+
+    实测 spark-x2.6 在个别调用会把草稿包成 JSON（{"title":...,"jd_draft":"## ..."}）
+    或代码块标记。清洗规则：剥 ``` 围栏 → 若整体是 JSON 对象则取已知草稿键的
+    字符串值；清洗后仍无内容返回空串（上层 503 明确报错，不造样例）。
+    """
+    import json as _json
+
+    text = (raw or "").strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].lstrip().startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    if text.startswith("{"):
+        try:
+            obj = _json.loads(text)
+        except ValueError:
+            obj = None
+        if isinstance(obj, dict):
+            for key in ("jd_draft", "draft_md", "jd", "content", "text"):
+                value = obj.get(key)
+                if isinstance(value, str) and value.strip():
+                    text = value.strip()
+                    break
+    return text
+
+
+def generate_jd_draft(payload: "JobProfileJdDraftRequest") -> dict[str, Any]:
+    """调用真实 LLM 生成 JD 草稿（T-A22）。
+
+    口径（需求 §16 D-04 相关验收）：模型失败/超时/空返回一律明确报错（503，上游依赖不可用），
+    绝不用样例文案顶替；草稿不落库——人工编辑确认后随 POST/PUT 岗位保存，
+    「保存后可查」由岗位自身 jd_text 承担。模型名（model_version）取本次
+    调用实际生效值（供应商启停/切换即时生效，llm_client 口径）。
+    """
+    import json as _json
+    from datetime import datetime as _dt
+
+    from app.core.llm_client import get_llm_client
+    from app.core.prompts.loader import TEMPLATE_DIR
+
+    payload_json = _json.dumps(
+        {
+            "title": payload.title,
+            "department": payload.department,
+            "requirements_text": payload.requirements_text,
+            "min_degree": payload.min_degree,
+            "must_skills": payload.must_skills,
+            "bonus_skills": payload.bonus_skills,
+            "remarks": payload.remarks,
+        },
+        ensure_ascii=False,
+    )
+    template = (TEMPLATE_DIR / "jd_draft.txt").read_text(encoding="utf-8")
+    prompt = template.replace("{payload_json}", payload_json)
+
+    client = get_llm_client()
+    try:
+        draft = client.chat_text(
+            prompt,
+            system_prompt=(
+                "你是 JD 起草助手。只输出 markdown 正文：以 ## 岗位职责 / ## 任职要求 / ## 加分项 "
+                "为结构。绝不输出 JSON、代码块标记或任何解释性文字。"
+            ),
+            purpose="jd_draft",
+            max_tokens=2000,
+        )
+    except Exception as exc:  # LLMError/超时/连接失败 → 统一 503 明确报错（公共错误码白名单无 502）
+        raise BizError(503, f"JD 草稿生成失败：{exc}") from exc
+    draft = _extract_jd_md(draft)
+    if not draft:
+        raise BizError(503, "JD 草稿生成失败：模型返回空内容")
+    return {
+        "draft_md": draft,
+        "model_version": client.model,
+        "prompt_version": JD_DRAFT_PROMPT_VERSION,
+        "generated_at": _dt.now(),
+    }

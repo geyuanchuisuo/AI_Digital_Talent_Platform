@@ -7,7 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.api.deps import CurrentUser, PageParams, pagination
+from app.api.deps import CurrentUser, ManagementDep, PageParams, pagination
 from app.core.errors import BizError
 from app.core.response import ok, paginated
 from app.database import get_db
@@ -29,7 +29,7 @@ router = APIRouter(prefix="/api/match", tags=["match"])
 @router.post("/batches", summary="发起匹配批次（同步圈人 + 成员快照，202）")
 def create_match_batch(
     payload: MatchBatchCreateRequest,
-    user: CurrentUser,
+    user: ManagementDep,
     db: Annotated[Session, Depends(get_db)],
 ):
     """岗位向量在批次内只算一次；Milvus/Embedding 不可用时降级执行（vector_degraded=1），不 503。"""
@@ -45,7 +45,7 @@ def create_match_batch(
 
 @router.get("/batches", summary="匹配批次列表")
 def list_match_batches(
-    user: CurrentUser,
+    user: ManagementDep,
     db: Annotated[Session, Depends(get_db)],
     page: Annotated[PageParams, Depends(pagination)],
     job_profile_id: int | None = Query(None, ge=1),
@@ -76,7 +76,7 @@ def list_match_batches(
 @router.get("/batches/{batch_id}", summary="匹配批次详情（轮询）")
 def get_match_batch(
     batch_id: int,
-    user: CurrentUser,
+    user: ManagementDep,
     db: Annotated[Session, Depends(get_db)],
 ):
     data = match_service.get_batch_detail(db, batch_id)
@@ -86,7 +86,7 @@ def get_match_batch(
 @router.post("/batches/{batch_id}/retry", summary="重试失败批次（复用原批次，D-E）")
 def retry_match_batch(
     batch_id: int,
-    user: CurrentUser,
+    user: ManagementDep,
     db: Annotated[Session, Depends(get_db)],
 ):
     data = match_service.retry_batch(db, batch_id)
@@ -96,7 +96,7 @@ def retry_match_batch(
 @router.get("/batches/{batch_id}/results", summary="匹配名次分页（硬淘汰置底，rank 查询时计算）")
 def list_match_results(
     batch_id: int,
-    user: CurrentUser,
+    user: ManagementDep,
     db: Annotated[Session, Depends(get_db)],
     page: Annotated[PageParams, Depends(pagination)],
 ):
@@ -114,7 +114,7 @@ def list_match_results(
 @router.get("/results/{result_id}", summary="匹配结果理由详情（F3-4/F3-5）")
 def get_match_result(
     result_id: int,
-    user: CurrentUser,
+    user: ManagementDep,
     db: Annotated[Session, Depends(get_db)],
 ):
     data = match_service.get_result_detail(db, result_id)
@@ -125,7 +125,7 @@ def get_match_result(
 def patch_match_result(
     result_id: int,
     payload: ManualVerdictRequest,
-    user: CurrentUser,
+    user: ManagementDep,
     db: Annotated[Session, Depends(get_db)],
 ):
     result = match_service.set_manual_verdict(db, result_id, payload.manual_verdict, user_id=user.id)
