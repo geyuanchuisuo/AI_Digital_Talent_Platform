@@ -1681,14 +1681,22 @@ _ENROLLMENT_DECIDE_ACTIONS = {
 
 
 def _occupying_count(db: Session, course_id: int, *, exclude_id: int | None = None) -> int:
-    """占用名额的报名数：pending 占位、pending_admin_review 复核占位、approved 占用。"""
-    stmt = select(func.count()).select_from(TrainingEnrollment).where(
-        TrainingEnrollment.course_id == course_id,
-        TrainingEnrollment.status.in_(("pending", "pending_admin_review", "approved")),
+    """占用名额的报名数：pending 占位、pending_admin_review 复核占位、approved 占用。
+
+    必须用 FOR UPDATE 当前读：调用方已持有课程行锁，但本事务在加锁前通常已做过
+    一致性读（登录查用户/加载报名），REPEATABLE READ 快照看不到并发报名刚提交的占位。
+    """
+    stmt = (
+        select(TrainingEnrollment.id)
+        .where(
+            TrainingEnrollment.course_id == course_id,
+            TrainingEnrollment.status.in_(("pending", "pending_admin_review", "approved")),
+        )
+        .with_for_update()
     )
     if exclude_id is not None:
         stmt = stmt.where(TrainingEnrollment.id != exclude_id)
-    return int(db.scalar(stmt) or 0)
+    return len(db.scalars(stmt).all())
 
 
 def _next_session_id(db: Session, course_id: int, *, now: datetime) -> int | None:
@@ -1706,13 +1714,26 @@ def _reserved_awaiting_count(db: Session, course_id: int, *, exclude_id: int | N
     exclude_id 用于候选补本人确认：其自身预留不占额度（确认只是把预留转为占位，总量不变）。
     """
     stmt = (
-        select(func.count())
-        .select_from(TrainingEnrollment)
+        select(TrainingEnrollment.id)
         .where(TrainingEnrollment.course_id == course_id, TrainingEnrollment.status == "awaiting_confirmation")
+        .with_for_update()
     )
     if exclude_id is not None:
         stmt = stmt.where(TrainingEnrollment.id != exclude_id)
-    return int(db.scalar(stmt) or 0)
+    return len(db.scalars(stmt).all())
+
+
+def _lock_courses(db: Session, course_ids: set[int]) -> None:
+    """容量相关操作统一先按 ID 升序锁课程行，避免与报名/确认/递补的锁序交叉。"""
+    ids = sorted(course_ids)
+    if not ids:
+        return
+    db.scalars(
+        select(TrainingCourse.id)
+        .where(TrainingCourse.id.in_(ids))
+        .order_by(TrainingCourse.id.asc())
+        .with_for_update()
+    ).all()
 
 
 def _promote_waitlist(db: Session, course_id: int, *, now: datetime, actor_user_id: int | None = None) -> TrainingEnrollment | None:
@@ -1727,10 +1748,12 @@ def _promote_waitlist(db: Session, course_id: int, *, now: datetime, actor_user_
     reserved = _occupying_count(db, course_id) + _reserved_awaiting_count(db, course_id)
     if reserved >= course.capacity:
         return None
+    # 当前读锁定最早候补：避免并发取消已提交后被旧快照选回并“复活”
     row = db.scalar(
         select(TrainingEnrollment)
         .where(TrainingEnrollment.course_id == course_id, TrainingEnrollment.status == "waitlisted")
         .order_by(TrainingEnrollment.id.asc())
+        .with_for_update()
     )
     if not row:
         return None
@@ -2071,15 +2094,31 @@ def release_expired_enrollments(db: Session, *, now: datetime | None = None, act
         )
     )
     course_ids = {row.course_id for row in rows}
+    # 先锁课程再逐行复核：扫描后可能有并发确认/审批已改变状态，不能按旧快照覆盖
+    _lock_courses(db, course_ids)
+    released = 0
     for row in rows:
-        row.status = "expired"
+        locked = db.scalar(
+            select(TrainingEnrollment)
+            .where(
+                TrainingEnrollment.id == row.id,
+                TrainingEnrollment.status.in_(("pending", "pending_admin_review", "awaiting_confirmation")),
+                TrainingEnrollment.expires_at.is_not(None),
+                TrainingEnrollment.expires_at < moment,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if locked is not None:
+            locked.status = "expired"
+            released += 1
     db.flush()
     promoted = 0
-    for course_id in course_ids:
+    for course_id in sorted(course_ids):
         if _promote_waitlist(db, course_id, now=moment, actor_user_id=actor.id if actor else None) is not None:
             promoted += 1
     db.commit()
-    return {"scanned": len(rows), "released": len(rows), "promoted": promoted}
+    return {"scanned": len(rows), "released": released, "promoted": promoted}
 
 
 def list_enrollments(db: Session, *, course_id: int | None = None, user: User) -> list[TrainingEnrollment]:
