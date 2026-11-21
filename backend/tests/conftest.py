@@ -22,6 +22,29 @@ def _no_external_startup_for_unit_tests(request, monkeypatch):
     monkeypatch.setattr("app.main._ensure_milvus_collection", lambda: None)
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _isolate_task_runner_session(request):
+    """Session 级先行隔离（REQ-C-20261121-171500-A 根因修复）。
+
+    函数级 `_isolate_task_runner` 的 setup 晚于**模块级 fixture**（如
+    `test_match_batch_t25.py` 的 `client`）：pytest 先实例化高 scope fixture，
+    模块级 `TestClient(app)` 首个请求触发 lifespan 时 patch 尚未生效，真实
+    `TaskRunner` 启动后台线程并在整模块内每 2 秒扫描，与直接调用 handler 的
+    用例形成双执行竞态（2026-11-21 全量运行实锤：`match_results` 1062 重复键、
+    LLM 调用数 +1）。本 fixture 在所有 fixture 之前把全局单例打成空操作；
+    session 结束恢复。`real_runner` 用例由函数级 fixture 恢复真实行为。
+    """
+    from app.tasks import runner as runner_module
+
+    runner = runner_module.runner
+    orig_start, orig_stop = runner.start, runner.stop
+    request.config._store["runner_orig"] = (orig_start, orig_stop)
+    runner.start = lambda: None
+    runner.stop = lambda *a, **kw: None
+    yield
+    runner.start, runner.stop = orig_start, orig_stop
+
+
 @pytest.fixture(autouse=True)
 def _isolate_task_runner(request, monkeypatch):
     """不让全局单例的后台扫描线程参与测试（见模块 docstring 的 T-13 说明）。
@@ -30,8 +53,17 @@ def _isolate_task_runner(request, monkeypatch):
     T-12 的 runner 测试会直接 `TaskRunner()` 实例化并调用 `start()/stop()` 验证
     启动恢复 / 停止回置，patch 类方法会把它们打成空操作导致假失败。
     直接实例化不触发 lifespan，不会有后台线程，天然安全。
+
+    Session 级先行隔离见 `_isolate_task_runner_session`（本 fixture 保持函数级
+    monkeypatch 语义：每个测试前后状态干净；real_runner 用例在此恢复真实方法）。
     """
     if request.node.get_closest_marker("real_runner"):
+        orig = request.config._store.get("runner_orig", None)
+        if orig:
+            from app.tasks import runner as runner_module
+
+            monkeypatch.setattr(runner_module.runner, "start", orig[0])
+            monkeypatch.setattr(runner_module.runner, "stop", orig[1])
         return
     from app.tasks import runner as runner_module
 

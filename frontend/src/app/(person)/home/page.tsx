@@ -13,9 +13,15 @@ import { useEffect, useState } from 'react';
 
 import { getUser, type AuthUser } from '@/lib/auth';
 
-const PLACEHOLDERS = [
-  { key: 'learning', title: '我的学习', desc: '必修课进度 / 培训计划（C 组件挂载点）' },
-  { key: 'assessments', title: '我的测评', desc: '测评任务与结果查看（C 组件挂载点）' },
+/**
+ * 个人门户 C 入口（REQ-C-20261121-133109-A 第 3 项）：C 页面已按角色裁剪可达
+ * （/training 我的培训、/training/enrollments 课程报名、/assessments 我的测评、
+ * /inventory 我的复核），门户先提供跳转入口；嵌入式摘要组件待 C 给出组件契约
+ * （props/数据来源）后替换，避免双方各造第二套。
+ */
+const PORTAL_ENTRIES = [
+  { key: 'learning', title: '我的学习', desc: '必修课进度 / 培训计划 / 课程报名', href: '/training' },
+  { key: 'assessments', title: '我的测评', desc: '测评任务与结果查看', href: '/assessments' },
 ];
 
 export default function PersonHomePage() {
@@ -50,11 +56,13 @@ export default function PersonHomePage() {
             </Card>
           </Link>
         </Col>
-        {PLACEHOLDERS.map((item) => (
+        {PORTAL_ENTRIES.map((item) => (
           <Col xs={24} md={8} key={item.key}>
-            <Card title={item.title}>
-              <Typography.Text type="secondary">{item.desc}</Typography.Text>
-            </Card>
+            <Link href={item.href}>
+              <Card title={item.title} hoverable>
+                <Typography.Text>{item.desc}</Typography.Text>
+              </Card>
+            </Link>
           </Col>
         ))}
       </Row>

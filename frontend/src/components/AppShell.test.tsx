@@ -36,6 +36,11 @@ describe('AppShell', () => {
       '岗位测评',
       '人工面试',
       '培训成长',
+      'AI 面试间',
+      '培训报名',
+      '人才盘点',
+      '数据分析',
+      '流程定义',
     ]) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     }

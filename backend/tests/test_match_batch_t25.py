@@ -454,3 +454,17 @@ def test_manual_verdict_set_revoke_invalid_and_auth(env, fakes, client, auth):
     detail = resp.json()["data"]
     assert detail["manual_verdict"] is None
     assert detail["manual_verdict_by"] is None and detail["manual_verdict_at"] is None
+
+
+def test_module_client_lifespan_does_not_start_real_runner(client):
+    """REQ-C-20261121-171500-A 回归：模块级 client 的 lifespan 不得启动真实 TaskRunner。
+
+    根因：模块级 fixture 先于函数级 autouse 实例化，lifespan 在 runner patch 前
+    启动真实扫描线程，与直接调 handler 的用例形成双执行竞态（1062 重复键、
+    LLM 调用数 +1）。修复后 session 级先行隔离抢在一切 TestClient 之前；
+    本用例断言全局单例没有存活的后台线程。
+    """
+    client.get("/api/health")  # 确保 lifespan 已跑过
+    from app.tasks.runner import runner as global_runner
+
+    assert not global_runner.is_running, "真实 TaskRunner 线程不应在测试会话内存活"
