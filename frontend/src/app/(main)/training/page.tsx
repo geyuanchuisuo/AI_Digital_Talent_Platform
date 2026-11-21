@@ -34,7 +34,7 @@ import type { Dayjs } from 'dayjs';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { getUser, isManagement } from '@/lib/auth';
-import { getErrorMessage } from '@/lib/http';
+import { ApiError, getErrorMessage } from '@/lib/http';
 
 import {
   assignPlan,
@@ -92,6 +92,16 @@ const STATUS_LABEL = { active: '有效', inactive: '已下线' } as const;
 const LEARNING_LABEL = { not_started: '未开始', learning: '学习中', completed: '已完成' } as const;
 const LEARNING_COLOR = { not_started: 'default', learning: 'processing', completed: 'success' } as const;
 
+/**
+ * 首载错误文案：无权限（403）时静默返回 null，页面空态/权限提示已足够表达；
+ * 避免「我的培训/岗前/评级/轨迹」等多个组件首载各自弹重复 toast（UPD-C-20261121-133109 发现）。
+ * 用户主动操作的错误不适用本函数，仍应即时提示。
+ */
+function loadErrorOrSilent(error: unknown): string | null {
+  if (error instanceof ApiError && error.status === 403) return null;
+  return getErrorMessage(error);
+}
+
 function courseStatusTag(status: string) {
   return status === 'active' ? <Tag color="success">有效</Tag> : <Tag>已下线</Tag>;
 }
@@ -122,7 +132,8 @@ function MyTraining() {
       const data = await fetchMyPlans();
       setPlans(data.items);
     } catch (error) {
-      message.error(getErrorMessage(error));
+      const msg = loadErrorOrSilent(error);
+      if (msg) message.error(msg);
     } finally {
       setLoading(false);
     }
@@ -134,7 +145,8 @@ function MyTraining() {
       const data = await fetchGrowth({ page: 1, page_size: 20 });
       setGrowth(data.items);
     } catch (error) {
-      message.error(getErrorMessage(error));
+      const msg = loadErrorOrSilent(error);
+      if (msg) message.error(msg);
     } finally {
       setGrowthLoading(false);
     }
@@ -1247,7 +1259,8 @@ function PrejobPlans({ isAdmin }: { isAdmin: boolean }) {
     try {
       setRows(await fetchPrejobPlans());
     } catch (error) {
-      message.error(getErrorMessage(error));
+      const msg = loadErrorOrSilent(error);
+      if (msg) message.error(msg);
     } finally {
       setLoading(false);
     }
@@ -1449,7 +1462,8 @@ function GrowthTrajectoryPanel({ employeeUserId }: { employeeUserId?: number }) 
     try {
       setData(await fetchGrowthTrajectory({ employee_user_id: employeeUserId }));
     } catch (error) {
-      message.error(getErrorMessage(error));
+      const msg = loadErrorOrSilent(error);
+      if (msg) message.error(msg);
     } finally {
       setLoading(false);
     }
@@ -1545,7 +1559,8 @@ function CapabilityRatings({ canReview, canSubmit }: { canReview: boolean; canSu
       setChanges(cs);
       setRatings(rs);
     } catch (error) {
-      message.error(getErrorMessage(error));
+      const msg = loadErrorOrSilent(error);
+      if (msg) message.error(msg);
     } finally {
       setLoading(false);
     }
