@@ -7,10 +7,14 @@ def test_integrated_b_and_d_have_one_migration_head():
     config = Config()
     config.set_main_option('script_location', str(Path(__file__).parents[2] / 'backend/migrations'))
     script = ScriptDirectory.from_config(config)
-    assert len(script.get_heads()) == 1
-    head = script.get_revision(script.get_current_head())
-    assert head.revision == 'B_0014_merge_a15'
-    assert set(head.down_revision) == {
+    heads = script.get_heads()
+    assert len(heads) == 1  # 单头不变式：迁移链唯一 head、无断链
+    ancestry = {step.revision for step in script.iterate_revisions(heads[0], 'base')}
+    # 集成锚点只增不减：B_0007 为本请求口径，B_0014 为当前 B 汇入节点；
+    # 不再绑定“当前 head”常量，避免其他模块推进迁移后误报。
+    assert {'B_0007_merge_learning_evidence', 'B_0014_merge_a15'} <= ancestry
+    b14 = script.get_revision('B_0014_merge_a15')
+    assert set(b14.down_revision) == {
         'B_0013_graph_outbox', 'A_0015_merge_remote2'}
     head = script.get_revision('B_0013_graph_outbox')
     assert head.down_revision == 'B_0012_knowledge'

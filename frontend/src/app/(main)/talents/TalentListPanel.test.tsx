@@ -109,10 +109,24 @@ describe('TalentListPanel', () => {
     await waitFor(() =>
       expect(fetchTalentsMock).toHaveBeenLastCalledWith(expect.objectContaining({ deleted: true })),
     );
-    await waitFor(() => expect(screen.getAllByRole('button', { name: /恢\s*复/ }).length).toBe(2));
 
-    fireEvent.click(screen.getAllByRole('button', { name: /恢\s*复/ })[0]);
-    fireEvent.click(await screen.findByRole('button', { name: /确\s*定/ }));
+    // 刻意不用 getByRole(name) 定位：antd Table 在 jsdom 下每次角色查询都要遍历整表
+    // 做可访问性与样式计算，单次可达数秒，是 REQ-C-20261121-133109-B 临界超时的根因。
+    const restoreButtons = await waitFor(() => {
+      const buttons = Array.from(container.querySelectorAll('button')).filter((btn) =>
+        /恢\s*复/.test(btn.textContent ?? ''),
+      );
+      expect(buttons).toHaveLength(2);
+      return buttons;
+    });
+
+    fireEvent.click(restoreButtons[0]);
+    const confirmButton = await waitFor(() => {
+      const button = document.querySelector<HTMLButtonElement>('.ant-popover .ant-btn-primary');
+      expect(button?.textContent ?? '').toMatch(/确\s*定/);
+      return button as HTMLButtonElement;
+    });
+    fireEvent.click(confirmButton);
     await waitFor(() => expect(restoreTalentMock).toHaveBeenCalledWith(5));
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
   });
