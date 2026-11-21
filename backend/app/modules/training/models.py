@@ -226,7 +226,7 @@ class TrainingEnrollment(PKMixin, CrossDbUpdatedAtMixin, Base):
         String(20), nullable=False, default="elective", server_default=str_default("elective")
     )
     status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="pending", server_default=str_default("pending")
+        String(32), nullable=False, default="pending", server_default=str_default("pending")
     )
     expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     decided_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
